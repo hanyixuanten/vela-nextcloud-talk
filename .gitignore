@@ -1,0 +1,18 @@
+# Build output
+build/
+dist/
+*.rpk
+tests/.build/
+
+# Dependencies
+node_modules/
+
+# Signing material must never be committed
+sign/*.pem
+sign/**/*.pem
+
+# Tooling / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.log
