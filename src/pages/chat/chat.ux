@@ -1,0 +1,475 @@
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
+
+<template>
+  <div class="page">
+    <!-- Normal state: header, message list, input bar -->
+    <div class="main" show="{{!editing}}">
+      <div class="header">
+        <div class="back" @click="goBack">
+          <text class="back-text">‹</text>
+        </div>
+        <text class="title">{{ title }}</text>
+      </div>
+
+      <scroll class="scroll" scroll-y="{{true}}">
+        <div class="list">
+          <div class="msg {{ $item.mine ? 'msg-mine' : '' }}" for="{{messages}}">
+            <text class="msg-meta">{{ $item.meta }}</text>
+            <text class="msg-text {{ $item.mine ? 'msg-text-mine' : '' }}" style="font-size: {{ fontSize }}px;">{{ $item.text }}</text>
+          </div>
+
+          <div class="placeholder" show="{{!loading && !error && messages.length === 0}}">
+            <text class="placeholder-hint">{{ $t('chat.empty') }}</text>
+          </div>
+          <div class="placeholder" show="{{loading && messages.length === 0}}">
+            <text class="placeholder-hint">{{ $t('index.loading') }}</text>
+          </div>
+          <div class="placeholder" show="{{!loading && error}}">
+            <text class="placeholder-error">{{ error }}</text>
+          </div>
+        </div>
+      </scroll>
+
+      <div class="inputbar" @click="startEdit">
+        <text class="input-placeholder">{{ $t('chat.placeholder') }}</text>
+      </div>
+    </div>
+
+    <!-- Typing state: the keyboard occupies 321px, so the list is replaced by
+         a compact draft preview. This is the whole reason for the two states. -->
+    <div class="editor" show="{{editing}}">
+      <text class="editor-name">{{ title }}</text>
+      <text class="editor-text">{{ draftView || $t('chat.placeholder') }}</text>
+      <div class="editor-actions">
+        <div class="ghost" @click="stopEdit">
+          <text class="ghost-text">{{ $t('common.cancel') }}</text>
+        </div>
+        <div class="ghost ghost-primary" @click="send">
+          <text class="ghost-text ghost-primary-text">{{ sending ? $t('chat.sending') : $t('chat.send') }}</text>
+        </div>
+      </div>
+    </div>
+
+    <input-method
+      hide="{{!editing}}"
+      keyboardtype="{{keyboardType}}"
+      screentype="{{screenType}}"
+      maxlength="5"
+      vibratemode="short"
+      @complete="onKeyComplete"
+      @delete="onKeyDelete"
+    ></input-method>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import api from '../../common/scripts/api'
+import store from '../../common/scripts/store'
+import state from '../../common/scripts/state'
+import fmt from '../../common/scripts/format'
+
+const FONT_SIZES = { small: 20, normal: 23, large: 27 }
+const DRAFT_VIEW_LIMIT = 60
+
+function trimLastChar(text) {
+  const source = String(text || '')
+  if (source.length === 0) return ''
+  const last = source.charCodeAt(source.length - 1)
+  if (last >= 0xdc00 && last <= 0xdfff && source.length >= 2) {
+    return source.slice(0, source.length - 2)
+  }
+  return source.slice(0, source.length - 1)
+}
+
+export default {
+  protected: {
+    token: '',
+    name: ''
+  },
+
+  data: {
+    title: '',
+    messages: [],
+    draft: '',
+    draftView: '',
+    editing: false,
+    loading: false,
+    sending: false,
+    error: '',
+    fontSize: FONT_SIZES.normal,
+    keyboardType: 'QWERTY',
+    screenType: 'circle'
+  },
+
+  onInit() {
+    const room = state.activeRoom || {}
+    this.token = this.token || room.token || ''
+    this.title = this.name || room.name || 'Talk'
+    this.pollInterval = 15000
+    this.timer = null
+    this.myUser = ''
+    this.newestId = 0
+
+    this.settingsReady = store.load().then((settings) => {
+      state.settings = settings
+      api.configure(settings)
+      this.myUser = String(settings.user || '').toLowerCase()
+      this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
+      this.keyboardType = settings.keyboardType || 'QWERTY'
+      this.screenType = settings.screenType || 'circle'
+      this.pollInterval = settings.pollInterval || 15000
+    })
+
+    this.settingsReady.then(() => {
+      if (!this.token) {
+        this.error = this.$t('chat.errtoken')
+        return
+      }
+      this.loadInitial()
+    })
+  },
+
+  onShow() {
+    // Coming back from the settings page: re-read preferences and resume polling.
+    this.settingsReady = this.settingsReady.then(() => store.load()).then((settings) => {
+      state.settings = settings
+      api.configure(settings)
+      this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
+      this.keyboardType = settings.keyboardType || 'QWERTY'
+      this.screenType = settings.screenType || 'circle'
+      this.pollInterval = settings.pollInterval || 15000
+    })
+    this.settingsReady.then(() => this.startPolling())
+  },
+
+  onHide() {
+    this.stopPolling()
+  },
+
+  onDestroy() {
+    this.stopPolling()
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* data loading                                                        */
+  /* ------------------------------------------------------------------ */
+
+  loadInitial() {
+    this.loading = true
+    this.error = ''
+
+    api.getMessages(this.token, { limit: 40, lookIntoFuture: 0 })
+      .then((result) => {
+        // The API returns oldest-first; the UI is newest-first so that the
+        // latest message is visible without any scrollTo call.
+        const views = result.messages.map((m) => this.toView(m))
+        views.reverse()
+        this.messages = views
+        this.newestId = views.length > 0 ? views[0].id : 0
+        this.markRead()
+      })
+      .catch((err) => {
+        this.error = err && err.message ? err.message : '加载失败'
+      })
+      .then(() => {
+        this.loading = false
+      })
+  },
+
+  pollOnce() {
+    if (!this.token || this.loading) return
+    api.getMessages(this.token, { lastKnownMessageId: this.newestId, limit: 40 })
+      .then((result) => {
+        if (!result.messages || result.messages.length === 0) return
+        const views = result.messages.map((m) => this.toView(m))
+        views.reverse()
+        this.messages = views.concat(this.messages)
+        this.newestId = this.messages[0].id
+        this.markRead()
+      })
+      .catch((err) => {
+        // Polling failures stay silent: the header already shows the error of
+        // the initial load, and a watch should not buzz for a flaky network.
+        console.log('poll failed: ' + (err && err.message))
+      })
+  },
+
+  startPolling() {
+    this.stopPolling()
+    if (!this.token) return
+
+    const tick = () => {
+      this.pollOnce()
+      this.timer = setTimeout(tick, this.pollInterval)
+    }
+    this.timer = setTimeout(tick, this.pollInterval)
+  },
+
+  stopPolling() {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  },
+
+  markRead() {
+    if (!this.newestId) return
+    api.markRead(this.token, this.newestId).catch(() => undefined)
+
+    store.loadMarkers().then((markers) => {
+      markers[this.token] = this.newestId
+      store.saveMarkers(markers).catch(() => undefined)
+    })
+  },
+
+  toView(message) {
+    const actorId = String(message.actorId || '').toLowerCase()
+    const isSystem = Boolean(message.systemMessage)
+    const mine = !isSystem && actorId === this.myUser
+    const author = message.actorDisplayName || ''
+
+    return {
+      id: message.id,
+      text: fmt.renderMessage(message),
+      meta: mine ? fmt.formatClock(message.timestamp) : author + ' · ' + fmt.formatClock(message.timestamp),
+      mine: mine
+    }
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* composing                                                           */
+  /* ------------------------------------------------------------------ */
+
+  startEdit() {
+    this.editing = true
+    this.error = ''
+  },
+
+  stopEdit() {
+    this.editing = false
+  },
+
+  setDraft(value) {
+    this.draft = value
+    this.draftView =
+      value.length > DRAFT_VIEW_LIMIT ? '…' + value.slice(value.length - DRAFT_VIEW_LIMIT) : value
+  },
+
+  onKeyComplete(evt) {
+    const content = evt && evt.detail ? evt.detail.content : ''
+    if (!content) return
+    this.setDraft(this.draft + content)
+  },
+
+  onKeyDelete() {
+    this.setDraft(trimLastChar(this.draft))
+  },
+
+  send() {
+    const text = String(this.draft || '').trim()
+    if (!text || this.sending) return
+
+    this.sending = true
+    api.sendMessage(this.token, text)
+      .then((message) => {
+        this.setDraft('')
+        this.editing = false
+        if (message && message.id) {
+          this.messages = [this.toView(message)].concat(this.messages)
+          this.newestId = message.id
+        }
+        this.sending = false
+        this.startPolling()
+      })
+      .catch((err) => {
+        this.sending = false
+        prompt.showToast({
+          message: (err && err.message) || '发送失败',
+          duration: 2000
+        })
+      })
+  },
+
+  goBack() {
+    this.stopPolling()
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  background-color: #000000;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+}
+
+.header {
+  width: 340px;
+  height: 56px;
+  margin-top: 60px;
+  flex-direction: row;
+  align-items: center;
+}
+
+.back {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background-color: #14181d;
+  justify-content: center;
+  align-items: center;
+}
+
+.back-text {
+  font-size: 26px;
+  color: #cbd5e1;
+}
+
+.title {
+  width: 284px;
+  margin-left: 12px;
+  font-size: 26px;
+  color: #ffffff;
+  text-overflow: ellipsis;
+}
+
+.scroll {
+  flex: 1;
+  width: 100%;
+}
+
+.list {
+  width: 360px;
+  margin-left: 60px;
+  padding-bottom: 10px;
+  flex-direction: column;
+}
+
+.msg {
+  width: 332px;
+  margin-top: 8px;
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-top: 8px;
+  padding-bottom: 10px;
+  border-radius: 16px;
+  background-color: #14181d;
+  flex-direction: column;
+}
+
+.msg-mine {
+  background-color: #073a52;
+}
+
+.msg-meta {
+  font-size: 15px;
+  color: #6f7c8a;
+}
+
+.msg-text {
+  margin-top: 4px;
+  color: #e8eef5;
+}
+
+.msg-text-mine {
+  text-align: right;
+}
+
+.placeholder {
+  width: 340px;
+  padding-top: 40px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.placeholder-hint {
+  font-size: 18px;
+  color: #5b6672;
+  text-align: center;
+}
+
+.placeholder-error {
+  font-size: 20px;
+  color: #ff8a80;
+  text-align: center;
+}
+
+.inputbar {
+  width: 248px;
+  height: 52px;
+  margin-top: 8px;
+  margin-bottom: 16px;
+  border-radius: 26px;
+  background-color: #14181d;
+  justify-content: center;
+  align-items: center;
+}
+
+.input-placeholder {
+  font-size: 20px;
+  color: #6f7c8a;
+}
+
+.editor {
+  height: 150px;
+  width: 100%;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.editor-name {
+  font-size: 17px;
+  color: #6f7c8a;
+}
+
+.editor-text {
+  width: 320px;
+  margin-top: 6px;
+  font-size: 22px;
+  color: #e8eef5;
+  text-align: center;
+}
+
+.editor-actions {
+  width: 280px;
+  margin-top: 12px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ghost {
+  width: 132px;
+  height: 46px;
+  border-radius: 23px;
+  background-color: #1c2127;
+  justify-content: center;
+  align-items: center;
+}
+
+.ghost-primary {
+  background-color: #0082c9;
+}
+
+.ghost-text {
+  font-size: 21px;
+  color: #cbd5e1;
+}
+
+.ghost-primary-text {
+  color: #ffffff;
+}
+</style>

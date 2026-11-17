@@ -1,0 +1,277 @@
+<template>
+  <div class="page">
+    <div class="header">
+      <text class="title">{{ $t('settings.title') }}</text>
+    </div>
+
+    <scroll class="scroll" scroll-y="{{true}}">
+      <div class="list">
+        <div class="row" @click="openAccount">
+          <text class="row-label">{{ $t('settings.account') }}</text>
+          <text class="row-value">{{ accountLabel }}</text>
+        </div>
+
+        <div class="row" @click="cycleKeyboard">
+          <text class="row-label">{{ $t('settings.keyboard') }}</text>
+          <text class="row-value">{{ keyboardType }}</text>
+        </div>
+
+        <div class="row" @click="cycleScreen">
+          <text class="row-label">{{ $t('settings.screen') }}</text>
+          <text class="row-value">{{ screenLabel }}</text>
+        </div>
+
+        <div class="row" @click="cyclePoll">
+          <text class="row-label">{{ $t('settings.poll') }}</text>
+          <text class="row-value">{{ pollLabel }}</text>
+        </div>
+
+        <div class="row" @click="cycleFont">
+          <text class="row-label">{{ $t('settings.font') }}</text>
+          <text class="row-value">{{ fontLabel }}</text>
+        </div>
+
+        <div class="row row-danger" @click="confirmClear">
+          <text class="row-danger-text">{{ $t('settings.clear') }}</text>
+        </div>
+
+        <div class="row" @click="openAbout">
+          <text class="row-label">{{ $t('settings.about') }}</text>
+          <text class="row-value">{{ version }}</text>
+        </div>
+      </div>
+    </scroll>
+
+    <div class="footer">
+      <div class="foot-btn" @click="goBack">
+        <text class="foot-text">{{ $t('common.back') }}</text>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import store from '../../common/scripts/store'
+import state from '../../common/scripts/state'
+import api from '../../common/scripts/api'
+
+const SCREENS = ['circle', 'rect', 'pill']
+const SCREEN_LABEL_KEYS = {
+  circle: 'settings.screenCircle',
+  rect: 'settings.screenRect',
+  pill: 'settings.screenPill'
+}
+const FONTS = ['small', 'normal', 'large']
+const FONT_LABEL_KEYS = {
+  small: 'settings.fontSmall',
+  normal: 'settings.fontNormal',
+  large: 'settings.fontLarge'
+}
+const POLLS = [15000, 30000, 60000]
+
+function nextInList(list, current) {
+  const index = list.indexOf(current)
+  return list[(index + 1 + list.length) % list.length]
+}
+
+export default {
+  data: {
+    version: '0.1.0',
+    accountLabel: '',
+    keyboardType: 'QWERTY',
+    screenType: 'circle',
+    screenLabel: '',
+    pollInterval: 15000,
+    pollLabel: '',
+    fontScale: 'normal',
+    fontLabel: ''
+  },
+
+  onInit() {
+    store.load().then((settings) => {
+      state.settings = settings
+      state.ready = store.hasAccount(settings)
+      this.keyboardType = settings.keyboardType || 'QWERTY'
+      this.screenType = settings.screenType || 'circle'
+      this.pollInterval = settings.pollInterval || 15000
+      this.fontScale = settings.fontScale || 'normal'
+      this.refreshLabels(settings)
+    })
+  },
+
+  refreshLabels(settings) {
+    const s = settings || {}
+    if (store.hasAccount(s)) {
+      this.accountLabel = s.user + '@' + String(s.baseUrl).replace(/^https?:\/\//, '')
+    } else {
+      this.accountLabel = this.$t('settings.notSet')
+    }
+    this.screenLabel = this.$t(SCREEN_LABEL_KEYS[this.screenType] || SCREEN_LABEL_KEYS.circle)
+    this.fontLabel = this.$t(FONT_LABEL_KEYS[this.fontScale] || FONT_LABEL_KEYS.normal)
+    this.pollLabel = this.pollInterval / 1000 + this.$t('settings.seconds')
+  },
+
+  persist(patch) {
+    const merged = Object.assign({}, state.settings || {}, patch)
+    return store.save(merged).then((saved) => {
+      state.settings = saved
+      // The API client reads the account from its own copy; keep it in sync so
+      // changing settings never leaves a stale password behind.
+      api.configure(saved)
+      this.refreshLabels(saved)
+    })
+  },
+
+  cycleKeyboard() {
+    const value = this.keyboardType === 'QWERTY' ? 'T9' : 'QWERTY'
+    this.keyboardType = value
+    this.persist({ keyboardType: value }).catch(() => undefined)
+  },
+
+  cycleScreen() {
+    const value = nextInList(SCREENS, this.screenType)
+    this.screenType = value
+    this.screenLabel = this.$t(SCREEN_LABEL_KEYS[value])
+    this.persist({ screenType: value }).catch(() => undefined)
+  },
+
+  cyclePoll() {
+    const value = nextInList(POLLS, this.pollInterval)
+    this.pollInterval = value
+    this.pollLabel = value / 1000 + this.$t('settings.seconds')
+    this.persist({ pollInterval: value }).catch(() => undefined)
+  },
+
+  cycleFont() {
+    const value = nextInList(FONTS, this.fontScale)
+    this.fontScale = value
+    this.fontLabel = this.$t(FONT_LABEL_KEYS[value])
+    this.persist({ fontScale: value }).catch(() => undefined)
+  },
+
+  openAccount() {
+    router.push({ uri: '/login' })
+  },
+
+  openAbout() {
+    prompt.showToast({
+      message: 'Vela Nextcloud Talk 0.1.0',
+      duration: 2000
+    })
+  },
+
+  confirmClear() {
+    prompt.showDialog({
+      message: this.$t('settings.clearConfirm'),
+      buttons: [
+        { text: this.$t('settings.clear'), color: '#ff3b30' },
+        { text: this.$t('common.cancel') }
+      ],
+      success: (res) => {
+        if (res.index !== 0) return
+        store.clearAll().then(() => {
+          state.settings = store.DEFAULT_SETTINGS
+          state.ready = false
+          state.rooms = []
+          state.activeRoom = null
+          api.configure({})
+          prompt.showToast({ message: this.$t('settings.cleared'), duration: 1500 })
+          router.replace({ uri: '/login' })
+        })
+      }
+    })
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  background-color: #000000;
+}
+
+.header {
+  width: 340px;
+  height: 58px;
+  justify-content: center;
+  align-items: center;
+}
+
+.title {
+  font-size: 30px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.scroll {
+  flex: 1;
+  width: 100%;
+}
+
+.list {
+  width: 360px;
+  margin-left: 60px;
+  flex-direction: column;
+}
+
+.row {
+  width: 360px;
+  height: 58px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #1c2127;
+}
+
+.row-label {
+  font-size: 22px;
+  color: #e8eef5;
+}
+
+.row-value {
+  width: 190px;
+  font-size: 20px;
+  color: #6f7c8a;
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.row-danger {
+  justify-content: center;
+}
+
+.row-danger-text {
+  font-size: 22px;
+  color: #ff6b6b;
+}
+
+.footer {
+  width: 140px;
+  height: 60px;
+  justify-content: center;
+  align-items: center;
+}
+
+.foot-btn {
+  width: 120px;
+  height: 46px;
+  border-radius: 23px;
+  background-color: #14181d;
+  justify-content: center;
+  align-items: center;
+}
+
+.foot-text {
+  font-size: 20px;
+  color: #a9b5c2;
+}
+</style>

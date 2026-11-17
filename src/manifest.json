@@ -1,0 +1,46 @@
+{
+  "package": "com.hanyixuanten.nctalk",
+  "name": "Talk",
+  "icon": "/common/images/icon.png",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "minPlatformVersion": 1000,
+  "deviceTypeList": ["watch"],
+  "features": [
+    { "name": "system.router" },
+    { "name": "system.fetch" },
+    { "name": "system.storage" },
+    { "name": "system.file" },
+    { "name": "system.prompt" },
+    { "name": "system.vibrator" },
+    { "name": "system.device" }
+  ],
+  "config": {
+    "logLevel": "log",
+    "designWidth": 480
+  },
+  "router": {
+    "entry": "pages/index",
+    "pages": {
+      "pages/index": {
+        "component": "index",
+        "path": "/"
+      },
+      "pages/login": {
+        "component": "login",
+        "path": "/login"
+      },
+      "pages/chat": {
+        "component": "chat",
+        "path": "/chat"
+      },
+      "pages/settings": {
+        "component": "settings",
+        "path": "/settings"
+      }
+    }
+  },
+  "display": {
+    "backgroundColor": "#000000"
+  }
+}

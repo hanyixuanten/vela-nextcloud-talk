@@ -1,0 +1,338 @@
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
+
+<template>
+  <div class="page">
+    <!-- Idle state: three tappable fields + connect button -->
+    <div class="top" show="{{!editing}}">
+      <text class="brand">{{ $t('app.name') }}</text>
+      <text class="tagline">{{ $t('login.subtitle') }}</text>
+    </div>
+
+    <!-- Editing state: the keyboard eats 321px, only ~150px remain on top -->
+    <div class="edit-top" show="{{editing}}">
+      <text class="edit-label" if="{{activeIndex === 0}}">{{ $t('login.server') }}</text>
+      <text class="edit-label" if="{{activeIndex === 1}}">{{ $t('login.user') }}</text>
+      <text class="edit-label" if="{{activeIndex === 2}}">{{ $t('login.password') }}</text>
+      <text class="edit-value" if="{{activeIndex === 0}}">{{ server || $t('login.serverHint') }}_</text>
+      <text class="edit-value" if="{{activeIndex === 1}}">{{ user || $t('login.userHint') }}_</text>
+      <text class="edit-value" if="{{activeIndex === 2}}">{{ maskedPassword }}_</text>
+    </div>
+
+    <div class="form" show="{{!editing}}">
+      <div class="field" @click="startEdit(0)">
+        <text class="field-label">{{ $t('login.server') }}</text>
+        <text class="field-value {{ server ? '' : 'field-empty' }}">{{ server || $t('login.serverHint') }}</text>
+      </div>
+      <div class="field" @click="startEdit(1)">
+        <text class="field-label">{{ $t('login.user') }}</text>
+        <text class="field-value {{ user ? '' : 'field-empty' }}">{{ user || $t('login.userHint') }}</text>
+      </div>
+      <div class="field" @click="startEdit(2)">
+        <text class="field-label">{{ $t('login.password') }}</text>
+        <text class="field-value {{ appPassword ? '' : 'field-empty' }}">{{ appPassword ? maskedPassword : $t('login.passwordHint') }}</text>
+      </div>
+
+      <div class="primary {{ submitting ? 'primary-busy' : '' }}" @click="submit">
+        <text class="primary-text">{{ submitting ? $t('login.connecting') : $t('login.connect') }}</text>
+      </div>
+
+      <text class="error" show="{{error}}">{{ error }}</text>
+    </div>
+
+    <div class="edit-actions" show="{{editing}}">
+      <div class="ghost" @click="nextField">
+        <text class="ghost-text">{{ $t('login.next') }}</text>
+      </div>
+      <div class="ghost" @click="stopEdit">
+        <text class="ghost-text">{{ $t('login.done') }}</text>
+      </div>
+    </div>
+
+    <input-method
+      hide="{{!editing}}"
+      keyboardtype="{{keyboardType}}"
+      screentype="{{screenType}}"
+      maxlength="5"
+      vibratemode="short"
+      @complete="onKeyComplete"
+      @delete="onKeyDelete"
+    ></input-method>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import api from '../../common/scripts/api'
+import store from '../../common/scripts/store'
+import state from '../../common/scripts/state'
+
+function trimLastChar(text) {
+  const source = String(text || '')
+  if (source.length === 0) return ''
+  const last = source.charCodeAt(source.length - 1)
+  // Keep surrogate pairs (emoji) intact instead of leaving half a character.
+  if (last >= 0xdc00 && last <= 0xdfff && source.length >= 2) {
+    return source.slice(0, source.length - 2)
+  }
+  return source.slice(0, source.length - 1)
+}
+
+export default {
+  data: {
+    server: '',
+    user: '',
+    appPassword: '',
+    maskedPassword: '',
+    editing: false,
+    activeIndex: -1,
+    submitting: false,
+    error: '',
+    keyboardType: 'QWERTY',
+    screenType: 'circle'
+  },
+
+  onInit() {
+    store.load().then((settings) => {
+      this.server = settings.baseUrl || 'https://'
+      this.user = settings.user || ''
+      this.appPassword = settings.appPassword || ''
+      this.syncMasked()
+      this.keyboardType = settings.keyboardType || 'QWERTY'
+      this.screenType = settings.screenType || 'circle'
+    })
+  },
+
+  syncMasked() {
+    let dots = ''
+    for (let i = 0; i < this.appPassword.length; i += 1) dots += '•'
+    this.maskedPassword = dots
+  },
+
+  startEdit(index) {
+    this.activeIndex = index
+    this.editing = true
+    this.error = ''
+  },
+
+  stopEdit() {
+    this.editing = false
+    this.activeIndex = -1
+  },
+
+  nextField() {
+    if (this.activeIndex < 2) {
+      this.activeIndex = this.activeIndex + 1
+      return
+    }
+    this.stopEdit()
+  },
+
+  applyText(value) {
+    if (this.activeIndex === 0) this.server += value
+    else if (this.activeIndex === 1) this.user += value
+    else if (this.activeIndex === 2) {
+      this.appPassword += value
+      this.syncMasked()
+    }
+  },
+
+  removeText() {
+    if (this.activeIndex === 0) this.server = trimLastChar(this.server)
+    else if (this.activeIndex === 1) this.user = trimLastChar(this.user)
+    else if (this.activeIndex === 2) {
+      this.appPassword = trimLastChar(this.appPassword)
+      this.syncMasked()
+    }
+  },
+
+  onKeyComplete(evt) {
+    const content = evt && evt.detail ? evt.detail.content : ''
+    if (!content) return
+    this.applyText(content)
+  },
+
+  onKeyDelete() {
+    this.removeText()
+  },
+
+  submit() {
+    if (this.submitting) return
+
+    const baseUrl = String(this.server || '').trim().replace(/\/+$/, '')
+    const user = String(this.user || '').trim()
+    const appPassword = String(this.appPassword || '').trim()
+
+    if (!baseUrl || !user || !appPassword) {
+      this.error = this.$t('login.errRequired')
+      return
+    }
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      this.error = this.$t('login.errScheme')
+      return
+    }
+
+    this.editing = false
+    this.activeIndex = -1
+    this.submitting = true
+    this.error = ''
+
+    const candidate = Object.assign({}, state.settings || store.DEFAULT_SETTINGS, {
+      baseUrl: baseUrl,
+      user: user,
+      appPassword: appPassword
+    })
+
+    api.configure(candidate)
+
+    api.getCurrentUser()
+      .then((profile) => {
+        candidate.displayName = profile.displayName
+        return store.save(candidate).then((saved) => {
+          state.settings = saved
+          state.ready = true
+          state.loggedInOnce = true
+          api.configure(saved)
+          prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
+          router.replace({ uri: '/' })
+        })
+      })
+      .catch((err) => {
+        this.submitting = false
+        this.error = err && err.message ? err.message : this.$t('login.errRequired')
+        // Leave the API client pointing at the last known good account.
+        api.configure(state.settings || {})
+      })
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  background-color: #000000;
+}
+
+.top {
+  height: 104px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.brand {
+  font-size: 40px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.tagline {
+  font-size: 22px;
+  color: #6f7c8a;
+  margin-top: 4px;
+}
+
+.form {
+  width: 360px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.field {
+  width: 324px;
+  height: 62px;
+  margin-top: 10px;
+  padding-left: 18px;
+  padding-right: 18px;
+  border-radius: 16px;
+  background-color: #14181d;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.field-label {
+  font-size: 18px;
+  color: #6f7c8a;
+}
+
+.field-value {
+  font-size: 22px;
+  color: #e8eef5;
+  margin-top: 2px;
+}
+
+.field-empty {
+  color: #46505b;
+}
+
+.primary {
+  width: 360px;
+  height: 60px;
+  margin-top: 18px;
+  border-radius: 30px;
+  background-color: #0082c9;
+  justify-content: center;
+  align-items: center;
+}
+
+.primary-busy {
+  background-color: #0b5c8a;
+}
+
+.primary-text {
+  font-size: 24px;
+  color: #ffffff;
+}
+
+.error {
+  width: 360px;
+  margin-top: 12px;
+  font-size: 18px;
+  color: #ff6b6b;
+  text-align: center;
+}
+
+.edit-top {
+  width: 360px;
+  height: 92px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.edit-label {
+  font-size: 18px;
+  color: #6f7c8a;
+}
+
+.edit-value {
+  font-size: 24px;
+  color: #e8eef5;
+  margin-top: 6px;
+}
+
+.edit-actions {
+  width: 360px;
+  height: 58px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ghost {
+  height: 52px;
+  padding-left: 26px;
+  padding-right: 26px;
+  border-radius: 26px;
+  background-color: #1c2127;
+  justify-content: center;
+  align-items: center;
+}
+
+.ghost-text {
+  font-size: 22px;
+  color: #cbd5e1;
+}
+</style>

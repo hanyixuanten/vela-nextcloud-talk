@@ -1,0 +1,27 @@
+<script>
+import store from './common/scripts/store'
+import api from './common/scripts/api'
+import state from './common/scripts/state'
+
+export default {
+  onCreate() {
+    // Settings are read once at startup so every page gets a configured API
+    // client without repeating storage reads. Pages still call store.load()
+    // when they need the freshest values (e.g. right after editing the account).
+    store.load()
+      .then((settings) => {
+        state.settings = settings
+        state.ready = store.hasAccount(settings)
+        api.configure(settings)
+        console.log('app created, configured=' + state.ready)
+      })
+      .catch((err) => {
+        console.log('app created, settings load failed: ' + (err && err.message))
+      })
+  },
+
+  onDestroy() {
+    console.log('app destroyed')
+  }
+}
+</script>

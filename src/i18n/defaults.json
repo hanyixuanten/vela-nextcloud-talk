@@ -1,0 +1,61 @@
+{
+  "app": {
+    "name": "Talk"
+  },
+  "common": {
+    "cancel": "取消",
+    "retry": "重试",
+    "back": "返回"
+  },
+  "login": {
+    "subtitle": "Nextcloud Talk",
+    "server": "服务器",
+    "serverHint": "https://cloud.example.com",
+    "user": "用户名",
+    "userHint": "用户名或邮箱",
+    "password": "应用密码",
+    "passwordHint": "设置 → 安全 → 应用密码",
+    "connect": "连接",
+    "connecting": "连接中…",
+    "next": "下一个",
+    "done": "完成",
+    "errRequired": "请填写全部三项",
+    "errScheme": "地址需以 http:// 或 https:// 开头",
+    "saved": "已连接"
+  },
+  "index": {
+    "title": "会话",
+    "loading": "正在加载…",
+    "empty": "还没有会话",
+    "emptyHint": "在手机或网页端创建一个会话吧",
+    "refresh": "刷新",
+    "settings": "设置"
+  },
+  "chat": {
+    "placeholder": "点击输入消息…",
+    "send": "发送",
+    "sending": "发送中",
+    "empty": "还没有消息",
+    "errtoken": "会话参数缺失"
+  },
+  "settings": {
+    "title": "设置",
+    "account": "账号",
+    "notSet": "未设置",
+    "keyboard": "键盘",
+    "screen": "屏幕",
+    "poll": "刷新间隔",
+    "font": "字号",
+    "clear": "清除本地数据",
+    "clearConfirm": "将删除账号、密码和已读记录，确定吗？",
+    "about": "关于",
+    "screenCircle": "圆形",
+    "screenRect": "方形",
+    "screenPill": "胶囊",
+    "fontSmall": "小",
+    "fontNormal": "中",
+    "fontLarge": "大",
+    "seconds": "秒",
+    "cleared": "已清除"
+  }
+}
