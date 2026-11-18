@@ -26,10 +26,12 @@ sed -e "s#from '@system.fetch'#from './fetch-double.mjs'#" \
     "$ROOT/src/common/scripts/api.js" > "$BUILD/api.mjs"
 cp "$ROOT/src/common/scripts/base64.js" "$BUILD/base64.mjs"
 cp "$ROOT/src/common/scripts/format.js" "$BUILD/format.mjs"
+cp "$ROOT/src/common/scripts/protocol.js" "$BUILD/protocol.mjs"
 cp "$ROOT/tests/fetch-double.mjs" "$BUILD/fetch-double.mjs"
 
 fail=0
 "$NODE" "$ROOT/tests/units.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/protocol.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then
