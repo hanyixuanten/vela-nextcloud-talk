@@ -34,9 +34,9 @@
 已构建好的包在 `dist/`：
 
 ```
-dist/com.hanyixuanten.nctalk.debug.0.2.0.rpk   411 KB
+dist/com.hanyixuanten.nctalk.debug.0.2.1.rpk   412 KB
 package : com.hanyixuanten.nctalk
-version : 0.2.0 (versionCode 2)
+version : 0.2.1 (versionCode 3)
 sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 ```
 
@@ -50,7 +50,7 @@ sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 自己重新打包：
 
 ```bash
-npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.0.rpk
+npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.1.rpk
 ```
 
 签名证书的查找顺序是 `sign/debug/` → `sign/` → toolkit 内置的默认调试证书。本仓库的 rpk 用的是 `sign/*.pem`（自签名）。`sign/*.pem` 已在 `.gitignore` 里，所以**克隆后不生成证书也能打包**，只是会退回 toolkit 的默认证书——那样每次换机器重打包签名就变了，覆盖安装可能失败。要固定签名，按 [`sign/README.md`](sign/README.md) 生成一次即可。
@@ -64,7 +64,7 @@ npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.0.rpk
 手机：AstroBox → 打开「Talk 凭据配置」→ 填三项 → 发送到手表
 ```
 
-插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要 AstroBox ≥ 2.1.0，因为用了 api_level 3）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
+插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要 AstroBox ≥ 2.1.0，用 api_level 3；插件工具链固定 Rust 1.92，否则组件要求的 WASI 版本超过宿主上限）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
 
 ```bash
 cd astrobox-plugin
@@ -220,6 +220,15 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 - `editing = true`：会话名 + 草稿预览（只显示末尾 60 字）+ 取消 / 发送
 
 这样既不用滚动页面，也不会出现键盘遮挡。
+
+### 键盘收起
+
+输入法组件没有「收起」键，所以两个输入态都把键盘上方那块区域做成可点的：
+
+- 聊天页：`.editor-head`（会话名 + 草稿预览）铺满按钮以上的空间，点一下就走 `stopEdit`；
+- 登录页：`.edit-top`（字段标签 + 当前值）同理。
+
+`stopEdit` 只把 `editing` 置回 false，草稿仍留在 `this.draft` 里，再点输入条能接着写。这也是输入态要拆出独立容器的原因：整块区域可点，而不是只有文字本身。
 
 ### 消息顺序
 

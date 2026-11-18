@@ -107,4 +107,5 @@ python3 scripts/check_artifact.py
 - **没有缓存**，每次全量 `npm ci` + `cargo build`。想要就加 `actions/cache`，键用 `Cargo.lock` 与 `package-lock.json` 的哈希。
 - **不跑模拟器**。Vela 的 UI 只能靠 AIoT-IDE + AVD 验证，CI 里没有，所以 `build-rpk` 只证明「能编过、产物结构对」，不证明「跑起来对」。
 - **不校验签名一致性**。除非配了 secrets，否则只打印证书 subject，不比对是不是预期那张。
+- **插件工具链是钉死的**。`astrobox-plugin/rust-toolchain.toml` 指定 1.92.0，CI 从该文件读 channel 再装工具链；升级它就会改变组件声明的 WASI 版本，而宿主只到 0.2.6。
 - **插件包只做静态校验**。`check_artifact.py` 能挡格式与清单问题，挡不住运行时问题（比如 interconnect 被签名限制挡住）。

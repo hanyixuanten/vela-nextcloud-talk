@@ -38,10 +38,10 @@ astrobox-plugin/
 
 ## 构建
 
-需要 Rust（含 `wasm32-wasip2` 目标）与 Python 3：
+需要 Rust（含 `wasm32-wasip2` 目标）与 Python 3。**工具链版本不能随便换**，见下面「为什么固定 Rust 1.92」：
 
 ```bash
-rustup target add wasm32-wasip2
+rustup target add wasm32-wasip2   # 具体版本由 rust-toolchain.toml 决定
 
 python3 scripts/build_dist.py                    # 调试构建到 dist/
 python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
@@ -52,7 +52,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.1.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.2.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里同时装了发行版 rustc（没有 wasm std），`build_dist.py` 调用的 `cargo` 可能是错的那个，会报 `can't find crate for core`。用 rustup 的 cargo：
@@ -60,6 +60,20 @@ dist/nctalk-credential-0.1.1.abp  # 直接拖进 AstroBox 安装（ASCII 文件�
 ```bash
 PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 ```
+
+### 为什么固定 Rust 1.92
+
+组件里声明的 WASI 版本由**编译它的 Rust std** 决定，而 AstroBox 的 level 2/3 运行时是 wasmtime 38，只实现 **WASI 0.2.6**：
+
+| Rust | 组件里的 wasi 版本 |
+| --- | --- |
+| 1.90 | 0.2.3 |
+| 1.91 / 1.92 / 1.93 | 0.2.6 ← 正好是宿主上限 |
+| 1.100（当前 stable） | 0.2.12 |
+
+用 stable 编出来的包**编译一切正常**，装进 AstroBox 却加载失败——组件要求 `wasi:io/poll@0.2.12`，宿主只有 0.2.6，链接阶段就挂了。这就是最早「插件装不上」的真正原因，而不是 manifest 写错。
+
+`rust-toolchain.toml` 把工具链钉在 1.92.0，`check_artifact.py` 会把超过 0.2.6 的包判成错误。
 
 ### 产物自检
 
@@ -131,3 +145,5 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 - **`ui-v3` 的输入回传格式未知。** `on_ui_event_v3` 的 `event_payload` 可能是裸字符串，也可能是 `{"value":".."}`。`parse_input_value()` 两种都认，但没有文档可对照。
 - **权限名单仍以实测为准。** 现在的取值来自一个已上架插件的清单（`device` / `interconnect` / `thirdpartyapp` / `register_interconnect_recv`），官方文档通篇没有列过 v2 的合法权限枚举。
 - **`api_level: 3` 有版本门槛。** 官方对照表：api_level 2 → AstroBox ≥ 2.0.0，api_level 3 → ≥ 2.1.0。低于 2.1.0 会**直接拒绝加载**，症状和「装不上」几乎一样。
+- **WASI 版本是硬约束。** 见上文；换工具链前先跑 `check_artifact.py`。
+- **仍未在真机验证。** 现在「结构、清单、WASI 版本、权限」四项都能离线校验，但 interconnect 是否真能通到手表应用只能在设备上确认。
