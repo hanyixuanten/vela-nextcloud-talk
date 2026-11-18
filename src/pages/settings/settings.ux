@@ -83,7 +83,7 @@ function nextInList(list, current) {
 
 export default {
   data: {
-    version: '0.2.0',
+    version: '0.2.1',
     accountLabel: '',
     keyboardType: 'QWERTY',
     screenType: 'circle',
@@ -166,7 +166,7 @@ export default {
 
   openAbout() {
     prompt.showToast({
-      message: 'Vela Nextcloud Talk 0.2.0',
+      message: 'Vela Nextcloud Talk 0.2.1',
       duration: 2000
     })
   },

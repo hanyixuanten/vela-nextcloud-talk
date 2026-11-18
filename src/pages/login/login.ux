@@ -9,7 +9,8 @@
     </div>
 
     <!-- Editing state: the keyboard eats 321px, only ~150px remain on top -->
-    <div class="edit-top" show="{{editing}}">
+    <!-- No dismiss key on the keyboard: tapping the label/value area closes it. -->
+    <div class="edit-top" show="{{editing}}" @click="stopEdit">
       <text class="edit-label" if="{{activeIndex === 0}}">{{ $t('login.server') }}</text>
       <text class="edit-label" if="{{activeIndex === 1}}">{{ $t('login.user') }}</text>
       <text class="edit-label" if="{{activeIndex === 2}}">{{ $t('login.password') }}</text>

@@ -38,8 +38,12 @@
     <!-- Typing state: the keyboard occupies 321px, so the list is replaced by
          a compact draft preview. This is the whole reason for the two states. -->
     <div class="editor" show="{{editing}}">
-      <text class="editor-name">{{ title }}</text>
-      <text class="editor-text">{{ draftView || $t('chat.placeholder') }}</text>
+      <!-- Tap anywhere above the buttons to close the keyboard. The keyboard has
+           no dismiss key, and a keyboard-only UI would otherwise trap the user. -->
+      <div class="editor-head" @click="stopEdit">
+        <text class="editor-name">{{ title }}</text>
+        <text class="editor-text">{{ draftView || $t('chat.placeholder') }}</text>
+      </div>
       <div class="editor-actions">
         <div class="ghost" @click="stopEdit">
           <text class="ghost-text">{{ $t('common.cancel') }}</text>
@@ -426,8 +430,18 @@ export default {
   height: 150px;
   width: 100%;
   flex-direction: column;
+  align-items: center;
+}
+
+/* Fills everything above the action buttons so the whole upper half of the
+   screen dismisses the keyboard, not just the text itself. */
+.editor-head {
+  flex: 1;
+  width: 100%;
+  flex-direction: column;
   justify-content: flex-end;
   align-items: center;
+  padding-bottom: 4px;
 }
 
 .editor-name {
