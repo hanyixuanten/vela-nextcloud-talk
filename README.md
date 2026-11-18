@@ -34,9 +34,9 @@
 已构建好的包在 `dist/`：
 
 ```
-dist/com.hanyixuanten.nctalk.debug.0.1.0.rpk   403 KB
+dist/com.hanyixuanten.nctalk.debug.0.2.0.rpk   411 KB
 package : com.hanyixuanten.nctalk
-version : 0.1.0 (versionCode 1)
+version : 0.2.0 (versionCode 2)
 sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 ```
 
@@ -45,17 +45,36 @@ sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 1. 手机装「小米运动健康」并与手表配对。
 2. 手机端进入 `我的 → 关于 → 连点「关于」进入 Debug → 第三方应用`，包名填 `com.hanyixuanten.nctalk`，选择上面的 rpk 安装。
 3. 或者用社区工具（[minstall](https://github.com/HyperionD/minstall) 等）走蓝牙安装。
-4. 手表上打开 Talk，填服务器地址、用户名、**应用密码**。
+4. 手表上打开 Talk，填服务器地址、用户名、**应用密码**。嫌在表上打字麻烦，用下面的插件从手机填。
 
 自己重新打包：
 
 ```bash
-npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.1.0.rpk
+npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.0.rpk
 ```
 
 签名证书的查找顺序是 `sign/debug/` → `sign/` → toolkit 内置的默认调试证书。本仓库的 rpk 用的是 `sign/*.pem`（自签名）。`sign/*.pem` 已在 `.gitignore` 里，所以**克隆后不生成证书也能打包**，只是会退回 toolkit 的默认证书——那样每次换机器重打包签名就变了，覆盖安装可能失败。要固定签名，按 [`sign/README.md`](sign/README.md) 生成一次即可。
 
-### 3. 准备应用密码
+### 3. 从手机配置凭据（可选，但要装插件）
+
+在 480px 圆屏上敲服务器地址加一长串应用密码实在难受，所以有一个 AstroBox 插件：在手机上填表，凭据经蓝牙推到手表，由手表自己校验并保存。
+
+```
+手表：Talk → 设置 → 从手机配置   （停在这一页等）
+手机：AstroBox → 打开「Talk 凭据配置」→ 填三项 → 发送到手表
+```
+
+插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `dist/Talk 凭据配置.abp` 直接拖进 AstroBox 安装。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
+
+```bash
+cd astrobox-plugin
+rustup target add wasm32-wasip2
+PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
+```
+
+不装插件也完全可以，手表的登录页照样能手动输。
+
+### 4. 准备应用密码
 
 不要用账号密码登录。在 Nextcloud 网页端：
 
@@ -65,7 +84,7 @@ npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.1.0.rpk
 
 得到形如 `xxxxx-xxxxx-xxxxx-xxxxx-xxxxx` 的密码，填到手表的「应用密码」里。这样即使手表丢失，也只需要吊销这一条应用密码。
 
-### 4. 跑测试（可选）
+### 5. 跑测试（可选）
 
 不需要模拟器，桌面 Node ≥ 18 即可：
 
@@ -73,9 +92,13 @@ npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.1.0.rpk
 npm test          # 或 sh tests/run.sh
 ```
 
-会跑 `base64` / `format` 的单元测试，以及针对 `tests/mock-server.mjs` 这个假 Nextcloud 的 14 条接口集成测试（认证头、OCS 信封、游标、错误映射、网络失败）。测试里 `api.js` 是**原样执行**的，只把 `@system.fetch` 换成 `tests/fetch-double.mjs` 这个替身。
+46 条 JS 断言：`base64` / `format` / `protocol` 的单元测试，加上针对 `tests/mock-server.mjs` 这个假 Nextcloud 的 14 条接口集成测试（认证头、OCS 信封、游标、错误映射、网络失败）。测试里 `api.js` 是**原样执行**的，只把 `@system.fetch` 换成 `tests/fetch-double.mjs` 这个替身。
 
----
+插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
+
+```bash
+cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protocol
+```
 
 ---
 
@@ -91,6 +114,7 @@ npm test          # 或 sh tests/run.sh
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
 | 设置 | ✅ | 键盘布局、屏幕形状、轮询间隔、字号、清除数据 |
+| 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表校验后保存 |
 | 图片 / 文件消息 | ❌ | 只渲染文本，附件显示为占位文字 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
 | 通知推送 | ❌ | Vela 暂无第三方 app 的推送通道 |
@@ -117,25 +141,35 @@ vela-nextcloud-talk/
 │   │       ├── base64.js         # Basic Auth 用的 base64（无 btoa 依赖）
 │   │       ├── store.js          # @system.storage 封装 + 设置默认值
 │   │       ├── state.js          # 跨页面共享的运行时缓存
-│   │       └── format.js         # 时间、Rich Object String、头像取色
+│   │       ├── format.js         # 时间、Rich Object String、头像取色
+│   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
 │   ├── components/
 │   │   └── InputMethod/          # 三方输入法（vendored，勿手改）
 │   └── pages/
 │       ├── index/index.ux        # 会话列表
 │       ├── chat/chat.ux          # 聊天（含输入态）
 │       ├── login/login.ux        # 账号录入
+│       ├── setup/setup.ux        # 等手机推送凭据（interconnect）
 │       └── settings/settings.ux  # 设置
 ├── scripts/
 │   ├── gen-icon.py               # 零依赖 PNG 生成
 │   └── sync-input-method.sh      # 重新拉取并覆盖 InputMethod
+├── astrobox-plugin/              # 手机侧配置凭据的 AstroBox 插件（Rust → wasm）
+│   ├── Cargo.toml
+│   ├── manifest.json             # entry / api_level / permissions
+│   ├── src/                      # lib / ui / protocol / state / logger
+│   ├── tests/protocol.rs         # 协议单测（能跑，不依赖 wasm）
+│   └── scripts/build_dist.py     # 构建 + 打 .abp
 ├── docs/
 │   ├── api.md                    # 接口清单与错误映射
-│   └── design.md                 # 圆屏布局计算与状态机
+│   ├── design.md                 # 圆屏布局计算与状态机
+│   └── interconnect.md           # 与插件的协议、时序、排错
 ├── tests/
 │   ├── run.sh                    # 一键跑全部测试（需要 Node ≥ 18）
 │   ├── mock-server.mjs           # 假 Nextcloud Talk OCS 服务
 │   ├── fetch-double.mjs          # @system.fetch 的 Node 替身
 │   ├── api.test.mjs              # api.js 集成测试
+│   ├── protocol.test.mjs         # 凭据协议单元测试
 │   └── units.test.mjs            # base64 / format 单元测试
 └── sign/                         # 证书放这里（.gitignore 已排除 pem）
 ```
@@ -237,6 +271,8 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 - **无附件渲染**：文件/图片消息会显示成 Rich Object String 展开后的文件名文本。
 - **消息上限**：一次只取 40 条，没有上滑加载更早消息。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
+- **interconnect 的签名前提**：官方 Vela 文档要求快应用与手机端 App 包名/签名一致才能互联，而 AstroBox 的 `interconnect` host API 是按 `pkg-name` 投递的。这条限制是否被绕开**未在真机验证**，如果手表收不到推送，先看插件的 stdout 日志里 send 是否返回 `Err`。细节见 [`docs/interconnect.md`](docs/interconnect.md)。
+- **插件不持久化密码**：AstroBox v2 的 host API 没有文件系统接口，插件无法落盘，每次都要重填；真正的保存发生在手表的 `@system.storage`。
 
 ## 下一步
 
@@ -253,12 +289,14 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 ## 参考
 
 - [Vela JS 应用开发文档](https://iot.mi.com/vela/quickapp/zh/guide/)
+- [AstroBox 插件文档](https://plugindoc.astrobox.online/)
 - [项目配置 manifest.json](https://iot.mi.com/vela/quickapp/zh/guide/framework/manifest.html)
 - [数据请求 fetch](https://iot.mi.com/vela/quickapp/zh/features/network/fetch.html)
 - [Nextcloud Talk Conversation API](https://nextcloud-talk.readthedocs.io/en/latest/conversation/)
 - [Nextcloud Talk Chat API](https://nextcloud-talk.readthedocs.io/en/latest/chat/)
 - [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)
+- [AstroBox NG 插件模板（Rust）](https://github.com/AstralSightStudios/AstroBox-NG-Plugin-Template-Rust)
 
 ## 许可
 
-本仓库代码 MIT。`src/components/InputMethod/` 沿用上游许可，见该目录下的 `LICENSE`。
+本仓库代码 MIT。`src/components/InputMethod/` 沿用上游许可，见该目录下的 `LICENSE`。`astrobox-plugin/` 依赖的 `astrobox-ng-wit` 为 MIT。
