@@ -42,18 +42,18 @@ pub fn build(state: &State) -> Element {
         "https://cloud.example.com",
         &state.server,
         EV_SERVER,
-        false,
     ));
 
     form = form.child(field_label("用户名"));
-    form = form.child(field("用户名或邮箱", &state.user, EV_USER, false));
+    form = form.child(field("用户名或邮箱", &state.user, EV_USER));
 
     form = form.child(field_label("应用密码"));
+    // Plain text on purpose: app passwords are long and easy to mistype, and
+    // this form is on the user's own device. Masking here only hid typos.
     form = form.child(field(
         "Nextcloud → 设置 → 安全 → 应用密码",
         &state.password,
         EV_PASSWORD,
-        true,
     ));
 
     let send_disabled = matches!(state.status, Status::Sending) || state.addr.is_none();
@@ -85,8 +85,8 @@ fn field_label(text: &str) -> Element {
     Element::new(ElementType::P, Some(text)).size(12).text_color(MUTED)
 }
 
-fn field(placeholder: &str, value: &str, event_id: &str, secret: bool) -> Element {
-    let mut element = Element::new(ElementType::Input, None)
+fn field(placeholder: &str, value: &str, event_id: &str) -> Element {
+    Element::new(ElementType::Input, None)
         .prop("placeholder", placeholder)
         .prop("value", value)
         .width_full()
@@ -96,16 +96,7 @@ fn field(placeholder: &str, value: &str, event_id: &str, secret: bool) -> Elemen
         .bg(FIELD_BG)
         .text_color(TEXT)
         .on(Event::Input, event_id)
-        .on(Event::Change, event_id);
-
-    if secret {
-        // Never echo the app password back into the UI unconditionally; the
-        // host still needs the value to keep the field stateful, so mark it as
-        // a password input instead of clearing it.
-        element = element.prop("type", "password");
-    }
-
-    element
+        .on(Event::Change, event_id)
 }
 
 fn button_caption(status: &Status) -> &'static str {
