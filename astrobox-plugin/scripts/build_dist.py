@@ -139,6 +139,14 @@ def main():
         action="store_true",
         help="Package dist into <name>.abp",
     )
+    parser.add_argument(
+        "--archive-name",
+        help=(
+            "Override the .abp file name. Keep it ASCII: plugin names may be "
+            "localised, but installers on some platforms choke on non-ASCII "
+            "and spaces in the file name."
+        ),
+    )
     args, extra = parser.parse_known_args()
 
     cargo_args = []
@@ -210,7 +218,15 @@ def main():
             copy_item(root_dir, dist_dir, str(item))
 
     if args.package:
-        package_name = make_package_name(plugin_name, crate_name)
+        # Derive the archive name from the wasm entry (always ASCII) rather than
+        # from the localised manifest name.
+        stem = Path(entry).stem if entry else (crate_name or "plugin")
+        stem = stem.replace("_", "-")
+        version = str(manifest.get("version") or "").strip()
+        if version:
+            stem = f"{stem}-{version}"
+        stem = (args.archive_name or stem).strip()
+        package_name = make_package_name(stem, crate_name)
         package_path = dist_dir / f"{package_name}.abp"
         package_dist(dist_dir, package_path)
 
