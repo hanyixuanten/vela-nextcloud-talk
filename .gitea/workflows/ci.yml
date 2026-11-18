@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# Two jobs verify, two jobs produce artifacts.
+#
+# Deliberately minimal on third-party actions: only checkout and upload-artifact
+# are used, everything else is plain shell. A self-hosted act_runner often
+# cannot reach github.com to fetch arbitrary actions.
+#
+# If this runner needs a proxy for npm / crates.io, fill HTTP_PROXY below. The
+# network-facing steps export it only when it is non-empty, so an empty value
+# means "no proxy" and never leaks an empty http_proxy into tools.
+
+env:
+  HTTP_PROXY: ''
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------- JS layer
+  test:
+    name: test (js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          node -v
+          npm -v
+
+      - name: Install
+        run: |
+          if [ -n "$HTTP_PROXY" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          npm ci --no-audit --no-fund
+
+      # Runs base64/format/protocol unit tests plus the api.js integration suite
+      # against tests/mock-server.mjs. Needs no emulator and no device.
+      - name: Test
+        run: npm test
+
+  # ------------------------------------------------------------- Rust plugin
+  test-plugin:
+    name: test (plugin protocol)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: astrobox-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure Rust
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version
+
+      # The plugin crate only builds for wasm32-wasip2 because it links
+      # wit-bindgen, but src/protocol.rs is pure serde: tests/protocol.rs
+      # includes it by path and compiles for the host. No wasm target needed.
+      - name: Test protocol
+        run: |
+          if [ -n "$HTTP_PROXY" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          cargo test --target x86_64-unknown-linux-gnu --test protocol
+
+  # ---------------------------------------------------------------------- rpk
+  build-rpk:
+    name: build (rpk)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: |
+          if [ -n "$HTTP_PROXY" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          npm ci --no-audit --no-fund
+
+      # aiot-toolkit looks for signing material in sign/debug/, then sign/, then
+      # falls back to its own bundled debug certificate. With the secrets set the
+      # signature stays stable across builds; without them the rpk is still
+      # produced but signed by the toolkit, which breaks overwrite-installs from
+      # a previously differently-signed build.
+      - name: Restore signing certificate
+        env:
+          PRIVATE_PEM: ${{ secrets.SIGN_PRIVATE_PEM }}
+          CERT_PEM: ${{ secrets.SIGN_CERT_PEM }}
+        run: |
+          mkdir -p sign
+          if [ -n "$PRIVATE_PEM" ] && [ -n "$CERT_PEM" ]; then
+            printf '%s\n' "$PRIVATE_PEM" > sign/private.pem
+            printf '%s\n' "$CERT_PEM" > sign/certificate.pem
+            openssl x509 -in sign/certificate.pem -noout -subject -enddate
+          else
+            echo "no signing secrets; the toolkit debug certificate will be used"
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Inspect
+        run: |
+          ls -l dist/
+          unzip -l dist/*.rpk | tail -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpk
+          path: dist/*.rpk
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------- abp
+  build-plugin:
+    name: build (abp)
+    needs: test-plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: astrobox-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure Rust
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          rustup target add wasm32-wasip2
+          cargo --version
+
+      # build_dist.py shells out to `cargo` via PATH. Put the rustup toolchain
+      # first: some images also ship a distro rustc without wasm std, which
+      # fails with "can't find crate for core".
+      - name: Package
+        run: |
+          if [ -n "$HTTP_PROXY" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          python3 --version
+          python3 scripts/build_dist.py --release --package
+          ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abp
+          path: astrobox-plugin/dist/*.abp
+          if-no-files-found: error
