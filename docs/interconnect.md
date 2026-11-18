@@ -66,7 +66,8 @@
 
 ```
 插件 on_load        枚举设备 → register_interconnect_recv(addr, pkg) → 探测快应用是否安装
-手表 设置页         点「从手机配置」→ interconnect.instance() → onmessage 挂好
+手表 启动/设置页    首次启动直接落在这里；已有账号时走 设置 → 从手机配置
+                    → interconnect.instance() → onmessage 挂好
 用户               填三个字段 → 点「发送到手表」
 插件               校验格式 → send_qaic_message(addr, pkg, json) → set_timeout(15s)
 手表 onmessage      解析 → 校验必填与 scheme → api.getCurrentUser()
@@ -78,7 +79,7 @@
 
 ## 前置条件（重要）
 
-1. **手表上必须先打开 Talk 并停在「从手机配置」**。Vela 快应用退到后台会被挂起，收不到 interconnect 消息。
+1. **手表上必须先打开 Talk 并停在「从手机配置」**。Vela 快应用退到后台会被挂起，收不到 interconnect 消息。这也是首次启动直接进这一页的原因：登录页不监听，插件发过去也没人接。
 2. **快应用与手机端签名一致**。官方 Vela 文档写得很明确：`interconnect` 要求快应用 `package` 与手机端 App 包名一致、且 rpk 用同一张证书签名。AstroBox 的 `interconnect` host API 按 `pkg-name` 投递，是否绕开这条限制**未在真机验证**——这也是本项目目前最大的未知项。
 3. 插件需要在 AstroBox 里被授予 `device` / `interconnect` / `thirdpartyapp` / `ui` 权限。
 

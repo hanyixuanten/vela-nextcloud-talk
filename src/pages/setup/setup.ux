@@ -154,6 +154,12 @@ export default {
   },
 
   goBack() {
+    // Reached as the first screen there is no page to go back to, so fall
+    // through to the manual form instead of doing nothing.
+    if (!store.hasAccount(state.settings || {})) {
+      router.replace({ uri: '/login' })
+      return
+    }
     router.back()
   },
 

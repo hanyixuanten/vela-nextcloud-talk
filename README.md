@@ -34,9 +34,9 @@
 已构建好的包在 `dist/`：
 
 ```
-dist/com.hanyixuanten.nctalk.debug.0.2.1.rpk   412 KB
+dist/com.hanyixuanten.nctalk.debug.0.2.2.rpk   412 KB
 package : com.hanyixuanten.nctalk
-version : 0.2.1 (versionCode 3)
+version : 0.2.2 (versionCode 4)
 sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 ```
 
@@ -45,12 +45,12 @@ sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 1. 手机装「小米运动健康」并与手表配对。
 2. 手机端进入 `我的 → 关于 → 连点「关于」进入 Debug → 第三方应用`，包名填 `com.hanyixuanten.nctalk`，选择上面的 rpk 安装。
 3. 或者用社区工具（[minstall](https://github.com/HyperionD/minstall) 等）走蓝牙安装。
-4. 手表上打开 Talk，填服务器地址、用户名、**应用密码**。嫌在表上打字麻烦，用下面的插件从手机填。
+4. 手表上打开 Talk。**首次启动直接进「从手机配置」页**（它才是监听 interconnect 的那一页），要么等手机推，要么点「手动输入」自己填三项。
 
 自己重新打包：
 
 ```bash
-npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.1.rpk
+npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.2.rpk
 ```
 
 签名证书的查找顺序是 `sign/debug/` → `sign/` → toolkit 内置的默认调试证书。本仓库的 rpk 用的是 `sign/*.pem`（自签名）。`sign/*.pem` 已在 `.gitignore` 里，所以**克隆后不生成证书也能打包**，只是会退回 toolkit 的默认证书——那样每次换机器重打包签名就变了，覆盖安装可能失败。要固定签名，按 [`sign/README.md`](sign/README.md) 生成一次即可。
@@ -60,9 +60,11 @@ npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.1.rpk
 在 480px 圆屏上敲服务器地址加一长串应用密码实在难受，所以有一个 AstroBox 插件：在手机上填表，凭据经蓝牙推到手表，由手表自己校验并保存。
 
 ```
-手表：Talk → 设置 → 从手机配置   （停在这一页等）
+手表：首次启动就在「从手机配置」页；已有账号时走 设置 → 从手机配置
 手机：AstroBox → 打开「Talk 凭据配置」→ 填三项 → 发送到手表
 ```
+
+只有这一页在监听 interconnect。登录页底部也留了「从手机配置」入口，避免选了手动输入之后回不去。
 
 插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要 AstroBox ≥ 2.1.0，用 api_level 3；插件工具链固定 Rust 1.92，否则组件要求的 WASI 版本超过宿主上限）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
 

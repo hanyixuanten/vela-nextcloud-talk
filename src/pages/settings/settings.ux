@@ -83,7 +83,7 @@ function nextInList(list, current) {
 
 export default {
   data: {
-    version: '0.2.1',
+    version: '0.2.2',
     accountLabel: '',
     keyboardType: 'QWERTY',
     screenType: 'circle',
@@ -166,7 +166,7 @@ export default {
 
   openAbout() {
     prompt.showToast({
-      message: 'Vela Nextcloud Talk 0.2.1',
+      message: 'Vela Nextcloud Talk 0.2.2',
       duration: 2000
     })
   },
@@ -187,7 +187,8 @@ export default {
           state.activeRoom = null
           api.configure({})
           prompt.showToast({ message: this.$t('settings.cleared'), duration: 1500 })
-          router.replace({ uri: '/login' })
+          // Back to the "no account" state, which starts at the setup page.
+          router.replace({ uri: '/setup' })
         })
       }
     })

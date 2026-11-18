@@ -15,6 +15,7 @@
     "userHint": "Username or email",
     "password": "App password",
     "passwordHint": "Settings → Security → App passwords",
+    "fromPhone": "Set up from phone",
     "connect": "Connect",
     "connecting": "Connecting…",
     "next": "Next",

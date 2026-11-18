@@ -15,6 +15,7 @@
     "userHint": "用户名或邮箱",
     "password": "应用密码",
     "passwordHint": "设置 → 安全 → 应用密码",
+    "fromPhone": "从手机配置",
     "connect": "连接",
     "connecting": "连接中…",
     "next": "下一个",

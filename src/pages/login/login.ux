@@ -38,6 +38,10 @@
       </div>
 
       <text class="error" show="{{error}}">{{ error }}</text>
+
+      <!-- The setup page is the only place that listens on interconnect, so a
+           user who lands here must still be able to reach it. -->
+      <text class="link" @click="openSetup">{{ $t('login.fromPhone') }}</text>
     </div>
 
     <div class="edit-actions" show="{{editing}}">
@@ -155,6 +159,10 @@ export default {
 
   onKeyDelete() {
     this.removeText()
+  },
+
+  openSetup() {
+    router.replace({ uri: '/setup' })
   },
 
   submit() {
@@ -286,6 +294,14 @@ export default {
 .primary-text {
   font-size: 24px;
   color: #ffffff;
+}
+
+.link {
+  width: 360px;
+  margin-top: 14px;
+  font-size: 16px;
+  color: #6f7c8a;
+  text-align: center;
 }
 
 .error {

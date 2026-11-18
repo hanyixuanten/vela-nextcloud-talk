@@ -80,7 +80,9 @@ export default {
     const ready = this.readyPromise || Promise.resolve({})
     ready.then((settings) => {
       if (!store.hasAccount(settings)) {
-        router.replace({ uri: '/login' })
+        // First launch: land where the AstroBox plugin can actually reach us.
+        // /setup listens on interconnect; /login does not.
+        router.replace({ uri: '/setup' })
         return
       }
       this.refresh()
@@ -90,7 +92,7 @@ export default {
   refresh() {
     if (this.loading) return
     if (!api.isConfigured()) {
-      router.replace({ uri: '/login' })
+      router.replace({ uri: '/setup' })
       return
     }
 
