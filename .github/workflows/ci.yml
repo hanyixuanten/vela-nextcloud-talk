@@ -7,18 +7,20 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Two jobs verify, two jobs produce artifacts.
-#
-# Deliberately minimal on third-party actions: only checkout and upload-artifact
-# are used, everything else is plain shell. A self-hosted act_runner often
-# cannot reach github.com to fetch arbitrary actions.
-#
-# If this runner needs a proxy for npm / crates.io, fill HTTP_PROXY below. The
-# network-facing steps export it only when it is non-empty, so an empty value
-# means "no proxy" and never leaks an empty http_proxy into tools.
+permissions:
+  contents: read
 
+# Superseded pushes should not keep burning runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Set the repository variable HTTP_PROXY (Settings -> Secrets and variables ->
+# Actions -> Variables) if the runner needs a proxy for npm / crates.io.
+# Undefined expands to an empty string, and the steps below only export it when
+# non-empty, so nothing leaks an empty http_proxy into the tooling.
 env:
-  HTTP_PROXY: ''
+  HTTP_PROXY: ${{ vars.HTTP_PROXY }}
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -36,13 +38,13 @@ jobs:
 
       - name: Install
         run: |
-          if [ -n "$HTTP_PROXY" ]; then
+          if [ -n "${HTTP_PROXY:-}" ]; then
             export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
           fi
           npm ci --no-audit --no-fund
 
-      # Runs base64/format/protocol unit tests plus the api.js integration suite
-      # against tests/mock-server.mjs. Needs no emulator and no device.
+      # 46 assertions: base64/format/protocol unit tests plus the api.js
+      # integration suite against tests/mock-server.mjs. No emulator, no device.
       - name: Test
         run: npm test
 
@@ -74,7 +76,7 @@ jobs:
       # includes it by path and compiles for the host. No wasm target needed.
       - name: Test protocol
         run: |
-          if [ -n "$HTTP_PROXY" ]; then
+          if [ -n "${HTTP_PROXY:-}" ]; then
             export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
           fi
           cargo test --target x86_64-unknown-linux-gnu --test protocol
@@ -89,7 +91,7 @@ jobs:
 
       - name: Install
         run: |
-          if [ -n "$HTTP_PROXY" ]; then
+          if [ -n "${HTTP_PROXY:-}" ]; then
             export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
           fi
           npm ci --no-audit --no-fund
@@ -143,9 +145,6 @@ jobs:
           if ! command -v cargo >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
               | sh -s -- -y --profile minimal
-            # rustup only appends to a shell profile and $GITHUB_PATH only
-            # affects *later* steps, so export here too: without this the
-            # `cargo` call below exits 127 inside this very step.
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
@@ -158,13 +157,18 @@ jobs:
       # fails with "can't find crate for core".
       - name: Package
         run: |
-          if [ -n "$HTTP_PROXY" ]; then
+          if [ -n "${HTTP_PROXY:-}" ]; then
             export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
           fi
           export PATH="$HOME/.cargo/bin:$PATH"
           python3 --version
           python3 scripts/build_dist.py --release --package
           ls -l dist/
+
+      # Fail here rather than on the phone: this rejects a package whose
+      # manifest, entry or permissions would not install.
+      - name: Check artifact
+        run: python3 scripts/check_artifact.py
 
       - uses: actions/upload-artifact@v4
         with:
