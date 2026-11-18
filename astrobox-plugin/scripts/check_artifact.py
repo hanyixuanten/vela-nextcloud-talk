@@ -18,6 +18,7 @@ Exit code 0 = looks installable, 1 = at least one error.
 """
 
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -48,6 +49,13 @@ KNOWN_PERMISSIONS = {
 # Known-useless but harmless; rendering needs no permission.
 SUSPICIOUS_PERMISSIONS = {"ui"}
 
+# AstroBox runs level 2/3 plugins on wasmtime 38, whose WASI p2 implementation
+# reports 0.2.6. A component that imports a newer 0.2.x cannot be linked there,
+# and the failure looks like "the plugin does not install".
+MAX_WASI_PATCH = 6
+
+WASI_VERSION_RE = re.compile(rb"@0\.2\.(\d+)")
+
 COMPONENT_MAGIC = b"\x00asm" + b"\x0d\x00\x01\x00"
 MODULE_MAGIC = b"\x00asm" + b"\x01\x00\x00\x00"
 
@@ -74,6 +82,25 @@ class Report:
             print("  warn  " + item)
         for item in self.errors:
             print("  ERROR " + item)
+
+
+def check_wasi_version(blob, report):
+    """Reject components that need a newer WASI p2 than the host provides."""
+    patches = [int(match) for match in WASI_VERSION_RE.findall(blob)]
+    if not patches:
+        report.note("no wasi:*/@0.2.x imports (WASI-free component)")
+        return
+
+    newest = max(patches)
+    if newest > MAX_WASI_PATCH:
+        report.error(
+            f"component imports wasi 0.2.{newest}, but AstroBox's level 2/3 runtime "
+            f"(wasmtime 38) provides 0.2.{MAX_WASI_PATCH}; the component will fail to "
+            "link, which looks exactly like an install failure. Pin an older toolchain "
+            "(see rust-toolchain.toml)."
+        )
+    else:
+        report.note(f"wasi 0.2.{newest} <= 0.2.{MAX_WASI_PATCH} (host ceiling)")
 
 
 def check(path, report):
@@ -133,6 +160,7 @@ def check(path, report):
                 blob = archive.read(entry)[:8]
                 if blob == COMPONENT_MAGIC:
                     report.note(f"{entry} is a wasm component")
+                    check_wasi_version(archive.read(entry), report)
                 elif blob == MODULE_MAGIC:
                     report.error(
                         f"{entry} is a core wasm module, not a component; "

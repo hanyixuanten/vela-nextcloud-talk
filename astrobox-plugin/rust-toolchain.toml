@@ -1,0 +1,14 @@
+# Pinned on purpose: the WASI p2 version a component imports is decided by the
+# Rust std it is built against, and AstroBox runs level 2/3 plugins on
+# wasmtime 38, which implements WASI 0.2.6.
+#
+#   rust 1.90 -> wasi 0.2.3
+#   rust 1.91/1.92/1.93 -> wasi 0.2.6   <- host ceiling
+#   rust 1.100 (stable today) -> wasi 0.2.12, which does NOT link there
+#
+# Symptom of getting this wrong is not a compile error: the plugin simply fails
+# to load/install. scripts/check_artifact.py enforces the ceiling.
+[toolchain]
+channel = "1.92.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-wasip2"]

@@ -1,7 +1,7 @@
 {
   "name": "Talk 凭据配置",
   "icon": "icon.png",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "在 AstroBox 里填好服务器、用户名和应用密码，直接推送到手表上的 Talk 应用，省掉手环上打字",
   "author": "hanyixuanten",
   "website": "https://github.com/hanyixuanten/vela-nextcloud-talk",
