@@ -11,6 +11,11 @@
           <text class="row-value">{{ accountLabel }}</text>
         </div>
 
+        <div class="row" @click="openSetup">
+          <text class="row-label">{{ $t('settings.fromPhone') }}</text>
+          <text class="row-value">{{ $t('settings.fromPhoneHint') }}</text>
+        </div>
+
         <div class="row" @click="cycleKeyboard">
           <text class="row-label">{{ $t('settings.keyboard') }}</text>
           <text class="row-value">{{ keyboardType }}</text>
@@ -78,7 +83,7 @@ function nextInList(list, current) {
 
 export default {
   data: {
-    version: '0.1.0',
+    version: '0.2.0',
     accountLabel: '',
     keyboardType: 'QWERTY',
     screenType: 'circle',
@@ -155,9 +160,13 @@ export default {
     router.push({ uri: '/login' })
   },
 
+  openSetup() {
+    router.push({ uri: '/setup' })
+  },
+
   openAbout() {
     prompt.showToast({
-      message: 'Vela Nextcloud Talk 0.1.0',
+      message: 'Vela Nextcloud Talk 0.2.0',
       duration: 2000
     })
   },

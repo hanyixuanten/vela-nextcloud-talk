@@ -41,6 +41,8 @@
   "settings": {
     "title": "设置",
     "account": "账号",
+    "fromPhone": "从手机配置",
+    "fromPhoneHint": "需插件",
     "notSet": "未设置",
     "keyboard": "键盘",
     "screen": "屏幕",
@@ -57,5 +59,19 @@
     "fontLarge": "大",
     "seconds": "秒",
     "cleared": "已清除"
+  },
+  "setup": {
+    "title": "从手机配置",
+    "waiting": "等待手机发送…",
+    "verifying": "正在校验账号…",
+    "server": "服务器",
+    "user": "账号",
+    "hint": "在 AstroBox 里打开「Talk 凭据配置」插件，填好后点发送",
+    "manual": "手动输入",
+    "unsupported": "当前设备不支持互联通信",
+    "linkError": "与手机的连接出错",
+    "saved": "已保存",
+    "done": "已配置：{name}",
+    "failed": "配置失败"
   }
 }

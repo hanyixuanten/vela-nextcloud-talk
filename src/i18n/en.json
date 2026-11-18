@@ -41,6 +41,8 @@
   "settings": {
     "title": "Settings",
     "account": "Account",
+    "fromPhone": "Set up from phone",
+    "fromPhoneHint": "needs plugin",
     "notSet": "Not set",
     "keyboard": "Keyboard",
     "screen": "Screen",
@@ -57,5 +59,19 @@
     "fontLarge": "Large",
     "seconds": "s",
     "cleared": "Cleared"
+  },
+  "setup": {
+    "title": "Set up from phone",
+    "waiting": "Waiting for your phone…",
+    "verifying": "Checking the account…",
+    "server": "Server",
+    "user": "Account",
+    "hint": "Open the \"Talk credential\" plugin in AstroBox, fill the form, tap send",
+    "manual": "Type manually",
+    "unsupported": "This device does not support interconnect",
+    "linkError": "Link to phone failed",
+    "saved": "Saved",
+    "done": "Configured: {name}",
+    "failed": "Setup failed"
   }
 }

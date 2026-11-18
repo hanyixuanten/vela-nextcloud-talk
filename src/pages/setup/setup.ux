@@ -1,0 +1,265 @@
+<template>
+  <div class="page">
+    <div class="head">
+      <text class="title">{{ $t('setup.title') }}</text>
+      <text class="status {{ statusClass }}">{{ statusText }}</text>
+    </div>
+
+    <div class="info" show="{{serverLabel}}">
+      <text class="info-label">{{ $t('setup.server') }}</text>
+      <text class="info-value">{{ serverLabel }}</text>
+      <text class="info-label">{{ $t('setup.user') }}</text>
+      <text class="info-value">{{ userLabel }}</text>
+    </div>
+
+    <text class="hint" show="{{!serverLabel}}">{{ $t('setup.hint') }}</text>
+
+    <div class="actions">
+      <div class="ghost" @click="goBack">
+        <text class="ghost-text">{{ $t('common.back') }}</text>
+      </div>
+      <div class="ghost" @click="openLogin">
+        <text class="ghost-text">{{ $t('setup.manual') }}</text>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import interconnect from '@system.interconnect'
+import api from '../../common/scripts/api'
+import store from '../../common/scripts/store'
+import state from '../../common/scripts/state'
+import protocol from '../../common/scripts/protocol'
+
+export default {
+  data: {
+    statusText: '',
+    statusClass: 'status-waiting',
+    serverLabel: '',
+    userLabel: ''
+  },
+
+  onInit() {
+    this.connect = null
+    this.busy = false
+
+    this.setWaiting()
+
+    try {
+      this.connect = interconnect.instance()
+    } catch (e) {
+      this.setError(this.$t('setup.unsupported'))
+      return
+    }
+
+    // The connection is created and torn down by the system; these callbacks
+    // only exist to explain problems to the user.
+    this.connect.onopen = () => {
+      console.log('interconnect opened')
+    }
+    this.connect.onclose = () => {
+      console.log('interconnect closed')
+    }
+    this.connect.onerror = (evt) => {
+      const code = evt && evt.code ? '（' + evt.code + '）' : ''
+      this.setError(this.$t('setup.linkError') + code)
+    }
+    this.connect.onmessage = (evt) => { this.onMessage(evt) }
+  },
+
+  onDestroy() {
+    this.connect = null
+  },
+
+  setWaiting() {
+    this.statusText = this.$t('setup.waiting')
+    this.statusClass = 'status-waiting'
+  },
+
+  setError(message) {
+    this.statusText = message
+    this.statusClass = 'status-error'
+  },
+
+  onMessage(evt) {
+    if (this.busy) return
+
+    const raw = evt && evt.data
+    const text = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : ''
+    const parsed = protocol.parseCredentialMessage(text)
+
+    if (!parsed.ok) {
+      // Silent failures are traffic that belongs to another app on the channel.
+      if (parsed.silent) return
+      this.setError(parsed.error)
+      this.reply({ ok: false, message: parsed.error })
+      return
+    }
+
+    this.busy = true
+    this.serverLabel = parsed.config.baseUrl
+    this.userLabel = parsed.config.user
+    this.statusText = this.$t('setup.verifying')
+    this.statusClass = 'status-waiting'
+
+    // Validate before persisting: a typo in the app password should surface
+    // here, where the phone can still show it, not as a login failure later.
+    const candidate = Object.assign({}, state.settings || {}, parsed.config)
+    api.configure(candidate)
+
+    api.getCurrentUser()
+      .then((profile) => {
+        candidate.displayName = profile.displayName
+        return store.save(candidate)
+      })
+      .then((saved) => {
+        state.settings = saved
+        state.ready = true
+        state.loggedInOnce = true
+        api.configure(saved)
+
+        this.busy = false
+        this.statusText = this.$t('setup.done', { name: saved.displayName || saved.user })
+        this.statusClass = 'status-ok'
+        this.reply({ ok: true, message: this.$t('setup.saved'), displayName: saved.displayName })
+
+        setTimeout(() => {
+          router.replace({ uri: '/' })
+        }, 1600)
+      })
+      .catch((err) => {
+        this.busy = false
+        const message = (err && err.message) || this.$t('setup.failed')
+        this.setError(message)
+        this.reply({ ok: false, message: message })
+        // Never leave a half-configured client behind.
+        api.configure(state.settings || {})
+      })
+  },
+
+  reply(payload) {
+    if (!this.connect) return
+    try {
+      this.connect.send({
+        data: protocol.buildAck(payload),
+        fail: (data, code) => {
+          console.log('ack failed, code = ' + code)
+        }
+      })
+    } catch (e) {
+      console.log('ack send threw: ' + e)
+    }
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  openLogin() {
+    router.replace({ uri: '/login' })
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  background-color: #000000;
+}
+
+.head {
+  height: 118px;
+  margin-top: 44px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.title {
+  font-size: 30px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.status {
+  width: 320px;
+  margin-top: 12px;
+  font-size: 21px;
+  text-align: center;
+}
+
+.status-waiting {
+  color: #8a94a6;
+}
+
+.status-ok {
+  color: #7bd88f;
+}
+
+.status-error {
+  color: #ff8a80;
+}
+
+.info {
+  width: 360px;
+  margin-top: 8px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  padding-left: 18px;
+  padding-right: 18px;
+  border-radius: 16px;
+  background-color: #14181d;
+  flex-direction: column;
+}
+
+.info-label {
+  font-size: 16px;
+  color: #6f7c8a;
+}
+
+.info-value {
+  width: 288px;
+  font-size: 20px;
+  color: #e8eef5;
+  margin-top: 2px;
+  margin-bottom: 6px;
+  text-overflow: ellipsis;
+}
+
+.hint {
+  width: 300px;
+  margin-top: 10px;
+  font-size: 18px;
+  color: #5b6672;
+  text-align: center;
+}
+
+.actions {
+  width: 280px;
+  height: 54px;
+  margin-top: auto;
+  margin-bottom: 26px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ghost {
+  width: 132px;
+  height: 46px;
+  border-radius: 23px;
+  background-color: #1c2127;
+  justify-content: center;
+  align-items: center;
+}
+
+.ghost-text {
+  font-size: 20px;
+  color: #cbd5e1;
+}
+</style>
