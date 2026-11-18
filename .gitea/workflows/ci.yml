@@ -61,7 +61,11 @@ jobs:
           if ! command -v cargo >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
               | sh -s -- -y --profile minimal
+            # rustup only appends to a shell profile and $GITHUB_PATH only
+            # affects *later* steps, so export here too: without this the
+            # `cargo` call below exits 127 inside this very step.
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
           fi
           cargo --version
 
@@ -139,10 +143,15 @@ jobs:
           if ! command -v cargo >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
               | sh -s -- -y --profile minimal
+            # rustup only appends to a shell profile and $GITHUB_PATH only
+            # affects *later* steps, so export here too: without this the
+            # `cargo` call below exits 127 inside this very step.
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
           fi
           rustup target add wasm32-wasip2
           cargo --version
+          rustc --print target-libdir --target wasm32-wasip2
 
       # build_dist.py shells out to `cargo` via PATH. Put the rustup toolchain
       # first: some images also ship a distro rustc without wasm std, which

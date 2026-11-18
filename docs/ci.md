@@ -97,6 +97,24 @@ cd astrobox-plugin && PATH="$HOME/.cargo/bin:$PATH" \
 
 这套命令在干净 clone 里验证过：`npm ci` 装 718 个包，JS 46 条断言全绿，Rust 7 条全绿，rpk 与 abp 都能产出。
 
+## 实跑记录（首次上线踩的坑）
+
+runner 镜像实际是 `gitea/runner-images:ubuntu-26.04`，**镜像里没有 cargo**，也没有 rustup。第一版工作流就这样挂了：
+
+```
+/var/run/act/workflow/1.sh: line 7: cargo: command not found
+##[error]Process completed with exit code 127
+```
+
+原因很典型：`sh -s -- -y` 装完 rustup 后只写进了 shell profile，`echo $HOME/.cargo/bin >> $GITHUB_PATH` 只对**后续 step** 生效，当步里紧接着的 `cargo --version` 自然找不到。修法是当步再 `export PATH="$HOME/.cargo/bin:$PATH"` 一次。
+
+同一轮里另外两个信号：
+
+- `test (js)` 通过，Node **v24.22.3** / npm 11.19.1 —— 镜像自带的 Node 足够新，不需要 `actions/setup-node`；
+- `build (rpk)` 通过，日志里明确打出 `no signing secrets; the toolkit debug certificate will be used`，artifact `rpk.zip` 395 KB 上传成功 —— 说明不配 secrets 也能出包，降级路径是通的。
+
+`build (abp)` 因为 `test (plugin protocol)` 失败被 `needs:` 跳过，等修好后才第一次真正跑起来。
+
 ## 已知限制
 
 - **没有缓存**，每次全量 `npm ci` + `cargo build`。想要就自己加 `actions/cache`，键用 `Cargo.lock` 和 `package-lock.json` 的哈希。
