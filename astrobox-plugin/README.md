@@ -130,6 +130,8 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 ## 设计取舍
 
+**应用密码输入框是普通文本，不是密码框。** Nextcloud 的应用密码是 `xxxxx-xxxxx-xxxxx-xxxxx-xxxxx` 这种长串，掩码只会让人看不出自己漏了几位；而这个表单本来就跑在用户自己的设备上，掩码换不来安全感，只换来重输。真正的保护在别处：不落盘、发完即清、只经蓝牙一跳。
+
 **密码不在插件里持久化（是选择，不是限制）。** Host API 里没有文件系统函数（`os` 只给 arch/hostname/locale），但运行时确实提供 WASI std fs，只是限定在插件自己的目录内——所以 `std::fs` 是可用的，真要落盘做得到。这一版没做：每次打开重新输入，真正的保存在手表的 `@system.storage`，发送成功后插件立刻清空内存里的密码。少一处明文落盘就少一处泄露面。
 
 **只发给第一台已连接设备。** `device.get_connected_device_list()` 返回多台时取第一台。多设备同时连接是罕见场景，为它加选择器会让 UI 复杂一档，先不做。
