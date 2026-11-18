@@ -64,7 +64,7 @@ npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.0.rpk
 手机：AstroBox → 打开「Talk 凭据配置」→ 填三项 → 发送到手表
 ```
 
-插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `dist/Talk 凭据配置.abp` 直接拖进 AstroBox 安装。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
+插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要 AstroBox ≥ 2.1.0，因为用了 api_level 3）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
 
 ```bash
 cd astrobox-plugin
@@ -280,7 +280,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 - **消息上限**：一次只取 40 条，没有上滑加载更早消息。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
 - **interconnect 的签名前提**：官方 Vela 文档要求快应用与手机端 App 包名/签名一致才能互联，而 AstroBox 的 `interconnect` host API 是按 `pkg-name` 投递的。这条限制是否被绕开**未在真机验证**，如果手表收不到推送，先看插件的 stdout 日志里 send 是否返回 `Err`。细节见 [`docs/interconnect.md`](docs/interconnect.md)。
-- **插件不持久化密码**：AstroBox v2 的 host API 没有文件系统接口，插件无法落盘，每次都要重填；真正的保存发生在手表的 `@system.storage`。
+- **插件不持久化密码**：AstroBox 的 Host API 里确实没有文件系统函数（`os` 只给 arch/hostname/locale），运行时虽然提供 WASI std fs（限定在插件自己的目录内），但这一版**故意没有**写盘——密码每次都要重填，真正的保存只发生在手表的 `@system.storage`，发送成功后插件立刻清空内存里的密码。
 
 ## 下一步
 

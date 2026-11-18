@@ -120,4 +120,4 @@ runner 镜像实际是 `gitea/runner-images:ubuntu-26.04`，**镜像里没有 ca
 - **没有缓存**，每次全量 `npm ci` + `cargo build`。想要就自己加 `actions/cache`，键用 `Cargo.lock` 和 `package-lock.json` 的哈希。
 - **不做签名校验**（除非配了 secrets）。CI 里 `openssl x509 -noout -subject` 只打印，不比对是否符合预期。
 - **不跑模拟器**。Vela 的 UI 只能靠 AIoT-IDE + AVD 验证，CI 里没有，所以 `build` 只证明「能编过、产物结构对」，不证明「跑起来对」。
-- **abp 文件名带中文和空格**（`Talk 凭据配置.abp`），来自插件 manifest 的 `name`。`upload-artifact` 对这类文件名一般没问题，但如果你的 runner 文件系统编码异常，把插件 `manifest.json` 的 `name` 改成 ASCII 即可。
+- **abp 文件名是 ASCII**（`nctalk-credential-<版本>.abp`）。早先版本用的是 manifest 里的中文 `name`，在部分平台安装器上会出问题，现在 `build_dist.py` 改为从 wasm entry 派生，可用 `--archive-name` 覆盖。
