@@ -69,6 +69,10 @@ jobs:
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
+          # Follow the channel pinned in rust-toolchain.toml: the wasi version
+          # baked into the component depends on it (see that file).
+          CHANNEL=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$CHANNEL" --profile minimal
           cargo --version
 
       # The plugin crate only builds for wasm32-wasip2 because it links
@@ -148,7 +152,11 @@ jobs:
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
-          rustup target add wasm32-wasip2
+          # Follow the channel pinned in rust-toolchain.toml: the wasi version
+          # baked into the component depends on it. Getting this wrong yields a
+          # component that compiles fine and then refuses to load.
+          CHANNEL=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$CHANNEL" --profile minimal --target wasm32-wasip2
           cargo --version
           rustc --print target-libdir --target wasm32-wasip2
 
