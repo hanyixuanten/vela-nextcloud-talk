@@ -16,3 +16,8 @@ sign/**/*.pem
 .idea/
 .vscode/
 *.log
+
+# Rust plugin build output
+astrobox-plugin/target/
+astrobox-plugin/dist/
+*.abp
