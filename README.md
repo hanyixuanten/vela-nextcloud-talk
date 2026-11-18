@@ -102,7 +102,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 
 ### 6. CI
 
-`.gitea/workflows/ci.yml` 四个 job：`test`（JS 46 条断言）、`test-plugin`（Rust 7 条协议断言）、`build-rpk`、`build-plugin`，后两个用 `needs:` 卡在前两个通过之后，产物走 artifact。签名证书从 `SIGN_PRIVATE_PEM` / `SIGN_CERT_PEM` 两个 secret 注入，不配也能出包（退回 toolkit 调试证书）。
+`.github/workflows/ci.yml`（GitHub Actions）四个 job：`test`（JS 46 条断言）、`test-plugin`（Rust 7 条协议断言）、`build-rpk`、`build-plugin`，后两个用 `needs:` 卡在前两个通过之后，产物走 Artifacts。`build-plugin` 还会跑 `check_artifact.py`，把装不上的包挡在 CI。签名证书从 `SIGN_PRIVATE_PEM` / `SIGN_CERT_PEM` 两个 secret 注入，不配也能出包（退回 toolkit 调试证书）。
 
 细节、runner 标签要求和本地复现命令见 [`docs/ci.md`](docs/ci.md)。
 
@@ -166,12 +166,12 @@ vela-nextcloud-talk/
 │   ├── src/                      # lib / ui / protocol / state / logger
 │   ├── tests/protocol.rs         # 协议单测（能跑，不依赖 wasm）
 │   └── scripts/build_dist.py     # 构建 + 打 .abp
-├── .gitea/workflows/ci.yml       # Gitea Actions：测试 + 打包 rpk/abp
+├── .github/workflows/ci.yml      # GitHub Actions：测试 + 打包 rpk/abp
 ├── docs/
 │   ├── api.md                    # 接口清单与错误映射
 │   ├── design.md                 # 圆屏布局计算与状态机
 │   ├── interconnect.md           # 与插件的协议、时序、排错
-│   └── ci.md                     # CI 的 job 划分、secrets、runner 配置
+│   └── ci.md                     # CI 的 job 划分、secrets、产物与排错
 ├── tests/
 │   ├── run.sh                    # 一键跑全部测试（需要 Node ≥ 18）
 │   ├── mock-server.mjs           # 假 Nextcloud Talk OCS 服务
