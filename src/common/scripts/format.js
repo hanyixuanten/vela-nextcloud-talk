@@ -61,7 +61,9 @@ function formatClock(seconds) {
 }
 
 function weekday(seconds) {
-  return translated(WEEKDAY_KEYS[new Date(Number(seconds) * 1000).getDay()], '周' + ['日', '一', '二', '三', '四', '五', '六'][new Date(Number(seconds) * 1000).getDay()])
+  const day = new Date(Number(seconds) * 1000).getDay()
+  const fallback = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][day]
+  return translated(WEEKDAY_KEYS[day], fallback)
 }
 
 /**
