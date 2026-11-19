@@ -43,7 +43,8 @@ const MESSAGES = [
     actorDisplayName: 'Ann',
     message: 'first',
     timestamp: 100,
-    messageType: 'comment'
+    messageType: 'comment',
+    isReplyable: true
   },
   {
     id: 11,
@@ -52,13 +53,15 @@ const MESSAGES = [
     actorDisplayName: 'Alice',
     message: 'second',
     timestamp: 110,
-    messageType: 'comment'
+    messageType: 'comment',
+    isReplyable: true
   }
 ]
 
 export const EXPECTED = { USER, APP_PASSWORD, ROOMS, MESSAGES }
 
 export function start() {
+  const messages = MESSAGES.slice()
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (chunk) => {
@@ -122,21 +125,35 @@ export function start() {
       if (req.url.indexOf('/chat/tokA') >= 0) {
         if (req.method === 'POST') {
           const parsed = JSON.parse(body)
+          const replyTo = parsed.replyTo === undefined ? 0 : parsed.replyTo
+          const parent = messages.find((row) => row.id === replyTo && row.token === 'tokA')
+          if (replyTo !== 0 && (!parent || parent.messageType !== 'comment')) {
+            sendJson(400, {
+              ocs: {
+                meta: { status: 'failure', statuscode: 400, message: '' },
+                data: { error: 'reply-to' }
+              }
+            })
+            return
+          }
+          const data = {
+            id: messages.at(-1).id + 1,
+            token: 'tokA',
+            actorId: 'alice',
+            actorDisplayName: 'Alice',
+            message: parsed.message,
+            timestamp: 120,
+            messageType: 'comment',
+            isReplyable: true
+          }
+          if (parent) {
+            const { parent: _ancestor, ...snapshot } = parent
+            data.parent = snapshot
+          }
+          messages.push(data)
           sendJson(
             201,
-            {
-              ocs: {
-                meta: { status: 'ok', statuscode: 200, message: 'OK' },
-                data: {
-                  id: 12,
-                  actorId: 'alice',
-                  actorDisplayName: 'Alice',
-                  message: parsed.message,
-                  timestamp: 120,
-                  messageType: 'comment'
-                }
-              }
-            },
+            { ocs: { meta: { status: 'ok', statuscode: 201, message: 'OK' }, data: data } },
             { 'X-Chat-Last-Common-Read': '11' }
           )
           return
@@ -147,8 +164,8 @@ export function start() {
         const limit = Number(query.get('limit'))
         const forward = query.get('lookIntoFuture') === '1'
         const page = (forward
-          ? MESSAGES.filter((m) => m.id > cursor)
-          : MESSAGES.filter((m) => !cursor || m.id < cursor).reverse()).slice(0, limit)
+          ? messages.filter((m) => m.id > cursor)
+          : messages.filter((m) => !cursor || m.id < cursor).reverse()).slice(0, limit)
         if (!page.length) {
           res.writeHead(304).end()
         } else {

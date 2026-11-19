@@ -132,8 +132,11 @@ function request(options, credentials = account) {
 
         const ocs = payload && payload.ocs
         const meta = ocs && ocs.meta ? ocs.meta : null
-        const ocsOk = meta ? meta.statuscode === 100 || meta.statuscode === 200 : false
         const httpOk = status >= 200 && status < 300
+        // OCS v2 can mirror the HTTP code in meta (e.g. 201 Created for chat sends).
+        const ocsOk = meta && (
+          meta.statuscode === 100 || meta.statuscode === 200 || meta.statuscode === status
+        )
 
         if (httpOk && (ocsOk || (!meta && payload))) {
           resolve({
@@ -215,12 +218,14 @@ function getMessages(token, options) {
   )
 }
 
-/** Send a plain text message. Resolves with the created message object. */
-function sendMessage(token, text) {
+/** Send text, optionally replying to a numeric message ID. Resolves with the created message. */
+function sendMessage(token, text, replyTo) {
+  const body = { message: text }
+  if (replyTo !== undefined) body.replyTo = replyTo
   return request({
     path: TALK_V1 + '/chat/' + encodeURIComponent(token),
     method: 'POST',
-    body: { message: text }
+    body: body
   }).then((res) => res.data)
 }
 

@@ -88,13 +88,42 @@ await test('forward polling waits zero seconds and handles 304', async () => {
   assert.deepEqual(empty, { messages: [], lastGiven: 0, notModified: true })
 })
 
-await test('sendMessage posts a JSON body and returns the created message', async () => {
-  const created = await api.sendMessage('tokA', '你好')
+await test('sendMessage omits undefined replyTo and accepts OCS 201 Created', async () => {
+  const created = await api.sendMessage('tokA', '你好', undefined)
   assert.equal(created.id, 12)
   assert.equal(created.message, '你好')
+  assert.equal(created.parent, undefined)
 
-  const request = seen.filter((entry) => entry.method === 'POST').pop()
+  const request = seen.at(-1)
+  assert.equal(request.method, 'POST')
   assert.equal(request.body, JSON.stringify({ message: '你好' }))
+})
+
+await test('sendMessage posts a numeric replyTo and returns the embedded parent', async () => {
+  const created = await api.sendMessage('tokA', '收到', 10)
+  const request = seen.at(-1)
+  assert.equal(request.method, 'POST')
+  assert.equal(request.url, '/ocs/v2.php/apps/spreed/api/v1/chat/tokA')
+  assert.deepEqual(JSON.parse(request.body), { message: '收到', replyTo: 10 })
+  assert.equal(created.id, 13)
+  assert.equal(created.message, '收到')
+  assert.equal(created.parent.id, 10)
+  assert.equal(created.parent.actorDisplayName, 'Ann')
+  assert.equal(created.parent.message, 'first')
+  assert.equal(created.parent.parent, undefined)
+
+  const poll = await api.getMessages('tokA', { lastKnownMessageId: 12, lookIntoFuture: 1 })
+  assert.deepEqual(poll.messages, [created])
+})
+
+await test('sendMessage surfaces an invalid reply target without retrying as a plain send', async () => {
+  const before = seen.length
+  await assert.rejects(api.sendMessage('tokA', 'orphan', 999), (err) => {
+    assert.equal(err.status, 400)
+    assert.equal(err.payload.ocs.data.error, 'reply-to')
+    return true
+  })
+  assert.equal(seen.length, before + 1)
 })
 
 await test('markRead sends a POST with lastReadMessage', async () => {

@@ -13,7 +13,7 @@
 
       <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
         <div class="list">
-          <div class="msg {{ $item.mine ? 'msg-mine' : '' }}" for="{{messages}}">
+          <div class="msg {{ $item.mine ? 'msg-mine' : '' }}" for="{{messages}}" @longpress="selectReply($item.id)">
             <text class="msg-meta">{{ $item.meta }}</text>
             <text class="msg-text {{ $item.mine ? 'msg-text-mine' : '' }}" style="font-size: {{ fontSize }}px;">{{ $item.text }}</text>
           </div>
@@ -33,10 +33,18 @@
         </div>
       </scroll>
 
-      <div class="inputbar" show="{{!browsingHistory}}" @click="startEdit">
+      <div class="inputbar reply-bar" if="{{replyId > 0}}">
+        <div class="reply-open" @click="startReply">
+          <text class="reply-label">{{ $t('chat.reply') }}</text>
+        </div>
+        <div class="reply-clear" @click="clearReply">
+          <text class="reply-label">×</text>
+        </div>
+      </div>
+      <div class="inputbar" show="{{!browsingHistory && !replyId}}" @click="startEdit">
         <text class="input-placeholder">{{ $t('chat.placeholder') }}</text>
       </div>
-      <div class="inputbar" show="{{browsingHistory}}" @click="loadInitial">
+      <div class="inputbar" show="{{browsingHistory && !replyId}}" @click="loadInitial">
         <text class="history-label">{{ $t('chat.backlatest') }}</text>
       </div>
     </div>
@@ -44,11 +52,16 @@
     <!-- Typing state: the keyboard occupies 321px, so the list is replaced by
          a compact draft preview. This is the whole reason for the two states. -->
     <div class="editor" show="{{editing}}">
-      <!-- Tap anywhere above the buttons to close the keyboard. The keyboard has
-           no dismiss key, and a keyboard-only UI would otherwise trap the user. -->
-      <div class="editor-head" @click="stopEdit">
-        <text class="editor-name">{{ title }}</text>
-        <text class="editor-text">{{ draftView || $t('chat.placeholder') }}</text>
+      <!-- Tap the draft preview or the cancel button to close the keyboard. -->
+      <div class="editor-head">
+        <text class="editor-name" show="{{!replyId}}" @click="stopEdit">{{ title }}</text>
+        <div class="reply-bar reply-preview" if="{{replyId > 0 && editing}}">
+          <text class="reply-summary" @click="stopEdit">{{ replySummary }}</text>
+          <div class="reply-clear" @click="clearReply">
+            <text class="reply-label">×</text>
+          </div>
+        </div>
+        <text class="editor-text" @click="stopEdit">{{ draftView || $t('chat.placeholder') }}</text>
       </div>
       <div class="editor-actions">
         <div class="ghost" @click="stopEdit">
@@ -87,6 +100,7 @@ import fmt from '../../common/scripts/format'
 
 const FONT_SIZES = { small: 20, normal: 23, large: 27 }
 const DRAFT_VIEW_LIMIT = 60
+const REPLY_VIEW_LIMIT = 48
 const PAGE_SIZE = 12
 const WINDOW_SIZE = 24
 
@@ -117,6 +131,8 @@ export default {
     messages: [],
     draft: '',
     draftView: '',
+    replyId: 0,
+    replySummary: '',
     editing: false,
     loading: false,
     olderCursor: 0,
@@ -285,7 +301,8 @@ export default {
       id: Number(message.id),
       text: clipDisplay(fmt.renderMessage(message), 512),
       meta: mine ? fmt.formatClock(message.timestamp) : author + ' · ' + fmt.formatClock(message.timestamp),
-      mine: mine
+      mine: mine,
+      replyable: !isSystem && message.isReplyable === true
     }
   },
 
@@ -293,14 +310,36 @@ export default {
   /* composing                                                           */
   /* ------------------------------------------------------------------ */
 
+  selectReply(id) {
+    if (!this.visible || !this.initialised || this.loading || this.sending || this.editing) return
+    if (!Number.isSafeInteger(id) || id <= 0) return
+    const row = this.messages.find((message) => message.id === id)
+    if (!row || !row.replyable) return
+    this.replyId = id
+    this.replySummary = clipDisplay(row.text.replace(/\s+/g, ' ').trim(), REPLY_VIEW_LIMIT) || this.$t('chat.reply')
+  },
+
+  startReply() {
+    if (!this.replyId || this.loading || this.sending) return
+    this.editing = true
+    this.error = ''
+  },
+
+  clearReply() {
+    if (this.sending) return
+    this.replyId = 0
+    this.replySummary = ''
+    if (this.browsingHistory) this.stopEdit()
+  },
+
   startEdit() {
-    if (!this.initialised || this.loading || this.browsingHistory) return
+    if (!this.initialised || this.loading || this.browsingHistory || this.sending) return
     this.editing = true
     this.error = ''
   },
 
   stopEdit() {
-    this.editing = false
+    if (!this.sending) this.editing = false
   },
 
   setDraft(value) {
@@ -311,33 +350,40 @@ export default {
 
   onKeyComplete(evt) {
     const content = evt && evt.detail ? evt.detail.content : ''
-    if (!content) return
+    if (!content || !this.editing || this.sending) return
     this.setDraft(this.draft + content)
   },
 
   onKeyDelete() {
+    if (!this.editing || this.sending) return
     this.setDraft(trimLastChar(this.draft))
   },
 
   send() {
     const text = String(this.draft || '').trim()
-    if (!text || this.sending) return
+    if (!text || this.sending || (this.browsingHistory && !this.replyId)) return
 
     this.sending = true
-    return api.sendMessage(this.token, text)
+    return api.sendMessage(this.token, text, this.replyId || undefined)
       .then((message) => {
+        this.sending = false
+        this.clearReply()
         this.setDraft('')
         this.editing = false
+        if (this.visible && this.browsingHistory) {
+          this.loadInitial()
+          return
+        }
         if (this.visible && message && message.id) {
           const trimmed = this.mergeViews([this.toView(message)], false)
           if (trimmed || !this.olderCursor) this.olderCursor = this.messages[this.messages.length - 1].id
           // The forward cursor must not skip intervening messages from others.
         }
-        this.sending = false
         this.schedulePoll(0)
       })
       .catch((err) => {
         this.sending = false
+        if (!this.visible) return
         prompt.showToast({
           message: (err && err.message) || '发送失败',
           duration: 2000
@@ -498,8 +544,6 @@ export default {
   align-items: center;
 }
 
-/* Fills everything above the action buttons so the whole upper half of the
-   screen dismisses the keyboard, not just the text itself. */
 .editor-head {
   flex: 1;
   width: 100%;
@@ -520,6 +564,44 @@ export default {
   font-size: 22px;
   color: #e8eef5;
   text-align: center;
+}
+
+.reply-bar {
+  flex-direction: row;
+  align-items: center;
+}
+
+.reply-open {
+  flex: 1;
+  height: 100%;
+  justify-content: center;
+  align-items: center;
+}
+
+.reply-clear {
+  width: 46px;
+  height: 100%;
+  justify-content: center;
+  align-items: center;
+}
+
+.reply-preview {
+  width: 204px;
+  height: 36px;
+  border-radius: 18px;
+  background-color: #14181d;
+}
+
+.reply-label, .reply-summary {
+  font-size: 18px;
+  color: #b8d9fa;
+}
+
+.reply-summary {
+  width: 148px;
+  margin-left: 10px;
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
 .editor-actions {

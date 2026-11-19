@@ -25,7 +25,7 @@ OCS 把真实数据包在 `ocs` 里：
 }
 ```
 
-`api.js` 判定成功的条件是：HTTP 2xx **且**（`meta.statuscode` 为 100/200，或没有 `meta` 但 body 可解析）。OCS v1 用 100，v2 用 200，两者都要认。
+`api.js` 判定成功的条件是：HTTP 2xx **且**（`meta.statuscode` 为 `100`、`200` 或与 HTTP 状态码一致，或没有 `meta` 但 body 可解析）。OCS v2 可能在 `meta.statuscode` 里返回 HTTP 状态码，例如发送成功时的 `201`。
 
 ## 端点
 
@@ -72,7 +72,11 @@ POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}
 { "message": "你好" }
 ```
 
-成功返回 `201`，body 是新建消息对象（含 `id`、`timestamp`），可以直接上屏，不必重新拉列表。
+回复使用同一个端点，例如 `{ "message": "收到", "replyTo": 12345 }`。`replyTo` 是同一会话中可回复的消息 ID（JSON 整数），不是引用文本，也不是线程 ID。目标无效（如不存在、属于其他会话，或是不可回复的系统／命令消息）时，服务器返回 `400`。调用 `sendMessage(token, text, replyTo)` 时，省略第三个参数或传 `undefined` 会保持普通发送，JSON 不带 `replyTo`。
+
+成功返回 `201`，`ocs.data` 是新建消息对象（含 `id`、`timestamp`），可以直接上屏，不必重新拉列表。回复的发送结果和后续拉取都可以带 `parent`：正常情况下是被回复的完整消息对象，但不再嵌套 `parent`；拉取时如果原消息已删除，可以收到 `{ "id": 12345, "deleted": true }`。普通消息没有 `parent`。
+
+兼容性：上游从 Talk 8.0 开始提供 [`chat-replies`](https://nextcloud-talk.readthedocs.io/en/stable/capabilities/#80) capability，消息上的 `isReplyable` 标明是否可回复。本应用已使用 Talk 12.0 引入的 `conversation-v4`，无需更换聊天端点；普通发送不依赖回复能力。参见上游[发送消息](https://nextcloud-talk.readthedocs.io/en/stable/chat/#sending-a-new-chat-message)和[父消息结构](https://nextcloud-talk.readthedocs.io/en/stable/chat/#parent-data)。
 
 ### 已读标记
 
@@ -112,5 +116,7 @@ POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
 | `timestamp` | 秒级 unix 时间 |
 | `systemMessage` | 非空表示系统消息（加入/退出/改名） |
 | `messageType` | `comment` / `comment_deleted` / `system` / `command` |
+| `isReplyable` | 服务器标记此消息是否可回复 |
+| `parent` | 可选的被回复消息对象，或已删除标记 `{ id, deleted: true }` |
 
 Rich Object String 的展开在 `format.js` 的 `renderMessage()`：把 `{file}` 这类占位符替换成 `messageParameters.file.name`，未知占位符原样保留，避免信息丢失。

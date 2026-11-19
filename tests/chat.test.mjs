@@ -11,18 +11,26 @@ const script = readFileSync(new URL('../src/pages/chat/chat.ux', import.meta.url
   .replace('export default', 'globalThis.page =')
 const requests = []
 const read = []
+const sends = []
+const toasts = []
+let sendFailure = false
 const timers = new Map()
 let timerId = 0
-const message = (id) => ({ id, message: '文字', timestamp: 100 })
+const message = (id) => ({ id, message: '文字', timestamp: 100, isReplyable: true })
 const ids = (high, low) => Array.from({ length: high - low + 1 }, (_, i) => high - i)
 const ctx = {
   fmt,
   state: {},
+  prompt: { showToast: ({ message }) => toasts.push(message) },
   store: { load: async () => ({ user: 'alice' }) },
   api: {
     configure() {},
     getMessages: (token, query) => new Promise((resolve, reject) => requests.push({ token, query, resolve, reject })),
-    sendMessage: async () => message(100),
+    sendMessage: async (token, text, replyTo) => {
+      sends.push({ token, text, replyTo })
+      if (sendFailure) throw new Error('offline')
+      return message(replyTo ? 114 : 100)
+    },
     markRead: async (token, id) => read.push(id)
   },
   setTimeout: (fn, delay) => (timers.set(++timerId, { fn, delay }), timerId),
@@ -113,3 +121,51 @@ assert.equal(timers.size, 0)
 assert.equal(current()[0], 112)
 assert.deepEqual(read, [60, 60, 100, 112], 'late replies after hide do not mark read')
 console.log('  ok   chat page bounds history, resumes polling, and ignores background replies')
+assert.deepEqual(sends, [{ token: 'tokA', text: 'hello', replyTo: undefined }])
+
+page.onShow()
+await setImmediate()
+const replyHistory = page.loadOlder()
+requests.at(-1).resolve({ messages: [
+  { ...message(48), message: '  first\n' + 'x'.repeat(41) + '🙂tail' },
+  { ...message(47), isReplyable: false },
+  { ...message(46), systemMessage: 'user_added' }
+], lastGiven: 46 })
+await replyHistory
+for (const id of [999, 47, 46]) page.selectReply(id)
+assert.equal(page.replyId, 0)
+page.selectReply(48)
+assert.equal(page.replySummary, 'first ' + 'x'.repeat(41) + '…')
+assert.equal(page.editing, false, 'long press selects without opening the keyboard')
+page.startReply()
+page.setDraft(' got it ')
+page.clearReply()
+assert.equal(page.replySummary, '')
+assert.equal(page.draft, ' got it ')
+assert.equal(page.editing, false, 'canceling the quote returns to read-only history')
+page.selectReply(48)
+page.startReply()
+sendFailure = true
+const failedReply = page.send()
+page.clearReply()
+assert.equal(page.send(), undefined, 'ignore a second tap while sending')
+await failedReply
+assert.deepEqual(toasts, ['offline'])
+assert.equal(page.replyId, 48)
+assert.equal(page.draft, ' got it ')
+assert.equal(page.editing, true)
+assert.equal(sends.length, 2, 'failed replies are not automatically resent')
+sendFailure = false
+await page.send()
+assert.equal(page.replyId, 0)
+assert.equal(page.draft, '')
+assert.deepEqual(sends.slice(1), [
+  { token: 'tokA', text: 'got it', replyTo: 48 },
+  { token: 'tokA', text: 'got it', replyTo: 48 }
+])
+assert.equal(requests.at(-1).query.lastKnownMessageId, 0, 'a successful history reply returns to the latest page')
+respond([114, 112], 112)
+await setImmediate()
+assert.deepEqual(current(), [114, 112])
+assert.equal(page.browsingHistory, false)
+console.log('  ok   quote selection is bounded and reply failures preserve the draft for manual retry')
