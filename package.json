@@ -14,7 +14,7 @@
     "release:circle": "node scripts/build-watch.cjs release circle",
     "release:rect": "node scripts/build-watch.cjs release rect",
     "icon": "python3 scripts/gen-icon.py",
-    "test": "sh tests/run.sh",
+    "test": "sh tests/run.sh && node tests/build-watch.test.cjs",
     "sync:ime": "sh scripts/sync-input-method.sh"
   },
   "devDependencies": {

@@ -143,7 +143,6 @@ export default {
         if (!saved) return
         state.settings = saved
         state.ready = true
-        state.loggedInOnce = true
         api.configure(saved)
         if (this.link !== link) return
         this.statusText = this.$t('setup.done', { name: saved.displayName || saved.user })

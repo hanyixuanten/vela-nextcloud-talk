@@ -132,7 +132,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 ```
 vela-nextcloud-talk/
 ├── package.json                  # aiot-toolkit 构建脚本
-├── .npmrc                        # npmmirror registry
+├── .npmrc                        # npmmirror registry（CI 可改为官方 npm registry）
 ├── src/
 │   ├── manifest.json             # 包名、路由、features、designWidth
 │   ├── app.ux                    # 启动时读取设置并配置 API client
@@ -181,9 +181,11 @@ vela-nextcloud-talk/
 │   ├── chat.test.mjs             # 聊天交互测试
 │   └── seed-watch-chat.test.mjs  # seed/watch 聊天测试
 ├── scripts/seed-watch-chat.mjs   # 向真机写入测试消息
-└── docs/
-    ├── image-preview.md          # 附件显示调查
-    └── watch-memory-baseline.md  # 手表基线内存
+├── docs/
+│   ├── image-preview.md          # 附件显示调查
+│   └── watch-memory-baseline.md  # 手表基线内存
+├── LICENSE                      # 根仓库 MIT 许可
+├── SECURITY.md                  # 漏洞报告与安全边界
 └── sign/                         # 证书放这里（.gitignore 已排除 pem）
 ```
 

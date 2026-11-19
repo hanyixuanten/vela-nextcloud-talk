@@ -10,7 +10,11 @@ use serde_json::json;
 fn validates_and_normalizes_https_server_urls() {
     assert_eq!(normalize_server(" HTTPS://cloud.example.com/base/// ").as_deref(), Some("https://cloud.example.com/base"));
     assert_eq!(normalize_server("https://[::1]:8443/base").as_deref(), Some("https://[::1]:8443/base"));
-    for invalid in ["http://cloud.example.com", "https://", "https:///path", "https://user@host", "https://host name", "https://host\n", "https://:8443", "https://[]"] {
+    let too_long_host = format!("https://{}", "a".repeat(254));
+    assert!(normalize_server(&too_long_host).is_none());
+    let too_long_label = format!("https://{}.com", "a".repeat(64));
+    assert!(normalize_server(&too_long_label).is_none());
+    for invalid in ["http://cloud.example.com", "https://", "https:///path", "https://user@host", "https://host name", "https://host\n", "https://:8443", "https://[]", "https://[::1", "https://[abc]", "https://[1:2:3]", "https://[1:::2]", "https://[1:2:3:4:5:6:7:8:9]", "https://[1:2:3:4:5:6:7:8:9::]", "https://[::gg]", "https://[::ffff:999.1.1.1]",  "https://[::1]junk", "https://host:", "https://host:abc", "https://host:0", "https://host:65536", "https://.host", "https://host.", "https://a..host", "https://-bad.host", "https://[::1]:", "https://host/path?query", "https://host/path#frag"] {
         assert!(normalize_server(invalid).is_none(), "accepted {invalid:?}");
     }
 }

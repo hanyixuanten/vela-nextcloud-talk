@@ -66,6 +66,7 @@ import prompt from '@system.prompt'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import api from '../../common/scripts/api'
+import manifest from '../../manifest.json'
 
 const FONTS = ['small', 'normal', 'large']
 const FONT_LABEL_KEYS = {
@@ -82,7 +83,7 @@ function nextInList(list, current) {
 
 export default {
   data: {
-    version: '0.2.2',
+    version: manifest.versionName,
     accountLabel: '',
     keyboardType: 'QWERTY',
     pollInterval: 15000,

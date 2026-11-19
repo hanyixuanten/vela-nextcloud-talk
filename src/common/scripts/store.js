@@ -1,9 +1,7 @@
 // Persistent settings on the watch, backed by @system.storage.
 //
 // @system.storage only stores strings, so everything is JSON serialised.
-// Two keys are used:
-//   settings  -> account, UI preferences
-//   markers   -> per-conversation read markers (token -> last read message id)
+// The single key stores account and UI preferences.
 //
 // The application password is stored in the clear inside the app sandbox.
 // Vela offers no keystore API; see docs/design.md for the threat model.
@@ -11,7 +9,6 @@
 import storage from '@system.storage'
 
 const KEY_SETTINGS = 'nctalk.settings'
-const KEY_MARKERS = 'nctalk.markers'
 
 export const DEFAULT_SETTINGS = {
   baseUrl: '',
@@ -86,14 +83,6 @@ function save(settings) {
   return writeRaw(KEY_SETTINGS, JSON.stringify(normalized)).then(() => normalized)
 }
 
-function loadMarkers() {
-  return readRaw(KEY_MARKERS).then((raw) => parseJson(raw, {}))
-}
-
-function saveMarkers(markers) {
-  return writeRaw(KEY_MARKERS, JSON.stringify(markers || {}))
-}
-
 function clearAll() {
   return new Promise((resolve, reject) => {
     try {
@@ -112,7 +101,5 @@ export default {
   hasAccount,
   load,
   save,
-  loadMarkers,
-  saveMarkers,
   clearAll
 }

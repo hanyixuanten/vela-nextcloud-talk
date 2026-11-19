@@ -1,10 +1,14 @@
 <script>
 import store from './common/scripts/store'
 import api from './common/scripts/api'
+import fmt from './common/scripts/format'
 import state from './common/scripts/state'
 
 export default {
   onCreate() {
+    const translate = (key) => this.$t(key)
+    api.setTranslator(translate)
+    fmt.setTranslator(translate)
     // Settings are read once at startup so every page gets a configured API
     // client without repeating storage reads. Pages still call store.load()
     // when they need the freshest values (e.g. right after editing the account).

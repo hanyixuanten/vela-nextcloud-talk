@@ -64,29 +64,33 @@ function getHeader(headers, name) {
   return ''
 }
 
+let translate = (key) => key
+
+function setTranslator(fn) {
+  if (typeof fn === 'function') translate = fn
+}
+
+function translated(key, fallback) {
+  const value = translate(key)
+  return !value || value === key ? fallback : value
+}
+
 function describeStatus(status) {
-  switch (status) {
-    case 400:
-      return '请求被拒绝（参数错误）'
-    case 401:
-      return '账号或应用密码错误'
-    case 403:
-      return '没有权限执行该操作'
-    case 404:
-      return '会话不存在或已被删除'
-    case 412:
-      return '会话尚未开放（等待室）'
-    case 413:
-      return '消息过长'
-    case 429:
-      return '操作过于频繁，请稍后再试'
-    case 502:
-      return '服务器网关错误'
-    case 503:
-      return '服务暂不可用'
-    default:
-      return status >= 500 ? '服务器错误（' + status + '）' : '请求失败（' + status + '）'
+  if (status === 401) return translated('chat.unauthorized', '账号或应用密码错误')
+  const key = 'index.http' + status
+  const fallbacks = {
+    400: '请求被拒绝（参数错误）',
+    403: '没有权限执行该操作',
+    404: '会话不存在或已被删除',
+    412: '会话尚未开放（等待室）',
+    413: '消息过长',
+    429: '操作过于频繁，请稍后再试',
+    502: '服务器网关错误',
+    503: '服务暂不可用'
   }
+  if (Object.prototype.hasOwnProperty.call(fallbacks, status)) return translated(key, fallbacks[status])
+  if (status >= 500) return translated('index.http500', '服务器错误（{status}）').replace('{status}', status)
+  return translated('index.httpOther', '请求失败（{status}）').replace('{status}', status)
 }
 
 function apiError(status, message) {
@@ -106,7 +110,7 @@ function request(options, credentials = account) {
       if (settled) return
       settled = true
       clearTimeout(timeout)
-      const err = apiError(0, '网络请求超时')
+      const err = apiError(0, translated('chat.timeoutError', '网络请求超时'))
       err.code = 'TIMEOUT'
       reject(err)
     }, REQUEST_TIMEOUT_MS)
@@ -174,7 +178,7 @@ function request(options, credentials = account) {
       },
       fail: (data, code) => {
         const detail = typeof data === 'string' ? data : (data && data.data) || ''
-        const err = apiError(0, '网络请求失败' + (detail ? '：' + detail : ''))
+        const err = apiError(0, translated('index.fetchError', '网络请求失败') + (detail ? '：' + detail : ''))
         err.code = code
         finish(reject, err)
       }
@@ -188,7 +192,7 @@ function request(options, credentials = account) {
     try {
       fetch.fetch(params)
     } catch (err) {
-      finish(reject, apiError(0, '网络请求失败：' + ((err && err.message) || err)))
+      finish(reject, apiError(0, translated('index.fetchError', '网络请求失败') + '：' + ((err && err.message) || err)))
     }
   })
 }
@@ -293,6 +297,7 @@ function markRead(token, messageId) {
 }
 
 export default {
+  setTranslator,
   configure,
   isConfigured,
   getCurrentUser,

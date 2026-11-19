@@ -1,6 +1,17 @@
 // Display helpers: timestamps, Rich Object Strings, avatar initials.
 
-const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
+const WEEKDAY_KEYS = ['common.weekdaySun', 'common.weekdayMon', 'common.weekdayTue', 'common.weekdayWed', 'common.weekdayThu', 'common.weekdayFri', 'common.weekdaySat']
+
+let translate = (key) => key
+
+function setTranslator(fn) {
+  if (typeof fn === 'function') translate = fn
+}
+
+function translated(key, fallback) {
+  const value = translate(key)
+  return !value || value === key ? fallback : value
+}
 
 function pad2(value) {
   return value < 10 ? '0' + value : String(value)
@@ -35,7 +46,7 @@ function formatTime(seconds) {
     date.getMonth() === yesterday.getMonth() &&
     date.getDate() === yesterday.getDate()
 
-  if (isYesterday) return '昨天'
+  if (isYesterday) return translated('common.yesterday', '昨天')
 
   if (date.getFullYear() === now.getFullYear()) {
     return date.getMonth() + 1 + '/' + date.getDate()
@@ -50,7 +61,7 @@ function formatClock(seconds) {
 }
 
 function weekday(seconds) {
-  return '周' + WEEKDAYS[new Date(Number(seconds) * 1000).getDay()]
+  return translated(WEEKDAY_KEYS[new Date(Number(seconds) * 1000).getDay()], '周' + ['日', '一', '二', '三', '四', '五', '六'][new Date(Number(seconds) * 1000).getDay()])
 }
 
 /**
@@ -60,7 +71,7 @@ function weekday(seconds) {
  */
 function renderMessage(message) {
   if (!message) return ''
-  if (message.messageType === 'comment_deleted') return '消息已删除'
+  if (message.messageType === 'comment_deleted') return translated('chat.deleted', '消息已删除')
 
   const params = message.messageParameters || {}
   const text = String(message.message == null ? '' : message.message)
@@ -97,7 +108,8 @@ function previewWithAuthor(message) {
 function initials(name) {
   const text = String(name || '').trim()
   if (!text) return '#'
-  return text.charAt(0).toUpperCase()
+  const first = Array.from(text)[0]
+  return first.toUpperCase()
 }
 
 /** Stable color per conversation/user, so avatars stay recognisable. */
@@ -116,6 +128,7 @@ function colorFor(seed) {
 }
 
 export default {
+  setTranslator,
   formatTime,
   formatClock,
   weekday,

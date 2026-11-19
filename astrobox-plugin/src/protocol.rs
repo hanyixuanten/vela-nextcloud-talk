@@ -19,24 +19,103 @@ struct CredentialMessage<'a> {
     request_id: &'a str,
 }
 
+fn ipv6_groups(part: &str) -> Option<usize> {
+    if part.is_empty() { return Some(0); }
+    let segments: Vec<&str> = part.split(':').collect();
+    let mut groups = 0usize;
+    for (index, segment) in segments.iter().enumerate() {
+        if segment.is_empty() { return None; }
+        if segment.contains('.') {
+            if index + 1 != segments.len() { return None; }
+            let octets: Vec<&str> = segment.split('.').collect();
+            if octets.len() != 4 || octets.iter().any(|octet| octet.is_empty() || octet.len() > 3 || !octet.bytes().all(|byte| byte.is_ascii_digit()) || octet.parse::<u8>().is_err()) { return None; }
+            groups += 2;
+        } else {
+            if segment.len() > 4 || !segment.bytes().all(|byte| byte.is_ascii_hexdigit()) { return None; }
+            groups += 1;
+        }
+    }
+    Some(groups)
+}
+
+fn valid_ipv6_literal(address: &str) -> bool {
+    if address.is_empty() || address.contains(":::") || address.matches("::").count() > 1 { return false; }
+    if let Some((left, right)) = address.split_once("::") {
+        match (ipv6_groups(left), ipv6_groups(right)) {
+            (Some(left), Some(right)) => left + right < 8,
+            _ => false,
+        }
+    } else {
+        ipv6_groups(address) == Some(8)
+    }
+}
+
 pub fn normalize_server(server: &str) -> Option<String> {
+    if server.chars().any(char::is_control) {
+        return None;
+    }
     let trimmed = server.trim();
     let (scheme, rest) = trimmed.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("https") || rest.is_empty() || rest.chars().any(char::is_whitespace) {
+    if !scheme.eq_ignore_ascii_case("https")
+        || rest.is_empty()
+        || rest.chars().any(char::is_whitespace)
+        || rest.contains('#')
+        || rest.contains('?')
+    {
         return None;
     }
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = if authority.starts_with('[') {
-        authority.split_once(']').map(|(host, _)| host).unwrap_or("")
-    } else {
-        authority.rsplit_once(':').map_or(authority, |(host, port)| {
-            if port.bytes().all(|byte| byte.is_ascii_digit()) { host } else { authority }
-        })
-    };
-    if authority.is_empty() || host.is_empty() || host.starts_with(':') || authority.contains('@') || authority.chars().any(char::is_control) {
+    if !authority.starts_with('[') && authority.ends_with(':') {
         return None;
     }
-    let normalized = format!("https://{}", rest.trim_end_matches('/'));
+    let host = if authority.starts_with('[') {
+        let (host, suffix) = authority.split_once(']')?;
+        if host.len() <= 1
+            || !(suffix.is_empty() || suffix.starts_with(':'))
+            || suffix.starts_with(':') && suffix.len() == 1
+        {
+            return None;
+        }
+        let address = &host[1..];
+        if !valid_ipv6_literal(address) {
+            return None;
+        }
+        host
+    } else {
+        let host = authority.rsplit_once(':').map_or(authority, |(host, _)| host);
+        if host.is_empty()
+            || host.starts_with('.')
+            || host.ends_with('.')
+            || host.split('.').any(|label| label.is_empty())
+            || host.chars().any(|ch| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '.'))
+            || host.split('.').any(|label| label.starts_with('-') || label.ends_with('-'))
+            || host.len() > 253
+            || host.split('.').any(|label| label.len() > 63)
+        {
+            return None;
+        }
+        host
+    };
+    if authority.is_empty() || host.is_empty() || host.starts_with(':') || authority.contains('@') {
+        return None;
+    }
+    let port = if authority.starts_with('[') {
+        authority.split_once(']')?.1.strip_prefix(':')
+    } else {
+        authority.rsplit_once(':').and_then(|(_, port)| (!port.is_empty()).then_some(port))
+    };
+    if let Some(port) = port {
+        if !port.bytes().all(|byte| byte.is_ascii_digit()) || port.parse::<u16>().ok().filter(|p| *p > 0).is_none() {
+            return None;
+        }
+    } else if authority.starts_with('[') && !authority.ends_with(']') {
+        return None;
+    }
+    let normalized_rest = rest.trim_end_matches('/');
+    if normalized_rest.is_empty() {
+        return None;
+    }
+    let normalized = format!("https://{}", normalized_rest);
     Some(normalized)
 }
 

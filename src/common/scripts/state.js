@@ -21,7 +21,4 @@ export default {
   // Conversation currently open in pages/chat: { token, name, ... }
   activeRoom: null,
 
-  // True when the user already went through the login page once in this run,
-  // used to decide whether "/" or "/setup" should be the landing page.
-  loggedInOnce: false
 }

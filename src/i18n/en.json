@@ -3,6 +3,14 @@
     "name": "Talk"
   },
   "common": {
+    "weekdaySun": "Sun",
+    "weekdayMon": "Mon",
+    "weekdayTue": "Tue",
+    "weekdayWed": "Wed",
+    "weekdayThu": "Thu",
+    "weekdayFri": "Fri",
+    "weekdaySat": "Sat",
+    "yesterday": "Yesterday",
     "cancel": "Cancel",
     "retry": "Retry",
     "back": "Back"
@@ -27,6 +35,17 @@
   "index": {
     "title": "Chats",
     "loading": "Loading…",
+    "fetchError": "Network request failed",
+    "http400": "Request rejected (invalid parameters)",
+    "http403": "You do not have permission to perform this action",
+    "http404": "Conversation not found or deleted",
+    "http412": "Conversation is not open yet (waiting room)",
+    "http413": "Message is too long",
+    "http429": "Too many requests; try again later",
+    "http502": "Bad gateway",
+    "http503": "Service unavailable",
+    "http500": "Server error ({status})",
+    "httpOther": "Request failed ({status})",
     "empty": "No conversations yet",
     "emptyHint": "Create one on the phone or web client",
     "refresh": "Refresh",
@@ -34,6 +53,9 @@
   },
   "chat": {
     "offline": "Offline",
+    "deleted": "Message deleted",
+    "unauthorized": "Account or app password is incorrect. Please sign in again.",
+    "timeoutError": "Network request timed out",
     "placeholder": "Tap to type…",
     "loadolder": "Load older messages",
     "backlatest": "Back to latest",

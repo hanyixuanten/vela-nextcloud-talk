@@ -39,6 +39,10 @@ test('null/undefined are treated as empty', () => {
 })
 
 console.log('\nformat.js')
+fmt.setTranslator((key) => ({
+  'common.yesterday': '昨天',
+  'chat.deleted': '消息已删除'
+}[key] || key))
 
 test('renderMessage substitutes Rich Object placeholders', () => {
   const text = fmt.renderMessage({
@@ -98,8 +102,9 @@ test('formatTime returns empty for missing timestamp', () => {
   assert.equal(fmt.formatTime(undefined), '')
 })
 
-test('initials falls back to #', () => {
+test('initials returns a Unicode code point and falls back to #', () => {
   assert.equal(fmt.initials('alice'), 'A')
+  assert.equal(fmt.initials('😀alice'), '😀')
   assert.equal(fmt.initials('   '), '#')
   assert.equal(fmt.initials(null), '#')
 })

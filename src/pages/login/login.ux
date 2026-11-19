@@ -203,7 +203,6 @@ export default {
         return store.save(candidate).then((saved) => {
           state.settings = saved
           state.ready = true
-          state.loggedInOnce = true
           api.configure(saved)
           prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
           router.replace({ uri: '/' })

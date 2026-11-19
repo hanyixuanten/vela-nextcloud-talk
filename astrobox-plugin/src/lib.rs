@@ -226,8 +226,9 @@ impl event_v3::Guest for TalkCredentialPlugin {
                 if let Some((id, payload)) = send {
                     let timeout_id = id.clone();
                     let timeout_payload = protocol::timeout_payload(&timeout_id);
+                    let timer_payload = timeout_payload.clone();
                     astrobox_ng_wit::spawn(async move {
-                        let _ = timer::set_timeout(TIMEOUT_MS, &timeout_payload).await;
+                        let _ = timer::set_timeout(TIMEOUT_MS, &timer_payload).await;
                     });
                     start_send(id, payload).await;
                 }

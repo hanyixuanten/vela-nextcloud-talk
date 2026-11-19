@@ -12,16 +12,21 @@ if (!['build', 'release'].includes(mode) || !['circle', 'rect'].includes(shape))
 // official Vela conditional comments to staged UX sources before invoking aiot.
 // Limit conditions to the watch shapes we support; no arbitrary expression evaluation.
 function compileUx(source, filename) {
-  const directive = /^\s*(?:<!--|\/\*)\s*(if true: process\.env\.SHAPE === '(CIRCLE|RECT)'|endif)\s*(?:-->|\*\/)\s*$/
+  const directive = /^\s*(<!--|\/\*)\s*(if true: process\.env\.SHAPE === '(CIRCLE|RECT)'|endif)\s*(-->|\*\/)\s*$/
   let target
   const output = []
   for (const line of source.split(/\r?\n/)) {
     const match = directive.exec(line)
     if (match) {
-      if (match[1] === 'endif' ? !target : target) {
+      const isHtml = match[1] === '<!--'
+      if ((isHtml && match[4] !== '-->') || (!isHtml && match[4] !== '*/')) {
+        throw new Error(`Mismatched shape conditional delimiters in ${filename}: ${line.trim()}`)
+      }
+      const command = match[2]
+      if (command === 'endif' ? !target : target) {
         throw new Error(`Unbalanced shape conditional in ${filename}`)
       }
-      target = match[2]?.toLowerCase()
+      target = command === 'endif' ? undefined : match[3].toLowerCase()
     } else if (/(?:<!--|\/\*)\s*(?:if true:|endif\b)/.test(line)) {
       throw new Error(`Unsupported shape conditional in ${filename}: ${line.trim()}`)
     } else if (!target || target === shape) {
@@ -67,6 +72,10 @@ try {
   const packages = fs.existsSync(dist) ? fs.readdirSync(dist).filter(name => name.endsWith('.rpk')) : []
   // aiot 2.0.5 can report signing/compilation errors with status 0.
   if (packages.length !== 1) throw new Error(`aiot ${mode} did not produce exactly one RPK`)
+  if (fs.existsSync(output) && (!fs.statSync(output).isDirectory() || fs.lstatSync(output).isSymbolicLink())) {
+    throw new Error(`Refusing to clean unexpected output path: ${output}`)
+  }
+  if (fs.existsSync(output)) fs.rmSync(output, { recursive: true, force: true })
   fs.mkdirSync(output, { recursive: true })
   const name = packages[0]
   const targetName = `${path.basename(name, '.rpk')}-${shape}.rpk`

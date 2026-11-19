@@ -3,6 +3,14 @@
     "name": "Talk"
   },
   "common": {
+    "weekdaySun": "周日",
+    "weekdayMon": "周一",
+    "weekdayTue": "周二",
+    "weekdayWed": "周三",
+    "weekdayThu": "周四",
+    "weekdayFri": "周五",
+    "weekdaySat": "周六",
+    "yesterday": "昨天",
     "cancel": "取消",
     "retry": "重试",
     "back": "返回"
@@ -27,6 +35,17 @@
   "index": {
     "title": "会话",
     "loading": "正在加载…",
+    "fetchError": "网络请求失败",
+    "http400": "请求被拒绝（参数错误）",
+    "http403": "没有权限执行该操作",
+    "http404": "会话不存在或已被删除",
+    "http412": "会话尚未开放（等待室）",
+    "http413": "消息过长",
+    "http429": "操作过于频繁，请稍后再试",
+    "http502": "服务器网关错误",
+    "http503": "服务暂不可用",
+    "http500": "服务器错误（{status}）",
+    "httpOther": "请求失败（{status}）",
     "empty": "还没有会话",
     "emptyHint": "在手机或网页端创建一个会话吧",
     "refresh": "刷新",
@@ -34,6 +53,9 @@
   },
   "chat": {
     "offline": "离线",
+    "deleted": "消息已删除",
+    "unauthorized": "账号或应用密码错误，请重新登录",
+    "timeoutError": "网络请求超时",
     "placeholder": "点击输入消息…",
     "loadolder": "加载更早消息",
     "backlatest": "返回最新消息",

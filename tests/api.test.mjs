@@ -27,6 +27,11 @@ async function test(name, fn) {
 }
 
 console.log('api.js')
+api.setTranslator((key) => ({
+  'chat.unauthorized': '账号或应用密码错误',
+  'chat.timeoutError': '网络请求超时',
+  'index.fetchError': '网络请求失败'
+}[key] || key))
 
 await test('getCurrentUser returns id and display name', async () => {
   api.configure({ baseUrl: apiBase + '/', user: 'alice', appPassword: 'app-pass-word' })
@@ -214,7 +219,6 @@ await test('404 prefers the server message', async () => {
 })
 
 await test('hung requests reject after the request timeout', async () => {
-  api.configure({ baseUrl: apiBase + '/hang', user: 'a', appPassword: 'b' })
   api.configure({ baseUrl: apiBase + '/hang', user: 'a', appPassword: 'b' })
   const started = Date.now()
   await assert.rejects(

@@ -28,6 +28,7 @@ jobs:
   test:
     name: test (js)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +49,7 @@ jobs:
   test-plugin:
     name: test (plugin protocol)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: astrobox-plugin
@@ -79,13 +81,14 @@ jobs:
           if [ -n "${HTTP_PROXY:-}" ]; then
             export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
           fi
-          cargo test --target x86_64-unknown-linux-gnu --test protocol
+          cargo test --locked --target x86_64-unknown-linux-gnu --test protocol
 
   # ---------------------------------------------------------------------- rpk
   build-rpk:
     name: build (rpk-${{ matrix.shape }})
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +118,7 @@ jobs:
         env:
           PRIVATE_PEM: ${{ secrets.SIGN_PRIVATE_PEM }}
           CERT_PEM: ${{ secrets.SIGN_CERT_PEM }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
           if [ -n "$PRIVATE_PEM" ] && [ -n "$CERT_PEM" ]; then
             umask 077
@@ -127,6 +131,10 @@ jobs:
             echo 'Both SIGN_PRIVATE_PEM and SIGN_CERT_PEM must be configured' >&2
             exit 1
           else
+            if [ "$IS_TAG" = "true" ]; then
+              echo 'Refusing to build a release tag without signing secrets' >&2
+              exit 1
+            fi
             echo 'No signing secrets; building a toolkit-signed debug package'
             echo "mode=build" >> "$GITHUB_OUTPUT"
           fi
@@ -147,7 +155,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpk-${{ matrix.suffix }}
+          name: rpk-${{ steps.signing.outputs.mode == 'release' && 'release' || 'debug' }}-${{ matrix.suffix }}
           path: dist/*-${{ matrix.shape }}.rpk
           if-no-files-found: error
 
@@ -156,6 +164,7 @@ jobs:
     name: build (abp)
     needs: test-plugin
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: astrobox-plugin
