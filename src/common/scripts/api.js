@@ -4,6 +4,7 @@
 //   conversations  GET    /ocs/v2.php/apps/spreed/api/v4/room
 //   messages       GET    /ocs/v2.php/apps/spreed/api/v1/chat/{token}
 //   send message   POST   /ocs/v2.php/apps/spreed/api/v1/chat/{token}
+//   reaction       POST/DELETE /ocs/v2.php/apps/spreed/api/v1/reaction/{token}/{messageId}
 //   read marker    POST   /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
 //   current user   GET    /ocs/v2.php/cloud/user
 //
@@ -229,6 +230,31 @@ function sendMessage(token, text, replyTo) {
   }).then((res) => res.data)
 }
 
+/** Add or remove the current user's reaction. Resolves with emoji counts, or null if unavailable. */
+function setReaction(token, messageId, reaction, active) {
+  const path = TALK_V1 + '/reaction/' + encodeURIComponent(token) + '/' + encodeURIComponent(messageId)
+  // Match the Talk web client: DELETE carries its parameter in the URL, not a body.
+  const options = active
+    ? { path: path, method: 'POST', body: { reaction: reaction } }
+    : { path: path, method: 'DELETE', query: { reaction: reaction } }
+  return request(options).then((res) => {
+    const actorsByReaction = res.data
+    if (!actorsByReaction || typeof actorsByReaction !== 'object') return null
+    // Nextcloud 24 serializes an empty reaction map as [] instead of {}.
+    if (Array.isArray(actorsByReaction)) return actorsByReaction.length ? null : {}
+
+    const counts = {}
+    const reactions = Object.keys(actorsByReaction)
+    for (let i = 0; i < reactions.length; i += 1) {
+      const emoji = reactions[i]
+      const actors = actorsByReaction[emoji]
+      if (!Array.isArray(actors)) return null
+      if (actors.length > 0 && emoji !== '__proto__') counts[emoji] = actors.length
+    }
+    return counts
+  })
+}
+
 /** Tell the server the conversation was read up to `messageId`. */
 function markRead(token, messageId) {
   if (!messageId) return Promise.resolve()
@@ -246,5 +272,6 @@ export default {
   listConversations,
   getMessages,
   sendMessage,
+  setReaction,
   markRead
 }

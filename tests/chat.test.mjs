@@ -14,6 +14,8 @@ const read = []
 const sends = []
 const toasts = []
 let sendFailure = false
+const mutations = []
+const mutate = (counts) => mutations.at(-1).resolve(counts)
 const timers = new Map()
 let timerId = 0
 const message = (id) => ({ id, message: '文字', timestamp: 100, isReplyable: true })
@@ -31,6 +33,8 @@ const ctx = {
       if (sendFailure) throw new Error('offline')
       return message(replyTo ? 114 : 100)
     },
+    setReaction: (token, id, emoji, active) => new Promise((resolve, reject) =>
+      mutations.push({ args: [token, id, emoji, active], resolve, reject })),
     markRead: async (token, id) => read.push(id)
   },
   setTimeout: (fn, delay) => (timers.set(++timerId, { fn, delay }), timerId),
@@ -169,3 +173,59 @@ await setImmediate()
 assert.deepEqual(current(), [114, 112])
 assert.equal(page.browsingHistory, false)
 console.log('  ok   quote selection is bounded and reply failures preserve the draft for manual retry')
+
+const visibleRow = () => page.messages.find((row) => row.id === 114)
+page.selectMessage(114)
+assert.equal(page.actionId, 114)
+assert.equal(page.replyId, 0, 'long press opens actions but does not select a reply')
+page.openPicker()
+assert.deepEqual(Array.from(page.pickerChoices, (item) => item.label), ['👍', '❤️', '😂'])
+assert.equal(page.toggleReaction('💤'), undefined)
+const add = page.toggleReaction('👍')
+assert.deepEqual(mutations.at(-1).args, ['tokA', 114, '👍', true])
+assert.equal(page.pollOnce(), undefined, 'no concurrent read during a reaction mutation')
+assert.equal(page.toggleReaction('👍'), undefined)
+mutate({ '👍': 100, '💤': 400 })
+await add
+assert.equal(visibleRow().reactionSummary, '👍•99+')
+assert.equal(timers.size, 1)
+page.selectMessage(114)
+page.openPicker()
+assert.equal(page.pickerChoices[0].label, '👍−')
+const remove = page.toggleReaction('👍')
+assert.deepEqual(mutations.at(-1).args, ['tokA', 114, '👍', false])
+mutations.at(-1).reject(new Error('read only'))
+await remove
+assert.equal(visibleRow().reactionSummary, '👍•99+')
+assert.equal(toasts.at(-1), 'read only')
+page.selectMessage(114)
+page.openPicker()
+const retry = page.toggleReaction('👍')
+mutate({})
+await retry
+assert.equal(visibleRow().reactionSummary, '')
+assert.equal(visibleRow().reactionMask, 0)
+
+const before = current()
+const readsBefore = read.length
+const pollReactions = page.pollOnce()
+requests.at(-1).resolve({ messages: [
+  { id: 116, systemMessage: 'reaction_revoked', parent: { id: 114, reactions: { '❤️': 2 } } },
+  { id: 115, systemMessage: 'reaction', parent: { id: 114, reactions: { '👍': 1 }, reactionsSelf: ['👍'] } },
+  { id: 117, systemMessage: 'reaction_deleted', parent: { id: 999, deleted: true } }
+], lastGiven: 117 })
+await pollReactions
+assert.deepEqual(current(), before, 'reaction events do not occupy message slots')
+assert.equal(read.length, readsBefore)
+assert.equal(visibleRow().reactionSummary, '❤️2')
+assert.equal(visibleRow().text, '文字')
+tick()
+assert.equal(requests.at(-1).query.lastKnownMessageId, 117)
+respond([], 0, true)
+await setImmediate()
+page.selectMessage(114)
+page.replyToSelection()
+assert.equal(page.replyId, 114)
+assert.equal(page.editing, true)
+page.onHide()
+console.log('  ok   watch adds, removes and syncs bounded reactions without inserting event rows')

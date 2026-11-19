@@ -122,6 +122,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
 | 通知推送 | ❌ | Vela 暂无第三方 app 的推送通道 |
 | 引用回复 | ✅ | 长按可回复的消息 →「回复」；点 × 可取消引用 |
+| 表情反应 | ✅ | 长按普通消息 →「表情」，可添加或撤销 👍、❤️、😂（Talk 14+） |
 | 通话、表情回应 | ❌ | 尚未实现 |
 
 ---
@@ -285,9 +286,8 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 按优先级：
 
 1. 按[文本聊天真机内存基线](docs/watch-memory-baseline.md)验收历史分页、返回最新、后台切换及内存峰值。
-2. 表情回应。
-3. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）。
-4. 离线草稿队列。
+2. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）。
+3. 离线草稿队列。
 
 手表端不做缩略图或图片预览。
 

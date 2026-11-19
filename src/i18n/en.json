@@ -37,6 +37,8 @@
     "loadolder": "Load older messages",
     "backlatest": "Back to latest",
     "reply": "Reply",
+    "react": "React",
+    "reacterror": "Couldn't update reaction",
     "send": "Send",
     "sending": "Sending",
     "empty": "No messages yet",

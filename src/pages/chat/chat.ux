@@ -13,9 +13,10 @@
 
       <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
         <div class="list">
-          <div class="msg {{ $item.mine ? 'msg-mine' : '' }}" for="{{messages}}" @longpress="selectReply($item.id)">
+          <div class="msg {{ $item.mine ? 'msg-mine' : '' }} {{ $item.id === actionId ? 'msg-selected' : '' }}" for="{{messages}}" @longpress="selectMessage($item.id)">
             <text class="msg-meta">{{ $item.meta }}</text>
             <text class="msg-text {{ $item.mine ? 'msg-text-mine' : '' }}" style="font-size: {{ fontSize }}px;">{{ $item.text }}</text>
+            <text class="reaction-summary" if="{{!!$item.reactionSummary}}">{{ $item.reactionSummary }}</text>
           </div>
 
           <div class="placeholder" show="{{!loading && !error && !olderCursor && messages.length === 0}}">
@@ -33,7 +34,21 @@
         </div>
       </scroll>
 
-      <div class="inputbar reply-bar" if="{{replyId > 0}}">
+      <div class="inputbar reply-bar" if="{{actionId > 0}}">
+        <div class="reply-open" if="{{actionReplyable && !pickerOpen}}" @click="replyToSelection">
+          <text class="reply-label">{{ $t('chat.reply') }}</text>
+        </div>
+        <div class="reply-open" if="{{actionReactable && !pickerOpen}}" @click="openPicker">
+          <text class="reply-label">{{ $t('chat.react') }}</text>
+        </div>
+        <div class="reply-open" for="{{pickerChoices}}" @click="toggleReaction($item.emoji)">
+          <text class="reaction-label">{{ $item.label }}</text>
+        </div>
+        <div class="reply-clear" @click="closeActions">
+          <text class="reply-label">×</text>
+        </div>
+      </div>
+      <div class="inputbar reply-bar" if="{{replyId > 0 && !actionId}}">
         <div class="reply-open" @click="startReply">
           <text class="reply-label">{{ $t('chat.reply') }}</text>
         </div>
@@ -41,10 +56,10 @@
           <text class="reply-label">×</text>
         </div>
       </div>
-      <div class="inputbar" show="{{!browsingHistory && !replyId}}" @click="startEdit">
+      <div class="inputbar" show="{{!browsingHistory && !replyId && !actionId}}" @click="startEdit">
         <text class="input-placeholder">{{ $t('chat.placeholder') }}</text>
       </div>
-      <div class="inputbar" show="{{browsingHistory && !replyId}}" @click="loadInitial">
+      <div class="inputbar" show="{{browsingHistory && !replyId && !actionId}}" @click="loadInitial">
         <text class="history-label">{{ $t('chat.backlatest') }}</text>
       </div>
     </div>
@@ -103,6 +118,27 @@ const DRAFT_VIEW_LIMIT = 60
 const REPLY_VIEW_LIMIT = 48
 const PAGE_SIZE = 12
 const WINDOW_SIZE = 24
+const REACTIONS = ['👍', '❤️', '😂']
+
+function reactionMask(message) {
+  const self = message.reactionsSelf
+  return Array.isArray(self) ? REACTIONS.reduce((mask, emoji, i) =>
+    self.indexOf(emoji) >= 0 ? mask | (1 << i) : mask, 0) : 0
+}
+
+function describeReactions(counts, mask) {
+  return REACTIONS.map((emoji, i) => {
+    const count = counts && counts[emoji]
+    return Number.isInteger(count) && count > 0
+      ? emoji + (mask & (1 << i) ? '•' : '') + (count > 99 ? '99+' : count)
+      : ''
+  }).filter(Boolean).join('  ')
+}
+
+function isReactionEvent(message) {
+  const type = message.systemMessage
+  return type === 'reaction' || type === 'reaction_revoked' || type === 'reaction_deleted'
+}
 
 function clipDisplay(value, limit) {
   if (value.length <= limit) return value
@@ -133,6 +169,11 @@ export default {
     draftView: '',
     replyId: 0,
     replySummary: '',
+    actionId: 0,
+    actionReplyable: false,
+    actionReactable: false,
+    pickerOpen: false,
+    pickerChoices: [],
     editing: false,
     loading: false,
     olderCursor: 0,
@@ -154,6 +195,7 @@ export default {
     this.initialised = false
     this.visible = false
     this.receiving = false
+    this.reacting = false
 
     this.settingsReady = store.load().then((settings) => {
       state.settings = settings
@@ -180,6 +222,7 @@ export default {
 
   onHide() {
     this.visible = false
+    this.closeActions()
     this.stopPolling()
   },
 
@@ -189,7 +232,7 @@ export default {
 
   schedulePoll(delay) {
     this.stopPolling()
-    if (!this.visible || this.browsingHistory || this.receiving) return
+    if (!this.visible || this.browsingHistory || this.receiving || this.reacting) return
     this.timer = setTimeout(() => {
       this.timer = null
       if (this.initialised) this.pollOnce()
@@ -220,9 +263,10 @@ export default {
 
   // Serialize message reads, including retries and foreground transitions.
   receive(mode) {
-    if (!this.visible || !this.token || this.receiving) return
+    if (!this.visible || !this.token || this.receiving || this.reacting) return
     this.stopPolling()
     this.receiving = true
+    if (mode !== 'forward') this.closeActions()
     const forward = mode === 'forward'
     const older = mode === 'older'
     const cursor = forward ? this.forwardCursor : (older ? this.olderCursor : 0)
@@ -238,13 +282,31 @@ export default {
       timeout: 0
     }).then((result) => {
       if (!this.visible) return
-      const views = result.messages.map((message) => this.toView(message))
+      const snapshots = Object.create(null)
+      let rawFirst = 0
+      let rawLast = 0
+      const views = []
+      result.messages.forEach((message) => {
+        const id = Number(message.id) || 0
+        if (id > 0) {
+          rawFirst = Math.max(rawFirst, id)
+          rawLast = rawLast ? Math.min(rawLast, id) : id
+        }
+        if (!isReactionEvent(message)) {
+          views.push(this.toView(message))
+          return
+        }
+        if (!forward || !message.parent || message.parent.deleted) return
+        const parentId = Number(message.parent.id)
+        if (parentId > 0 && (!snapshots[parentId] || id > snapshots[parentId].id)) {
+          snapshots[parentId] = { id, parent: message.parent }
+        }
+      })
       views.sort((a, b) => b.id - a.id)
       const first = views.length ? views[0].id : 0
-      const last = views.length ? views[views.length - 1].id : 0
       if (older) {
         // The header may include filtered rows, so a short page is not EOF.
-        const previous = result.lastGiven || last
+        const previous = result.lastGiven || rawLast
         this.olderCursor = !result.notModified && previous > 0 && previous < cursor ? previous : 0
         this.mergeViews(views.filter((view) => view.id < cursor), true)
         this.browsingHistory = true
@@ -256,21 +318,32 @@ export default {
           if (scroll && scroll.scrollTo) scroll.scrollTo({ top: 0 })
         }
         this.messages = []
-        this.forwardCursor = first || result.lastGiven || 0
-        this.olderCursor = result.lastGiven || last
+        this.forwardCursor = rawFirst || result.lastGiven || 0
+        this.olderCursor = result.lastGiven || rawLast
         this.browsingHistory = false
         this.initialised = true
       } else {
-        this.forwardCursor = Math.max(cursor, result.lastGiven || 0, first)
+        this.forwardCursor = Math.max(cursor, result.lastGiven || 0, rawFirst)
       }
       if (views.length) {
         const trimmed = this.mergeViews(views, false)
         if (forward && (trimmed || !this.olderCursor)) {
           this.olderCursor = this.messages[this.messages.length - 1].id
         }
-        // Exit this continuation before keeping raw message data around for another request.
-        if (first > (forward ? cursor : 0)) return first
       }
+      if (forward && Object.keys(snapshots).length) {
+        this.messages = this.messages.map((row) => {
+          const event = snapshots[row.id]
+          if (!row.reactable || !event) return row
+          const mask = reactionMask(event.parent)
+          return Object.assign({}, row, {
+            reactionMask: mask,
+            reactionSummary: describeReactions(event.parent.reactions, mask)
+          })
+        })
+        if (this.pickerOpen) this.openPicker()
+      }
+      if (first > (forward ? cursor : 0)) return first
     }).then((id) => {
       if (id && this.visible) return api.markRead(this.token, id).catch(() => undefined)
     }).catch((err) => {
@@ -288,6 +361,7 @@ export default {
     all.sort((a, b) => b.id - a.id)
     const unique = all.filter((view, i) => i === 0 || all[i - 1].id !== view.id)
     this.messages = keepOldest ? unique.slice(-WINDOW_SIZE) : unique.slice(0, WINDOW_SIZE)
+    if (this.actionId && !this.messages.some((row) => row.id === this.actionId)) this.closeActions()
     return unique.length > WINDOW_SIZE
   },
 
@@ -296,19 +370,92 @@ export default {
     const isSystem = Boolean(message.systemMessage)
     const mine = !isSystem && actorId === this.myUser
     const author = clipDisplay(String(message.actorDisplayName || ''), 48)
+    const reactable = !isSystem && message.deleted !== true && (!message.messageType || message.messageType === 'comment')
+    const mask = reactable ? reactionMask(message) : 0
 
     return {
       id: Number(message.id),
       text: clipDisplay(fmt.renderMessage(message), 512),
       meta: mine ? fmt.formatClock(message.timestamp) : author + ' · ' + fmt.formatClock(message.timestamp),
       mine: mine,
-      replyable: !isSystem && message.isReplyable === true
+      replyable: !isSystem && message.isReplyable === true,
+      reactable,
+      reactionMask: mask,
+      reactionSummary: reactable ? describeReactions(message.reactions, mask) : ''
     }
   },
 
   /* ------------------------------------------------------------------ */
   /* composing                                                           */
   /* ------------------------------------------------------------------ */
+
+  selectMessage(id) {
+    if (!this.visible || !this.initialised || this.loading || this.sending || this.editing || this.reacting) return
+    if (!Number.isSafeInteger(id) || id <= 0) return
+    const row = this.messages.find((message) => message.id === id)
+    if (!row || (!row.replyable && !row.reactable)) return
+    this.closeActions()
+    this.actionId = id
+    this.actionReplyable = row.replyable
+    this.actionReactable = row.reactable
+  },
+
+  closeActions() {
+    this.actionId = 0
+    this.actionReplyable = false
+    this.actionReactable = false
+    this.pickerOpen = false
+    this.pickerChoices = []
+  },
+
+  replyToSelection() {
+    const id = this.actionId
+    this.closeActions()
+    this.selectReply(id)
+    if (this.replyId === id && id > 0) this.startReply()
+  },
+
+  openPicker() {
+    const row = this.messages.find((message) => message.id === this.actionId)
+    if (!row || !row.reactable || this.reacting) return
+    this.pickerChoices = REACTIONS.map((emoji, i) => ({
+      emoji,
+      label: emoji + (row.reactionMask & (1 << i) ? '−' : '')
+    }))
+    this.pickerOpen = true
+  },
+
+  toggleReaction(emoji) {
+    const i = REACTIONS.indexOf(emoji)
+    if (i < 0 || !this.visible || !this.pickerOpen || this.reacting) return
+    if (this.receiving) {
+      prompt.showToast({ message: this.$t('index.loading'), duration: 1500 })
+      return
+    }
+    const id = this.actionId
+    const row = this.messages.find((message) => message.id === id)
+    if (!row || !row.reactable) return
+    const bit = 1 << i
+    const active = !(row.reactionMask & bit)
+    this.reacting = true
+    this.stopPolling()
+    this.closeActions()
+    return api.setReaction(this.token, id, emoji, active).then((counts) => {
+      this.messages = this.messages.map((message) => {
+        if (message.id !== id) return message
+        const mask = active ? message.reactionMask | bit : message.reactionMask & ~bit
+        return Object.assign({}, message, {
+          reactionMask: mask,
+          reactionSummary: counts ? describeReactions(counts, mask) : message.reactionSummary
+        })
+      })
+    }).catch((err) => {
+      if (this.visible) prompt.showToast({ message: (err && err.message) || this.$t('chat.reacterror'), duration: 2000 })
+    }).then(() => {
+      this.reacting = false
+      this.schedulePoll(this.pollInterval)
+    })
+  },
 
   selectReply(id) {
     if (!this.visible || !this.initialised || this.loading || this.sending || this.editing) return
@@ -484,6 +631,21 @@ export default {
 
 .msg-text-mine {
   text-align: right;
+}
+
+.msg-selected {
+  background-color: #24526c;
+}
+
+.reaction-summary {
+  margin-top: 4px;
+  color: #b8d9fa;
+  font-size: 16px;
+}
+
+.reaction-label {
+  font-size: 24px;
+  color: #ffffff;
 }
 
 .placeholder {

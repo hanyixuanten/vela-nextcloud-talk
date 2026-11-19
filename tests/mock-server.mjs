@@ -62,6 +62,23 @@ export const EXPECTED = { USER, APP_PASSWORD, ROOMS, MESSAGES }
 
 export function start() {
   const messages = MESSAGES.slice()
+  const aliceReaction = { actorType: 'users', actorId: USER, actorDisplayName: 'Alice A.', timestamp: 121 }
+  const reactionsById = new Map([
+    [10, Object.assign(Object.create(null), {
+      '👍': [{ actorType: 'users', actorId: 'ann', actorDisplayName: 'Ann', timestamp: 119 }]
+    })]
+  ])
+  const withReactions = (message) => {
+    const reactions = reactionsById.get(message.id)
+    if (!reactions || !Object.keys(reactions).length) return message
+    const counts = {}
+    const own = []
+    Object.keys(reactions).forEach((emoji) => {
+      counts[emoji] = reactions[emoji].length
+      if (reactions[emoji].some((actor) => actor.actorId === USER)) own.push(emoji)
+    })
+    return { ...message, reactions: counts, ...(own.length ? { reactionsSelf: own } : {}) }
+  }
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (chunk) => {
@@ -113,6 +130,44 @@ export function start() {
         return
       }
 
+      const url = new URL(req.url, 'http://localhost')
+      const reactionRoute = /^\/ocs\/v2\.php\/apps\/spreed\/api\/v1\/reaction\/([^/]+)\/(\d+)$/.exec(url.pathname)
+      if (reactionRoute) {
+        const messageId = Number(reactionRoute[2])
+        const message = messages.find((row) => row.id === messageId && row.token === reactionRoute[1])
+        const fail = (code, msg) => sendJson(code, {
+          ocs: { meta: { status: 'failure', statuscode: code, message: msg }, data: null }
+        })
+        if (!message) return fail(404, 'Message not found')
+        if (req.method !== 'POST' && req.method !== 'DELETE') return fail(405, 'Method not allowed')
+
+        let reaction
+        try {
+          reaction = req.method === 'POST' ? JSON.parse(body).reaction : url.searchParams.get('reaction')
+        } catch (_) {
+          return fail(400, 'Invalid reaction payload')
+        }
+        if (!reaction || typeof reaction !== 'string') return fail(400, 'Reaction required')
+        // Exercise a successful mutation without a usable reaction map.
+        if (reaction === '🫥') return envelope(null)
+
+        const reactions = reactionsById.get(messageId) || Object.create(null)
+        const actors = reactions[reaction] || []
+        const ownIndex = actors.findIndex((actor) => actor.actorId === USER)
+        if (req.method === 'DELETE') {
+          if (ownIndex < 0) return fail(404, 'Reaction not found')
+          actors.splice(ownIndex, 1)
+          if (!actors.length) delete reactions[reaction]
+          // Use both current {} and Nextcloud 24's [] when the last reaction is removed.
+          return envelope(messageId === 12 && !Object.keys(reactions).length ? [] : reactions)
+        }
+        if (ownIndex >= 0) return envelope(reactions)
+        actors.push(aliceReaction)
+        reactions[reaction] = actors
+        reactionsById.set(messageId, reactions)
+        return sendJson(201, { ocs: { meta: { status: 'ok', statuscode: 201, message: 'OK' }, data: reactions } })
+      }
+
       if (req.url.indexOf('/chat/tokA/read') >= 0) {
         if (req.method !== 'POST') {
           sendJson(405, {})
@@ -159,7 +214,7 @@ export function start() {
           return
         }
 
-        const query = new URL(req.url, 'http://localhost').searchParams
+        const query = url.searchParams
         const cursor = Number(query.get('lastKnownMessageId'))
         const limit = Number(query.get('limit'))
         const forward = query.get('lookIntoFuture') === '1'
@@ -169,7 +224,7 @@ export function start() {
         if (!page.length) {
           res.writeHead(304).end()
         } else {
-          envelope(page, { 'X-Chat-Last-Given': String(page.at(-1).id) })
+          envelope(page.map(withReactions), { 'X-Chat-Last-Given': String(page.at(-1).id) })
         }
         return
       }

@@ -64,6 +64,7 @@ GET /ocs/v2.php/apps/spreed/api/v1/chat/{token}?lookIntoFuture=1&timeout=0&limit
 - 向前方向（`1`）：查询游标后的消息，`timeout=0` 不等待新消息。
 - `X-Chat-Last-Given` 是当前方向的下一页游标，可能指向被过滤、未出现在响应列表中的记录；无此头时用消息 ID 的最小值（历史）或最大值（向前）。客户端按 ID 倒序展示，不依赖服务器排序。
 - `304` 表示没有该方向的更多消息，不是请求错误。拉取不自动写已读；支持 `chat-keep-notifications` 时也禁止 GET 自动清除提醒。
+- 回应变化可能随向前轮询返回为 `messageType: "system"`、`systemMessage: "reaction"` / `"reaction_revoked"` / `"reaction_deleted"` 的记录。这些记录本身不作为普通消息展示；若带有原消息的 `parent` 快照，可据其 `id` 更新已加载消息的回应字段。推进游标仍以 `X-Chat-Last-Given` 为准，无需开启 `includeLastKnown`。
 
 ### 发送消息
 
@@ -77,6 +78,21 @@ POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}
 成功返回 `201`，`ocs.data` 是新建消息对象（含 `id`、`timestamp`），可以直接上屏，不必重新拉列表。回复的发送结果和后续拉取都可以带 `parent`：正常情况下是被回复的完整消息对象，但不再嵌套 `parent`；拉取时如果原消息已删除，可以收到 `{ "id": 12345, "deleted": true }`。普通消息没有 `parent`。
 
 兼容性：上游从 Talk 8.0 开始提供 [`chat-replies`](https://nextcloud-talk.readthedocs.io/en/stable/capabilities/#80) capability，消息上的 `isReplyable` 标明是否可回复。本应用已使用 Talk 12.0 引入的 `conversation-v4`，无需更换聊天端点；普通发送不依赖回复能力。参见上游[发送消息](https://nextcloud-talk.readthedocs.io/en/stable/chat/#sending-a-new-chat-message)和[父消息结构](https://nextcloud-talk.readthedocs.io/en/stable/chat/#parent-data)。
+
+### 添加 / 撤销消息回应
+
+```
+POST /ocs/v2.php/apps/spreed/api/v1/reaction/{token}/{messageId}
+{ "reaction": "👍" }
+
+DELETE /ocs/v2.php/apps/spreed/api/v1/reaction/{token}/{messageId}?reaction=%F0%9F%91%8D
+```
+
+`setReaction(token, messageId, reaction, active)` 在 `active` 为 `true` 时发送 POST，`false` 时发送 DELETE。与 Talk 网页客户端一致：添加用 JSON body，撤销用 URL 编码的查询参数，不发送 body。新添加返回 `201`，已添加同一表情返回 `200`，撤销成功返回 `200`；找不到消息或要撤销的回应时可能返回 `404`。
+
+成功时，`ocs.data` 是该消息完整的「表情 → 回应者列表」（没有回应时为 `{}`，Nextcloud 24 可能为 `[]`），不等于聊天消息中的计数。客户端将列表长度转换为「表情 → 总数」，如果响应没有可用映射则返回 `null`，与有效的空映射 `{}` 区分。当前用户已点选的表情由聊天消息的 `reactionsSelf` 提供；本次操作成功后可按 `active` 更新当前表情的选中状态。
+
+上游从 Talk 14 / Nextcloud 24 开始提供 `reactions` capability。消息中缺少回应字段不代表服务器不支持回应。服务器只允许对符合条件的消息操作，并检查会话只读状态和参与者权限。参见上游[回应管理](https://nextcloud-talk.readthedocs.io/en/stable/reaction/)和[消息字段](https://nextcloud-talk.readthedocs.io/en/stable/chat/#receive-chat-messages-of-a-conversation)。
 
 ### 已读标记
 
@@ -118,5 +134,7 @@ POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
 | `messageType` | `comment` / `comment_deleted` / `system` / `command` |
 | `isReplyable` | 服务器标记此消息是否可回复 |
 | `parent` | 可选的被回复消息对象，或已删除标记 `{ id, deleted: true }` |
+| `reactions` | 可选的「表情 → 总回应数」映射 |
+| `reactionsSelf` | 可选的当前用户已回应的表情数组；未回应时可能不返回 |
 
 Rich Object String 的展开在 `format.js` 的 `renderMessage()`：把 `{file}` 这类占位符替换成 `messageParameters.file.name`，未知占位符原样保留，避免信息丢失。

@@ -126,6 +126,45 @@ await test('sendMessage surfaces an invalid reply target without retrying as a p
   assert.equal(seen.length, before + 1)
 })
 
+await test('setReaction adds via JSON, returning all emoji counts for new and duplicate reactions', async () => {
+  const expected = { '👍': 2, '❤️': 1 }
+  await api.setReaction('tokA', 10, '❤️', true)
+  assert.deepEqual(await api.setReaction('tokA', 10, '👍', true), expected)
+  const request = seen.at(-1)
+  assert.equal(request.method, 'POST')
+  assert.equal(request.url, '/ocs/v2.php/apps/spreed/api/v1/reaction/tokA/10')
+  assert.deepEqual(JSON.parse(request.body), { reaction: '👍' })
+  assert.deepEqual(await api.setReaction('tokA', 10, '👍', true), expected)
+
+  const history = await api.getMessages('tokA')
+  const message = history.messages.find((row) => row.id === 10)
+  assert.deepEqual(message.reactions, expected)
+  assert.deepEqual(message.reactionsSelf, ['👍', '❤️'])
+})
+
+await test('setReaction removes via encoded DELETE query and preserves other actors', async () => {
+  assert.deepEqual(await api.setReaction('tokA', 10, '❤️', false), { '👍': 2 })
+  const request = seen.at(-1)
+  assert.equal(request.method, 'DELETE')
+  assert.equal(request.url, '/ocs/v2.php/apps/spreed/api/v1/reaction/tokA/10?reaction=' + encodeURIComponent('❤️'))
+  assert.equal(request.body, '')
+  assert.deepEqual(await api.setReaction('tokA', 10, '👍', false), { '👍': 1 })
+  const history = await api.getMessages('tokA')
+  const message = history.messages.find((row) => row.id === 10)
+  assert.deepEqual(message.reactions, { '👍': 1 })
+  assert.equal(message.reactionsSelf, undefined)
+})
+
+await test('setReaction distinguishes an empty map from missing counts and propagates 404', async () => {
+  await api.setReaction('tokA', 11, '👍', true)
+  assert.deepEqual(await api.setReaction('tokA', 11, '👍', false), {})
+  await api.setReaction('tokA', 12, '👍', true)
+  assert.deepEqual(await api.setReaction('tokA', 12, '👍', false), {})
+  assert.equal(await api.setReaction('tokA', 11, '🫥', true), null)
+  await assert.rejects(api.setReaction('tokA', 11, '👍', false), { status: 404, message: 'Reaction not found' })
+  await assert.rejects(api.setReaction('tokA', 999, '👍', true), { status: 404, message: 'Message not found' })
+})
+
 await test('markRead sends a POST with lastReadMessage', async () => {
   await api.markRead('tokA', 11)
   const request = seen.at(-1)
