@@ -22,6 +22,6 @@ export default {
   activeRoom: null,
 
   // True when the user already went through the login page once in this run,
-  // used to decide whether "/" or "/login" should be the landing page.
+  // used to decide whether "/" or "/setup" should be the landing page.
   loggedInOnce: false
 }

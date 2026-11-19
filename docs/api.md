@@ -10,7 +10,7 @@
 | `OCS-APIRequest` | `true` | 缺了会返回登录页 HTML，解析报错难以定位 |
 | `Accept` | `application/json` | Talk 的 `reactions` 结构会让 XML 响应非法 |
 
-POST/PUT 额外带 `Content-Type: application/json`，body 为 JSON 字符串。
+POST 额外带 `Content-Type: application/json`，body 为 JSON 字符串。
 
 ## 响应信封
 
@@ -61,7 +61,7 @@ GET /ocs/v2.php/apps/spreed/api/v1/chat/{token}?lookIntoFuture=1&timeout=0&limit
 ```
 
 - 历史方向（`0`）：无游标取最近一页；带游标只取更早的消息。
-- 向前方向（`1`）：查询游标后的消息，`timeout=0` 不等待新消息。
+- 向前方向（`1`）：查询游标后的消息，客户端短轮询不设置 `timeout`，避免请求长期挂起。
 - `X-Chat-Last-Given` 是当前方向的下一页游标，可能指向被过滤、未出现在响应列表中的记录；无此头时用消息 ID 的最小值（历史）或最大值（向前）。客户端按 ID 倒序展示，不依赖服务器排序。
 - `304` 表示没有该方向的更多消息，不是请求错误。拉取不自动写已读；支持 `chat-keep-notifications` 时也禁止 GET 自动清除提醒。
 - 回应变化可能随向前轮询返回为 `messageType: "system"`、`systemMessage: "reaction"` / `"reaction_revoked"` / `"reaction_deleted"` 的记录。这些记录本身不作为普通消息展示；若带有原消息的 `parent` 快照，可据其 `id` 更新已加载消息的回应字段。推进游标仍以 `X-Chat-Last-Given` 为准，无需开启 `includeLastKnown`。
@@ -105,7 +105,7 @@ POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
 
 ## 错误映射
 
-`describeStatus()` 把 HTTP 状态翻译成人话，直接显示在界面上：
+`describeStatus()` 把 HTTP 状态翻译成人话，直接显示在界面上。请求另有 20 秒客户端超时，避免网络调用永久悬挂。
 
 | HTTP | 界面文案 | 常见原因 |
 | --- | --- | --- |

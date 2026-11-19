@@ -9,6 +9,7 @@ import api from './.build/api.mjs'
 
 const server = await start()
 const base = 'http://127.0.0.1:' + server.address().port
+const apiBase = 'https://127.0.0.1:' + server.address().port
 
 let passed = 0
 let failed = 0
@@ -28,10 +29,17 @@ async function test(name, fn) {
 console.log('api.js')
 
 await test('getCurrentUser returns id and display name', async () => {
-  api.configure({ baseUrl: base + '/', user: 'alice', appPassword: 'app-pass-word' })
+  api.configure({ baseUrl: apiBase + '/', user: 'alice', appPassword: 'app-pass-word' })
   const user = await api.getCurrentUser()
   assert.equal(user.id, 'alice')
   assert.equal(user.displayName, 'Alice A.')
+})
+
+await test('rejects plaintext HTTP credentials before making a request', async () => {
+  await assert.rejects(
+    () => api.getCurrentUser({ baseUrl: 'http://example.com', user: 'a', appPassword: 'b' }),
+    (err) => /HTTPS/.test(err.message)
+  )
 })
 
 await test('validating a rejected candidate preserves the live account', async () => {
@@ -77,13 +85,15 @@ await test('getMessages follows the history cursor', async () => {
   assert.equal(request.get('timeout'), null)
 })
 
-await test('forward polling waits zero seconds and handles 304', async () => {
+await test('forward polling follows cursor and handles empty 304 without timeout query', async () => {
   const poll = await api.getMessages('tokA', { lastKnownMessageId: 10, lookIntoFuture: 1 })
   assert.deepEqual(poll.messages.map((row) => row.id), [11])
   assert.equal(poll.lastGiven, 11)
   const request = new URL(seen.at(-1).url, base).searchParams
+  assert.equal(request.get('lastKnownMessageId'), '10')
   assert.equal(request.get('lookIntoFuture'), '1')
-  assert.equal(request.get('timeout'), '0')
+  assert.equal(request.get('timeout'), null)
+  assert.equal(request.get('setReadMarker'), '0')
   const empty = await api.getMessages('tokA', { lastKnownMessageId: 11, lookIntoFuture: 1 })
   assert.deepEqual(empty, { messages: [], lastGiven: 0, notModified: true })
 })
@@ -180,7 +190,7 @@ await test('markRead without an id is a no-op', async () => {
 })
 
 await test('401 maps to a credential error', async () => {
-  api.configure({ baseUrl: base, user: 'alice', appPassword: 'wrong' })
+  api.configure({ baseUrl: apiBase, user: 'alice', appPassword: 'wrong' })
   await assert.rejects(
     () => api.getCurrentUser(),
     (err) => {
@@ -192,7 +202,7 @@ await test('401 maps to a credential error', async () => {
 })
 
 await test('404 prefers the server message', async () => {
-  api.configure({ baseUrl: base, user: 'alice', appPassword: 'app-pass-word' })
+  api.configure({ baseUrl: apiBase, user: 'alice', appPassword: 'app-pass-word' })
   await assert.rejects(
     () => api.getMessages('notfound', {}),
     (err) => {
@@ -203,8 +213,19 @@ await test('404 prefers the server message', async () => {
   )
 })
 
+await test('hung requests reject after the request timeout', async () => {
+  api.configure({ baseUrl: apiBase + '/hang', user: 'a', appPassword: 'b' })
+  api.configure({ baseUrl: apiBase + '/hang', user: 'a', appPassword: 'b' })
+  const started = Date.now()
+  await assert.rejects(
+    () => api.getCurrentUser(),
+    (err) => err.status === 0 && err.code === 'TIMEOUT'
+  )
+  assert.ok(Date.now() - started < api.REQUEST_TIMEOUT_MS + 2000)
+})
+
 await test('unreachable host reports a network error', async () => {
-  api.configure({ baseUrl: 'http://127.0.0.1:1', user: 'a', appPassword: 'b' })
+  api.configure({ baseUrl: apiBase.replace(/:\d+$/, ':1'), user: 'a', appPassword: 'b' })
   await assert.rejects(
     () => api.getCurrentUser(),
     (err) => {

@@ -21,7 +21,7 @@
     "next": "Next",
     "done": "Done",
     "errRequired": "All three fields are required",
-    "errScheme": "Address must start with http:// or https://",
+    "errScheme": "Server address must use https://",
     "saved": "Connected"
   },
   "index": {
@@ -33,6 +33,7 @@
     "settings": "Settings"
   },
   "chat": {
+    "offline": "Offline",
     "placeholder": "Tap to type…",
     "loadolder": "Load older messages",
     "backlatest": "Back to latest",
@@ -59,12 +60,14 @@
     "about": "About",
     "screenCircle": "Round",
     "screenRect": "Square",
-    "screenPill": "Capsule",
     "fontSmall": "Small",
     "fontNormal": "Normal",
     "fontLarge": "Large",
+    "saveFailed": "Could not save settings. Please try again.",
     "seconds": "s",
-    "cleared": "Cleared"
+    "cleared": "Cleared",
+    "clearFailed": "Could not clear data. Please try again.",
+    "clearAgain": "Tap again to confirm clearing"
   },
   "setup": {
     "title": "Set up from phone",

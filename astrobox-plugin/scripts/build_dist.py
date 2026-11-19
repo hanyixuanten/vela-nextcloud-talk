@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def run_cargo_build(root_dir, cargo_args):
-    cmd = ["cargo", "build", *cargo_args]
+    cmd = ["cargo", "build", "--locked", *cargo_args]
     result = subprocess.run(cmd, cwd=root_dir)
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -200,6 +200,11 @@ def main():
         sys.exit(1)
 
     dist_dir = root_dir / "dist"
+    if dist_dir.is_symlink() or dist_dir.resolve() != (root_dir / "dist").resolve():
+        sys.stderr.write(f"refusing to clean unexpected dist path: {dist_dir}\n")
+        sys.exit(1)
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
     dist_dir.mkdir(parents=True, exist_ok=True)
 
     copy_item(root_dir, dist_dir, "manifest.json")

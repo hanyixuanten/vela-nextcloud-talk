@@ -71,8 +71,8 @@ fn begin_send() -> Option<(String, String)> {
             state.status = Status::Err("服务器、用户名、应用密码都要填。".to_string());
             return None;
         }
-        if !(server.starts_with("http://") || server.starts_with("https://")) {
-            state.status = Status::Err("服务器地址要以 http:// 或 https:// 开头。".to_string());
+        if protocol::normalize_server(server).is_none() {
+            state.status = Status::Err("请输入有效的 HTTPS 服务器地址。".to_string());
             return None;
         }
 
@@ -101,10 +101,9 @@ fn fail_send(id: &str, message: &str) {
     }
 }
 
-async fn start_send() {
-    let send = begin_send();
-    ui::render(&state::snapshot());
-    let Some((id, payload)) = send else { return };
+async fn start_send(id: String, payload: String) {
+    // The timeout is started from a detached task by the click handler, before
+    // any host future here can stall.
 
     // Always enumerate again on click. Never guess a target for credentials
     // if more than one device is connected.
@@ -140,6 +139,9 @@ async fn start_send() {
             pending.addr = Some(addr.clone());
         }
     });
+    if !state::with(|state| state.pending.as_ref().is_some_and(|pending| pending.id == id)) {
+        return;
+    }
 
     if interconnect::send_qaic_message(&addr, protocol::PKG_NAME, &payload).await.is_err() {
         tracing::warn!("could not submit Talk interconnect message");
@@ -149,10 +151,7 @@ async fn start_send() {
     state::with(|state| state.app_installed = Some(true));
 
     // Success from the host means the message was submitted, not that the
-    // watch saved the credentials. Only the watch ACK confirms that.
-    if state::with(|state| state.pending.as_ref().is_some_and(|p| p.id == id)) {
-        let _ = timer::set_timeout(TIMEOUT_MS, &protocol::timeout_payload(&id)).await;
-    }
+    // watch saved the credentials. The detached timeout waits for the ACK.
 }
 
 fn handle_ack(payload: &str) {
@@ -222,7 +221,16 @@ impl event_v3::Guest for TalkCredentialPlugin {
         // don't leave detached host work for the old runtime to drain.
         astrobox_ng_wit::spawn(async move {
             if event_id == ui::EV_SEND && matches!(event, Event::Click) {
-                start_send().await;
+                let send = begin_send();
+                ui::render(&state::snapshot());
+                if let Some((id, payload)) = send {
+                    let timeout_id = id.clone();
+                    let timeout_payload = protocol::timeout_payload(&timeout_id);
+                    astrobox_ng_wit::spawn(async move {
+                        let _ = timer::set_timeout(TIMEOUT_MS, &timeout_payload).await;
+                    });
+                    start_send(id, payload).await;
+                }
             } else if matches!(event, Event::Input | Event::Change) {
                 let value = parse_input_value(&event_payload);
                 let changed = state::with(|state| {
@@ -238,6 +246,7 @@ impl event_v3::Guest for TalkCredentialPlugin {
                     true
                 });
                 if changed {
+                    state::with(|state| state.status = Status::Idle);
                     ui::render(&state::snapshot());
                 }
             }

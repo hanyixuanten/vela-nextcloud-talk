@@ -3,8 +3,17 @@
 #[path = "../src/protocol.rs"]
 mod protocol;
 
-use protocol::{PKG_NAME, parse_ack, timeout_matches, timeout_payload};
+use protocol::{PKG_NAME, normalize_server, parse_ack, timeout_matches, timeout_payload};
 use serde_json::json;
+
+#[test]
+fn validates_and_normalizes_https_server_urls() {
+    assert_eq!(normalize_server(" HTTPS://cloud.example.com/base/// ").as_deref(), Some("https://cloud.example.com/base"));
+    assert_eq!(normalize_server("https://[::1]:8443/base").as_deref(), Some("https://[::1]:8443/base"));
+    for invalid in ["http://cloud.example.com", "https://", "https:///path", "https://user@host", "https://host name", "https://host\n", "https://:8443", "https://[]"] {
+        assert!(normalize_server(invalid).is_none(), "accepted {invalid:?}");
+    }
+}
 
 #[test]
 fn builds_v1_credentials_with_request_id() {
@@ -41,7 +50,7 @@ fn reads_current_astrobox_ack_envelope_and_checks_routing() {
 #[test]
 fn accepts_legacy_and_string_encoded_ack() {
     let legacy = parse_ack(r#"{"ok":false}"#).unwrap();
-    assert!(legacy.matches("AA:BB", "123-1"));
+    assert!(!legacy.matches("AA:BB", "123-1"));
     assert!(!legacy.ack.ok);
     assert_eq!(legacy.ack.message, "");
     assert_eq!(legacy.ack.display_name, "");

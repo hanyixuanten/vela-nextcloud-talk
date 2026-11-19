@@ -8,7 +8,7 @@
         <div class="back" @click="goBack">
           <text class="back-text">‹</text>
         </div>
-        <text class="title">{{ title }}</text>
+        <text class="title">{{ title }}{{ error ? ' · ' + $t('chat.offline') : '' }}</text>
       </div>
 
       <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
@@ -194,8 +194,8 @@ export default {
     this.forwardCursor = 0
     this.initialised = false
     this.visible = false
-    this.receiving = false
     this.reacting = false
+    this.receiveGeneration = 0
 
     this.settingsReady = store.load().then((settings) => {
       state.settings = settings
@@ -209,21 +209,39 @@ export default {
 
   onShow() {
     this.visible = true
-    this.settingsReady.then(() => {
+    this.refreshSettings().then(() => {
       if (!this.visible) return
       if (!this.token) {
         this.error = this.$t('chat.errtoken')
         return
       }
-      if (!this.initialised && !this.receiving) this.loadInitial()
+      if (this.loading || (!this.initialised && !this.receiving)) this.loadInitial()
       else this.schedulePoll(this.pollInterval)
+    }).catch((err) => {
+      this.loading = false
+      this.error = err && err.message ? err.message : '加载失败'
     })
+  },
+
+  // Returning from Settings refreshes preferences before resuming message reads.
+  refreshSettings() {
+    this.settingsReady = this.settingsReady.then(() => store.load()).then((settings) => {
+      state.settings = settings
+      api.configure(settings)
+      this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
+      this.keyboardType = settings.keyboardType || 'QWERTY'
+      this.pollInterval = settings.pollInterval || 15000
+    })
+    return this.settingsReady
   },
 
   onHide() {
     this.visible = false
+    this.receiveGeneration += 1
     this.closeActions()
     this.stopPolling()
+    this.receiving = false
+    this.loading = false
   },
 
   onDestroy() {
@@ -247,6 +265,10 @@ export default {
     }
   },
 
+  /* ------------------------------------------------------------------ */
+  /* data loading                                                        */
+  /* ------------------------------------------------------------------ */
+
   loadInitial() {
     return this.receive('latest')
   },
@@ -266,6 +288,7 @@ export default {
     if (!this.visible || !this.token || this.receiving || this.reacting) return
     this.stopPolling()
     this.receiving = true
+    const generation = ++this.receiveGeneration
     if (mode !== 'forward') this.closeActions()
     const forward = mode === 'forward'
     const older = mode === 'older'
@@ -278,10 +301,9 @@ export default {
     return api.getMessages(this.token, {
       lastKnownMessageId: cursor,
       limit: PAGE_SIZE,
-      lookIntoFuture: forward,
-      timeout: 0
+      lookIntoFuture: forward
     }).then((result) => {
-      if (!this.visible) return
+      if (!this.visible || generation !== this.receiveGeneration) return
       const snapshots = Object.create(null)
       let rawFirst = 0
       let rawLast = 0
@@ -349,6 +371,7 @@ export default {
     }).catch((err) => {
       if (this.visible && !forward) this.error = (err && err.message) || '加载失败'
     }).then(() => {
+      if (generation !== this.receiveGeneration) return
       this.receiving = false
       this.loading = false
       this.schedulePoll(this.pollInterval)

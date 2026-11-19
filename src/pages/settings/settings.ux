@@ -42,7 +42,7 @@
         </div>
 
         <div class="row row-danger" @click="confirmClear">
-          <text class="row-danger-text">{{ $t('settings.clear') }}</text>
+          <text class="row-danger-text">{{ clearArmed ? $t('settings.clearAgain') : $t('settings.clear') }}</text>
         </div>
 
         <div class="row" @click="openAbout">
@@ -88,7 +88,8 @@ export default {
     pollInterval: 15000,
     pollLabel: '',
     fontScale: 'normal',
-    fontLabel: ''
+    fontLabel: '',
+    clearArmed: false
   },
 
   onInit() {
@@ -114,34 +115,52 @@ export default {
   },
 
   persist(patch) {
-    const merged = Object.assign({}, state.settings || {}, patch)
-    return store.save(merged).then((saved) => {
-      state.settings = saved
-      // The API client reads the account from its own copy; keep it in sync so
-      // changing settings never leaves a stale password behind.
-      api.configure(saved)
-      this.refreshLabels(saved)
+    const save = () => {
+      const merged = Object.assign({}, state.settings || {}, patch)
+      return store.save(merged).then((saved) => {
+        state.settings = saved
+        // The API client reads the account from its own copy; keep it in sync so
+        // changing settings never leaves a stale password behind.
+        api.configure(saved)
+        this.refreshLabels(saved)
+        return saved
+      })
+    }
+    this.persistQueue = (this.persistQueue || Promise.resolve()).then(save, save)
+    return this.persistQueue
+  },
+
+  handlePersistFailure(err) {
+    this.persistQueue = Promise.resolve()
+    store.load().then((settings) => {
+      state.settings = settings
+      this.keyboardType = settings.keyboardType || 'QWERTY'
+      this.pollInterval = settings.pollInterval || 15000
+      this.fontScale = settings.fontScale || 'normal'
+      this.refreshLabels(settings)
     })
+    console.log('settings save failed: ' + ((err && err.message) || err))
+    prompt.showToast({ message: this.$t('settings.saveFailed'), duration: 2000 })
   },
 
   cycleKeyboard() {
     const value = this.keyboardType === 'QWERTY' ? 'T9' : 'QWERTY'
     this.keyboardType = value
-    this.persist({ keyboardType: value }).catch(() => undefined)
+    this.persist({ keyboardType: value }).catch((err) => this.handlePersistFailure(err))
   },
 
   cyclePoll() {
     const value = nextInList(POLLS, this.pollInterval)
     this.pollInterval = value
     this.pollLabel = value / 1000 + this.$t('settings.seconds')
-    this.persist({ pollInterval: value }).catch(() => undefined)
+    this.persist({ pollInterval: value }).catch((err) => this.handlePersistFailure(err))
   },
 
   cycleFont() {
     const value = nextInList(FONTS, this.fontScale)
     this.fontScale = value
     this.fontLabel = this.$t(FONT_LABEL_KEYS[value])
-    this.persist({ fontScale: value }).catch(() => undefined)
+    this.persist({ fontScale: value }).catch((err) => this.handlePersistFailure(err))
   },
 
   openAccount() {
@@ -160,25 +179,23 @@ export default {
   },
 
   confirmClear() {
-    prompt.showDialog({
-      message: this.$t('settings.clearConfirm'),
-      buttons: [
-        { text: this.$t('settings.clear'), color: '#ff3b30' },
-        { text: this.$t('common.cancel') }
-      ],
-      success: (res) => {
-        if (res.index !== 0) return
-        store.clearAll().then(() => {
-          state.settings = store.DEFAULT_SETTINGS
-          state.ready = false
-          state.rooms = []
-          state.activeRoom = null
-          api.configure({})
-          prompt.showToast({ message: this.$t('settings.cleared'), duration: 1500 })
-          // Back to the "no account" state, which starts at the setup page.
-          router.replace({ uri: '/setup' })
-        })
-      }
+    if (!this.clearArmed) {
+      this.clearArmed = true
+      return
+    }
+    this.clearArmed = false
+    store.clearAll().then(() => {
+      state.settings = store.DEFAULT_SETTINGS
+      state.ready = false
+      state.rooms = []
+      state.activeRoom = null
+      api.configure({})
+      prompt.showToast({ message: this.$t('settings.cleared'), duration: 1500 })
+      // Back to the "no account" state, which starts at the setup page.
+      router.replace({ uri: '/setup' })
+    }).catch((err) => {
+      console.log('clear data failed: ' + ((err && err.message) || err))
+      prompt.showToast({ message: this.$t('settings.clearFailed'), duration: 2000 })
     })
   },
 

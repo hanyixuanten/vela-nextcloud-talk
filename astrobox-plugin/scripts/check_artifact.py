@@ -14,7 +14,7 @@ a phone. This script checks the things that actually break installs:
 Usage:
     python3 scripts/check_artifact.py [path/to/plugin.abp]
 
-Exit code 0 = looks installable, 1 = at least one error.
+Exit code 0 = looks installable, 1 = at least one error, 2 = ambiguous/missing input.
 """
 
 import json
@@ -207,7 +207,15 @@ def check(path, report):
 def main():
     default = Path(__file__).resolve().parent.parent / "dist"
     candidates = sorted(default.glob("*.abp"))
-    target = Path(sys.argv[1]) if len(sys.argv) > 1 else (candidates[0] if candidates else default)
+    if len(sys.argv) > 1:
+        target = Path(sys.argv[1])
+    elif len(candidates) == 1:
+        target = candidates[0]
+    elif candidates:
+        sys.stderr.write("multiple .abp files found; pass the intended artifact path explicitly\n")
+        return 2
+    else:
+        target = default
 
     print(f"checking {target}")
     report = Report()

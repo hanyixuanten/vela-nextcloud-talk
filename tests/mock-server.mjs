@@ -215,12 +215,12 @@ export function start() {
         }
 
         const query = url.searchParams
-        const cursor = Number(query.get('lastKnownMessageId'))
-        const limit = Number(query.get('limit'))
+        const cursor = Number(query.get('lastKnownMessageId')) || 0
+        const limit = Number(query.get('limit')) || 40
         const forward = query.get('lookIntoFuture') === '1'
         const page = (forward
           ? messages.filter((m) => m.id > cursor)
-          : messages.filter((m) => !cursor || m.id < cursor).reverse()).slice(0, limit)
+          : (cursor ? messages.filter((m) => m.id < cursor).reverse() : messages.slice().reverse())).slice(0, limit)
         if (!page.length) {
           res.writeHead(304).end()
         } else {

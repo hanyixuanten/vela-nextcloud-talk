@@ -4,7 +4,7 @@
   "private": true,
   "description": "Nextcloud Talk client for Xiaomi Vela smartwatches (Vela JS app)",
   "engines": {
-    "node": ">=14"
+    "node": ">=18"
   },
   "scripts": {
     "build": "npm run build:circle --",

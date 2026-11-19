@@ -48,8 +48,8 @@ export function parseCredentialMessage(raw) {
   if (!isNonEmptyString(baseUrl) || !isNonEmptyString(user) || !isNonEmptyString(appPassword)) {
     return { ok: false, requestId, error: '服务器、用户名、应用密码都不能为空' }
   }
-  if (!/^https?:\/\//i.test(baseUrl)) {
-    return { ok: false, requestId, error: '服务器地址需以 http:// 或 https:// 开头' }
+  if (!/^https:\/\//i.test(baseUrl)) {
+    return { ok: false, requestId, error: '服务器地址必须使用 https://' }
   }
 
   return { ok: true, requestId, config: { baseUrl: baseUrl, user: user, appPassword: appPassword } }
