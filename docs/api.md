@@ -56,13 +56,14 @@ GET /ocs/v2.php/apps/spreed/api/v4/room?includeStatus=0
 ### 拉取消息
 
 ```
-GET /ocs/v2.php/apps/spreed/api/v1/chat/{token}?lookIntoFuture=0&limit=40&setReadMarker=1[&lastKnownMessageId=N]
+GET /ocs/v2.php/apps/spreed/api/v1/chat/{token}?lookIntoFuture=0&limit=12&setReadMarker=0&markNotificationsAsRead=0[&lastKnownMessageId=N]
+GET /ocs/v2.php/apps/spreed/api/v1/chat/{token}?lookIntoFuture=1&timeout=0&limit=12&setReadMarker=0&markNotificationsAsRead=0[&lastKnownMessageId=N]
 ```
 
-- 不带 `lastKnownMessageId`：取最近 `limit` 条，服务端按**时间正序**返回。
-- 带 `lastKnownMessageId`：只取该 id 之后的新消息。
-- 响应头 `X-Chat-Last-Given` 是下一页的游标（本骨架暂未用于翻页）。
-- 可能返回 `304`，表示没有新消息，此时不应报错。
+- 历史方向（`0`）：无游标取最近一页；带游标只取更早的消息。
+- 向前方向（`1`）：查询游标后的消息，`timeout=0` 不等待新消息。
+- `X-Chat-Last-Given` 是当前方向的下一页游标，可能指向被过滤、未出现在响应列表中的记录；无此头时用消息 ID 的最小值（历史）或最大值（向前）。客户端按 ID 倒序展示，不依赖服务器排序。
+- `304` 表示没有该方向的更多消息，不是请求错误。拉取不自动写已读；支持 `chat-keep-notifications` 时也禁止 GET 自动清除提醒。
 
 ### 发送消息
 
@@ -76,11 +77,11 @@ POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}
 ### 已读标记
 
 ```
-PUT /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
+POST /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
 { "lastReadMessage": 12345 }
 ```
 
-失败静默忽略：已读标记失败不影响用户读消息。
+首次加载最新消息或轮询收到新消息时，使用该批实际显示的最大 ID；历史分页不调用。失败不影响读消息。
 
 ## 错误映射
 

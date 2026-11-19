@@ -63,18 +63,29 @@ await test('baseUrl trailing slash is stripped', async () => {
   assert.equal(request.url, '/ocs/v2.php/apps/spreed/api/v4/room?includeStatus=0')
 })
 
-await test('getMessages keeps server order and reads X-Chat-Last-Given', async () => {
-  const history = await api.getMessages('tokA', { limit: 40 })
-  assert.equal(history.messages.length, 2)
-  assert.equal(history.messages[0].id, 10)
+await test('getMessages follows the history cursor', async () => {
+  const history = await api.getMessages('tokA', { limit: 1 })
+  assert.equal(history.messages[0].id, 11)
   assert.equal(history.lastGiven, 11)
+  const older = await api.getMessages('tokA', { lastKnownMessageId: history.lastGiven })
+  assert.deepEqual(older.messages.map((row) => row.id), [10])
+  assert.equal(older.lastGiven, 10)
+  const request = new URL(seen.at(-1).url, base).searchParams
+  assert.equal(request.get('lookIntoFuture'), '0')
+  assert.equal(request.get('setReadMarker'), '0')
+  assert.equal(request.get('markNotificationsAsRead'), '0')
+  assert.equal(request.get('timeout'), null)
 })
 
-await test('getMessages passes lastKnownMessageId when polling', async () => {
-  const poll = await api.getMessages('tokA', { lastKnownMessageId: 11 })
-  assert.equal(poll.messages.length, 0)
-  const request = seen.filter((entry) => entry.url.indexOf('/chat/tokA') >= 0).pop()
-  assert.ok(request.url.indexOf('lastKnownMessageId=11') >= 0)
+await test('forward polling waits zero seconds and handles 304', async () => {
+  const poll = await api.getMessages('tokA', { lastKnownMessageId: 10, lookIntoFuture: 1 })
+  assert.deepEqual(poll.messages.map((row) => row.id), [11])
+  assert.equal(poll.lastGiven, 11)
+  const request = new URL(seen.at(-1).url, base).searchParams
+  assert.equal(request.get('lookIntoFuture'), '1')
+  assert.equal(request.get('timeout'), '0')
+  const empty = await api.getMessages('tokA', { lastKnownMessageId: 11, lookIntoFuture: 1 })
+  assert.deepEqual(empty, { messages: [], lastGiven: 0, notModified: true })
 })
 
 await test('sendMessage posts a JSON body and returns the created message', async () => {
@@ -86,9 +97,11 @@ await test('sendMessage posts a JSON body and returns the created message', asyn
   assert.equal(request.body, JSON.stringify({ message: '你好' }))
 })
 
-await test('markRead sends a PUT with lastReadMessage', async () => {
+await test('markRead sends a POST with lastReadMessage', async () => {
   await api.markRead('tokA', 11)
-  const request = seen.filter((entry) => entry.method === 'PUT').pop()
+  const request = seen.at(-1)
+  assert.equal(request.method, 'POST')
+  assert.ok(request.url.endsWith('/chat/tokA/read'))
   assert.equal(request.body, JSON.stringify({ lastReadMessage: 11 }))
 })
 

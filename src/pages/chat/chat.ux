@@ -11,14 +11,14 @@
         <text class="title">{{ title }}</text>
       </div>
 
-      <scroll class="scroll" scroll-y="{{true}}">
+      <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
         <div class="list">
           <div class="msg {{ $item.mine ? 'msg-mine' : '' }}" for="{{messages}}">
             <text class="msg-meta">{{ $item.meta }}</text>
             <text class="msg-text {{ $item.mine ? 'msg-text-mine' : '' }}" style="font-size: {{ fontSize }}px;">{{ $item.text }}</text>
           </div>
 
-          <div class="placeholder" show="{{!loading && !error && messages.length === 0}}">
+          <div class="placeholder" show="{{!loading && !error && !olderCursor && messages.length === 0}}">
             <text class="placeholder-hint">{{ $t('chat.empty') }}</text>
           </div>
           <div class="placeholder" show="{{loading && messages.length === 0}}">
@@ -27,11 +27,17 @@
           <div class="placeholder" show="{{!loading && error}}">
             <text class="placeholder-error">{{ error }}</text>
           </div>
+          <div class="history-action" show="{{olderCursor > 0}}" @click="loadOlder">
+            <text class="history-label">{{ loading ? $t('index.loading') : $t('chat.loadolder') }}</text>
+          </div>
         </div>
       </scroll>
 
-      <div class="inputbar" @click="startEdit">
+      <div class="inputbar" show="{{!browsingHistory}}" @click="startEdit">
         <text class="input-placeholder">{{ $t('chat.placeholder') }}</text>
+      </div>
+      <div class="inputbar" show="{{browsingHistory}}" @click="loadInitial">
+        <text class="history-label">{{ $t('chat.backlatest') }}</text>
       </div>
     </div>
 
@@ -81,6 +87,14 @@ import fmt from '../../common/scripts/format'
 
 const FONT_SIZES = { small: 20, normal: 23, large: 27 }
 const DRAFT_VIEW_LIMIT = 60
+const PAGE_SIZE = 12
+const WINDOW_SIZE = 24
+
+function clipDisplay(value, limit) {
+  if (value.length <= limit) return value
+  const last = value.charCodeAt(limit - 1)
+  return value.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit) + '…'
+}
 
 function trimLastChar(text) {
   const source = String(text || '')
@@ -105,6 +119,8 @@ export default {
     draftView: '',
     editing: false,
     loading: false,
+    olderCursor: 0,
+    browsingHistory: false,
     sending: false,
     error: '',
     fontSize: FONT_SIZES.normal,
@@ -118,7 +134,10 @@ export default {
     this.pollInterval = 15000
     this.timer = null
     this.myUser = ''
-    this.newestId = 0
+    this.forwardCursor = 0
+    this.initialised = false
+    this.visible = false
+    this.receiving = false
 
     this.settingsReady = store.load().then((settings) => {
       state.settings = settings
@@ -128,117 +147,143 @@ export default {
       this.keyboardType = settings.keyboardType || 'QWERTY'
       this.pollInterval = settings.pollInterval || 15000
     })
+  },
 
+  onShow() {
+    this.visible = true
     this.settingsReady.then(() => {
+      if (!this.visible) return
       if (!this.token) {
         this.error = this.$t('chat.errtoken')
         return
       }
-      this.loadInitial()
+      if (!this.initialised && !this.receiving) this.loadInitial()
+      else this.schedulePoll(this.pollInterval)
     })
-  },
-
-  onShow() {
-    // Coming back from the settings page: re-read preferences and resume polling.
-    this.settingsReady = this.settingsReady.then(() => store.load()).then((settings) => {
-      state.settings = settings
-      api.configure(settings)
-      this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
-      this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.pollInterval = settings.pollInterval || 15000
-    })
-    this.settingsReady.then(() => this.startPolling())
   },
 
   onHide() {
+    this.visible = false
     this.stopPolling()
   },
 
   onDestroy() {
+    this.onHide()
+  },
+
+  schedulePoll(delay) {
     this.stopPolling()
-  },
-
-  /* ------------------------------------------------------------------ */
-  /* data loading                                                        */
-  /* ------------------------------------------------------------------ */
-
-  loadInitial() {
-    this.loading = true
-    this.error = ''
-
-    api.getMessages(this.token, { limit: 40, lookIntoFuture: 0 })
-      .then((result) => {
-        // The API returns oldest-first; the UI is newest-first so that the
-        // latest message is visible without any scrollTo call.
-        const views = result.messages.map((m) => this.toView(m))
-        views.reverse()
-        this.messages = views
-        this.newestId = views.length > 0 ? views[0].id : 0
-        this.markRead()
-      })
-      .catch((err) => {
-        this.error = err && err.message ? err.message : '加载失败'
-      })
-      .then(() => {
-        this.loading = false
-      })
-  },
-
-  pollOnce() {
-    if (!this.token || this.loading) return
-    api.getMessages(this.token, { lastKnownMessageId: this.newestId, limit: 40 })
-      .then((result) => {
-        if (!result.messages || result.messages.length === 0) return
-        const views = result.messages.map((m) => this.toView(m))
-        views.reverse()
-        this.messages = views.concat(this.messages)
-        this.newestId = this.messages[0].id
-        this.markRead()
-      })
-      .catch((err) => {
-        // Polling failures stay silent: the header already shows the error of
-        // the initial load, and a watch should not buzz for a flaky network.
-        console.log('poll failed: ' + (err && err.message))
-      })
-  },
-
-  startPolling() {
-    this.stopPolling()
-    if (!this.token) return
-
-    const tick = () => {
-      this.pollOnce()
-      this.timer = setTimeout(tick, this.pollInterval)
-    }
-    this.timer = setTimeout(tick, this.pollInterval)
+    if (!this.visible || this.browsingHistory || this.receiving) return
+    this.timer = setTimeout(() => {
+      this.timer = null
+      if (this.initialised) this.pollOnce()
+      else this.loadInitial()
+    }, delay)
   },
 
   stopPolling() {
-    if (this.timer) {
+    if (this.timer !== null) {
       clearTimeout(this.timer)
       this.timer = null
     }
   },
 
-  markRead() {
-    if (!this.newestId) return
-    api.markRead(this.token, this.newestId).catch(() => undefined)
+  loadInitial() {
+    return this.receive('latest')
+  },
 
-    store.loadMarkers().then((markers) => {
-      markers[this.token] = this.newestId
-      store.saveMarkers(markers).catch(() => undefined)
+  loadOlder() {
+    if (!this.olderCursor || this.sending || this.editing) return
+    return this.receive('older')
+  },
+
+  pollOnce() {
+    if (this.browsingHistory) return
+    return this.receive('forward')
+  },
+
+  // Serialize message reads, including retries and foreground transitions.
+  receive(mode) {
+    if (!this.visible || !this.token || this.receiving) return
+    this.stopPolling()
+    this.receiving = true
+    const forward = mode === 'forward'
+    const older = mode === 'older'
+    const cursor = forward ? this.forwardCursor : (older ? this.olderCursor : 0)
+    if (!forward) {
+      this.loading = true
+      this.error = ''
+    }
+
+    return api.getMessages(this.token, {
+      lastKnownMessageId: cursor,
+      limit: PAGE_SIZE,
+      lookIntoFuture: forward,
+      timeout: 0
+    }).then((result) => {
+      if (!this.visible) return
+      const views = result.messages.map((message) => this.toView(message))
+      views.sort((a, b) => b.id - a.id)
+      const first = views.length ? views[0].id : 0
+      const last = views.length ? views[views.length - 1].id : 0
+      if (older) {
+        // The header may include filtered rows, so a short page is not EOF.
+        const previous = result.lastGiven || last
+        this.olderCursor = !result.notModified && previous > 0 && previous < cursor ? previous : 0
+        this.mergeViews(views.filter((view) => view.id < cursor), true)
+        this.browsingHistory = true
+        return
+      }
+      if (!forward) {
+        if (this.browsingHistory && this.$element) {
+          const scroll = this.$element('chat-scroll')
+          if (scroll && scroll.scrollTo) scroll.scrollTo({ top: 0 })
+        }
+        this.messages = []
+        this.forwardCursor = first || result.lastGiven || 0
+        this.olderCursor = result.lastGiven || last
+        this.browsingHistory = false
+        this.initialised = true
+      } else {
+        this.forwardCursor = Math.max(cursor, result.lastGiven || 0, first)
+      }
+      if (views.length) {
+        const trimmed = this.mergeViews(views, false)
+        if (forward && (trimmed || !this.olderCursor)) {
+          this.olderCursor = this.messages[this.messages.length - 1].id
+        }
+        // Exit this continuation before keeping raw message data around for another request.
+        if (first > (forward ? cursor : 0)) return first
+      }
+    }).then((id) => {
+      if (id && this.visible) return api.markRead(this.token, id).catch(() => undefined)
+    }).catch((err) => {
+      if (this.visible && !forward) this.error = (err && err.message) || '加载失败'
+    }).then(() => {
+      this.receiving = false
+      this.loading = false
+      this.schedulePoll(this.pollInterval)
     })
+  },
+
+  mergeViews(views, keepOldest) {
+    if (!views.length) return false
+    const all = views.concat(this.messages)
+    all.sort((a, b) => b.id - a.id)
+    const unique = all.filter((view, i) => i === 0 || all[i - 1].id !== view.id)
+    this.messages = keepOldest ? unique.slice(-WINDOW_SIZE) : unique.slice(0, WINDOW_SIZE)
+    return unique.length > WINDOW_SIZE
   },
 
   toView(message) {
     const actorId = String(message.actorId || '').toLowerCase()
     const isSystem = Boolean(message.systemMessage)
     const mine = !isSystem && actorId === this.myUser
-    const author = message.actorDisplayName || ''
+    const author = clipDisplay(String(message.actorDisplayName || ''), 48)
 
     return {
-      id: message.id,
-      text: fmt.renderMessage(message),
+      id: Number(message.id),
+      text: clipDisplay(fmt.renderMessage(message), 512),
       meta: mine ? fmt.formatClock(message.timestamp) : author + ' · ' + fmt.formatClock(message.timestamp),
       mine: mine
     }
@@ -249,6 +294,7 @@ export default {
   /* ------------------------------------------------------------------ */
 
   startEdit() {
+    if (!this.initialised || this.loading || this.browsingHistory) return
     this.editing = true
     this.error = ''
   },
@@ -278,16 +324,17 @@ export default {
     if (!text || this.sending) return
 
     this.sending = true
-    api.sendMessage(this.token, text)
+    return api.sendMessage(this.token, text)
       .then((message) => {
         this.setDraft('')
         this.editing = false
-        if (message && message.id) {
-          this.messages = [this.toView(message)].concat(this.messages)
-          this.newestId = message.id
+        if (this.visible && message && message.id) {
+          const trimmed = this.mergeViews([this.toView(message)], false)
+          if (trimmed || !this.olderCursor) this.olderCursor = this.messages[this.messages.length - 1].id
+          // The forward cursor must not skip intervening messages from others.
         }
         this.sending = false
-        this.startPolling()
+        this.schedulePoll(0)
       })
       .catch((err) => {
         this.sending = false
@@ -299,7 +346,7 @@ export default {
   },
 
   goBack() {
-    this.stopPolling()
+    this.onHide()
     router.back()
   }
 }
@@ -410,6 +457,22 @@ export default {
   font-size: 20px;
   color: #ff8a80;
   text-align: center;
+}
+
+.history-action {
+  align-self: center;
+  width: 220px;
+  height: 48px;
+  margin-bottom: 10px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 20px;
+  background-color: #262626;
+}
+
+.history-label {
+  color: #b8d9fa;
+  font-size: 20px;
 }
 
 .inputbar {

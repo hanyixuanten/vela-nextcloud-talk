@@ -4,7 +4,7 @@
 //   conversations  GET    /ocs/v2.php/apps/spreed/api/v4/room
 //   messages       GET    /ocs/v2.php/apps/spreed/api/v1/chat/{token}
 //   send message   POST   /ocs/v2.php/apps/spreed/api/v1/chat/{token}
-//   read marker    PUT    /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
+//   read marker    POST   /ocs/v2.php/apps/spreed/api/v1/chat/{token}/read
 //   current user   GET    /ocs/v2.php/cloud/user
 //
 // Auth is HTTP Basic with a Nextcloud *app password* (never the account
@@ -192,16 +192,18 @@ function listConversations() {
 
 /**
  * Fetch messages of a conversation.
- * options: { lastKnownMessageId, limit, lookIntoFuture }
- * Resolves with { messages, lastGiven } where `messages` is oldest-first.
+ * options: { lastKnownMessageId, limit, lookIntoFuture, timeout }
+ * Resolves with { messages, lastGiven } in server order.
  */
 function getMessages(token, options) {
   const opts = options || {}
   const query = {
     lookIntoFuture: opts.lookIntoFuture ? 1 : 0,
     limit: opts.limit || 30,
-    setReadMarker: 1
+    setReadMarker: 0,
+    markNotificationsAsRead: 0
   }
+  if (opts.lookIntoFuture) query.timeout = opts.timeout === undefined ? 0 : opts.timeout
   if (opts.lastKnownMessageId) query.lastKnownMessageId = opts.lastKnownMessageId
 
   return request({ path: TALK_V1 + '/chat/' + encodeURIComponent(token), query: query }).then(
@@ -227,7 +229,7 @@ function markRead(token, messageId) {
   if (!messageId) return Promise.resolve()
   return request({
     path: TALK_V1 + '/chat/' + encodeURIComponent(token) + '/read',
-    method: 'PUT',
+    method: 'POST',
     body: { lastReadMessage: Number(messageId) }
   }).then(() => undefined)
 }

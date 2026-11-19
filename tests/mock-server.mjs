@@ -111,7 +111,7 @@ export function start() {
       }
 
       if (req.url.indexOf('/chat/tokA/read') >= 0) {
-        if (req.method !== 'PUT') {
+        if (req.method !== 'POST') {
           sendJson(405, {})
           return
         }
@@ -142,18 +142,18 @@ export function start() {
           return
         }
 
-        // With a cursor the server returns only newer messages: none here.
-        const hasCursor = req.url.indexOf('lastKnownMessageId') >= 0
-        sendJson(
-          200,
-          {
-            ocs: {
-              meta: { status: 'ok', statuscode: 200, message: 'OK' },
-              data: hasCursor ? [] : MESSAGES
-            }
-          },
-          { 'X-Chat-Last-Given': '11' }
-        )
+        const query = new URL(req.url, 'http://localhost').searchParams
+        const cursor = Number(query.get('lastKnownMessageId'))
+        const limit = Number(query.get('limit'))
+        const forward = query.get('lookIntoFuture') === '1'
+        const page = (forward
+          ? MESSAGES.filter((m) => m.id > cursor)
+          : MESSAGES.filter((m) => !cursor || m.id < cursor).reverse()).slice(0, limit)
+        if (!page.length) {
+          res.writeHead(304).end()
+        } else {
+          envelope(page, { 'X-Chat-Last-Given': String(page.at(-1).id) })
+        }
         return
       }
 

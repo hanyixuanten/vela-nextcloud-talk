@@ -89,7 +89,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程，以及针对模拟 Nextcloud 的接口集成测试。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -111,14 +111,14 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | --- | --- | --- |
 | 账号登录 / 校验 | ✅ | 走 `/ocs/v2.php/cloud/user` 验证，成功才落盘 |
 | 会话列表 | ✅ | 按最近活跃排序、未读数、最后一条消息预览 |
-| 历史消息 | ✅ | 最近 40 条，倒序展示（最新在最上方，无需滚动到底） |
+| 历史消息 | ✅ | 每次拉 12 条；列表底部点「加载更早消息」，最多保留 24 条 |
 | 发送消息 | ✅ | POST `/chat/{token}`，发送后本地立即上屏 |
-| 已读标记 | ✅ | 打开会话后 PUT `/chat/{token}/read` |
+| 已读标记 | ✅ | 打开会话或收到新消息后 POST `/chat/{token}/read` |
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
 | 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表校验后保存 |
-| 图片 / 文件消息 | ❌ | 只渲染文本，附件显示为占位文字 |
+| 图片 / 文件消息 | ❌ | 只显示文件名及文字，不下载图片 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
 | 通知推送 | ❌ | Vela 暂无第三方 app 的推送通道 |
 | 通话、回复、表情回应 | ❌ | 超出骨架范围 |
@@ -229,7 +229,7 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 ### 消息顺序
 
-消息按 **id 倒序**渲染，最新一条在最上方。这样新消息到达时直接 `concat` 到数组头部即可，完全不需要 `scrollTo`（Vela 的 `scroll` 滚动控制在不同机型上行为不一致，能绕开就绕开）。
+消息按 **id 倒序**渲染，最新一条在最上方。新消息按 ID 合并去重；查看历史时暂停轮询，超过 24 条就移出较新的记录。点「返回最新消息」重新获取最近一页。
 
 ### 输入法集成
 
@@ -270,11 +270,11 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 ## 已知限制
 
-- **轮询而非长轮询**：`lookIntoFuture=1` 需要服务端挂住连接最多 60s，Vela 的 `fetch` 生命周期在后台不稳，所以用 15s 短轮询。代价是耗电和延迟。想试长轮询，改 `chat.ux` 的 `pollOnce` 传 `lookIntoFuture: 1` 即可。
+- **短轮询**：使用 `lookIntoFuture=1&timeout=0`，每次请求结束后再开始计时。浏览历史或离开页面时暂停轮询。
 - **明文 HTTP**：`manifest.json` 没有声明网络安全例外，实际请务必用 HTTPS，否则应用密码在链路上是裸的。
 - **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。
-- **无附件渲染**：文件/图片消息会显示成 Rich Object String 展开后的文件名文本。
-- **消息上限**：一次只取 40 条，没有上滑加载更早消息。
+- **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。暂不自动下载或解码图片，原因见[图片预览评估](docs/image-preview.md)。
+- **消息窗口**：单页 12 条、界面最多 24 条，单条正文保留前 512 个 UTF-16 代码单元以内并加省略号；完整长消息请在手机或网页端查看。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
 - **互联真机验证**：AstroBox 按已连接设备地址与已安装快应用包名投递；仍须在目标固件与 AstroBox 版本上验证收发。Android 官方互联签名要求与排错见[凭据互联说明](docs/interconnect.md)。
 - **插件不持久化密码**：AstroBox 的 Host API 里确实没有文件系统函数（`os` 只给 arch/hostname/locale），运行时虽然提供 WASI std fs（限定在插件自己的目录内），但这一版**故意没有**写盘——密码每次都要重填，真正的保存只发生在手表的 `@system.storage`，发送成功后插件立刻清空内存里的密码。
@@ -283,11 +283,12 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 按优先级：
 
-1. 上滑加载更早消息（`lastKnownMessageId` 翻页）
-2. 图片消息缩略图（`@system.fetch` 拿临时文件 uri → `image` 组件）
-3. 长按消息回复 / 表情
-4. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）
-5. 离线草稿队列
+1. 真机验收历史分页、返回最新、后台切换及内存峰值。
+2. 长按消息回复 / 表情。
+3. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）。
+4. 离线草稿队列。
+
+图片预览不进入近期计划。若有明确需求，只评估默认关闭、点按加载单张缩略图的原型。
 
 ---
 

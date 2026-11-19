@@ -34,6 +34,8 @@
   },
   "chat": {
     "placeholder": "Tap to type…",
+    "loadolder": "Load older messages",
+    "backlatest": "Back to latest",
     "send": "Send",
     "sending": "Sending",
     "empty": "No messages yet",

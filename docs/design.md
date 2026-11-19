@@ -63,12 +63,11 @@ half_width(y) = sqrt(240² - (y - 240)²)
 
 ## 3. 消息顺序与游标
 
-列表按 **id 倒序**（最新在最上）。好处：
+列表按 **ID 倒序**展示，每次拉取 12 条、最多保留 24 个用于渲染的消息对象。正文截到 512 个 UTF-16 代码单元以内（另加省略号），作者名截到 48；不常驻原始 OCS 对象、附件数据或图片。这是常驻显示数据的限制，不是完整 JSON 响应和原生渲染的峰值内存保证。
 
-- 新消息 `concat` 到头部即可，不需要 `scrollTo`，绕开不同机型 `scroll` 滚动 API 的差异；
-- 用户打开会话第一眼就是最新消息，符合手表「只看一眼」的使用方式。
-
-游标 `newestId` 始终等于 `messages[0].id`，既用于轮询的 `lastKnownMessageId`，也用于已读标记。
+- 列表底部点「加载更早消息」，使用历史方向的 `X-Chat-Last-Given`（缺失时取最小 ID）。短页不代表结束，`304` 或游标不再前进才隐藏入口。
+- 浏览历史时暂停向前轮询，窗口满后移出较新的行，仍可继续翻页。点「返回最新消息」重新获取最近一页并恢复轮询。历史载入不写已读。
+- 新消息轮询有独立游标，发送成功只在界面插入新行，不移动轮询游标，以免跳过尚未拉到的消息。合并时按 ID 去重。
 
 ## 4. 状态机
 
@@ -85,18 +84,19 @@ pages/login  ──submit──> api.getCurrentUser()
 
 pages/index  ──tap 会话──> state.activeRoom = room → push('/chat', {token, name})
 
-pages/chat   onInit  → loadInitial()（40 条）
-             onShow  → 重新读 settings + startPolling()
-             onHide / onDestroy → stopPolling()
-             tap 输入条 → editing = true
-             send ok  → 清草稿 + 头部插入新消息 + 重启轮询
+pages/chat   onInit  → 读取配置
+             onShow  → 首次拉最近一页；之后恢复轮询（历史模式除外）
+             onHide / onDestroy → 停止定时器
+             tap 加载更早 → 向后翻页、暂停轮询
+             tap 返回最新 → 重取最近一页、恢复轮询
+             send ok → 清草稿、插入消息并尽快轮询
 ```
 
 轮询用 `setTimeout` 递归而不是 `setInterval`：`setInterval` 在网络慢的时候会堆积请求，递归可以保证上一次请求回来后再排下一次。
 
 ## 5. 存储结构
 
-`@system.storage` 只能存字符串，所以全部 JSON 序列化。两个键：
+`@system.storage` 只能存字符串，所以全部 JSON 序列化。聊天页不落盘消息或翻页游标；保留的旧版 `nctalk.markers` 存储辅助函数当前不在聊天流程中使用。
 
 ```jsonc
 // nctalk.settings
@@ -133,16 +133,9 @@ pages/chat   onInit  → loadInitial()（40 条）
 
 ## 7. 为什么不用长轮询 / WebSocket
 
-Talk 支持 `lookIntoFuture=1`（服务端挂住连接，最多 60s）和 `timeout`。没采用的原因：
-
-- Vela 的 `fetch` 在应用转入后台后行为不确定，长连接可能被静默掐断且不触发 `fail`；
-- 60s 挂起期间若用户发消息，需要额外取消逻辑；
-- 长轮询对表的功耗不一定比 15s 短轮询更好（每次都要重建 TLS 连接）。
-
-短轮询的代价是延迟（最多 15s）和连接开销。`pollOnce()` 已经把参数抽出来了，想切长轮询只需传 `lookIntoFuture: 1, timeout: 25`，并处理 304。
+向前查询使用 `lookIntoFuture=1&timeout=0`，不让服务端等待下一条消息。Vela 在退后台后对长连接的处理未验证；短轮询也更容易与历史翻页串行。代价是连接开销和默认约 15 秒的更新间隔（另加请求耗时）。
 
 ## 8. 待决策
 
-- **翻页方式**：`X-Chat-Last-Given` 已经拿到了，但「上滑加载更早消息」和「倒序列表」组合起来需要判断滚到列表底部（视觉上的底部 = 数组尾部）。Vela 的 `scroll` 没有 `scrollend` 事件，可能要退化成「底部固定一个『加载更早』按钮」。
-- **图片消息**：`@system.fetch` 拿到的临时文件 uri 是否能在 `image` 组件里直接显示，需要在真机验证，模拟器和真机行为不一致。
+- **图片消息**：暂缓预览；详见[解码成本和真机验收门槛](image-preview.md)。
 - **多实例**：目前只支持一个 Nextcloud 账号。多账号需要把 `nctalk.settings` 改成账号数组 + 当前索引，`markers` 也要按账号分区。
