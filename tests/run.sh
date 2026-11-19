@@ -35,6 +35,7 @@ fail=0
 "$NODE" "$ROOT/tests/setup.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/seed-watch-chat.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then
   rm -rf "$BUILD"

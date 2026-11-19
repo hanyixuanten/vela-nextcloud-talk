@@ -283,7 +283,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 按优先级：
 
-1. 真机验收历史分页、返回最新、后台切换及内存峰值。
+1. 按[文本聊天真机内存基线](docs/watch-memory-baseline.md)验收历史分页、返回最新、后台切换及内存峰值。
 2. 长按消息回复 / 表情。
 3. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）。
 4. 离线草稿队列。
