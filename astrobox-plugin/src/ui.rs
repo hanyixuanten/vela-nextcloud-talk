@@ -8,6 +8,13 @@ pub const EV_SERVER: &str = "field-server";
 pub const EV_USER: &str = "field-user";
 pub const EV_PASSWORD: &str = "field-password";
 pub const EV_SEND: &str = "send";
+/// Open Talk on the watch so its interconnect listener is actually attached.
+pub const EV_LAUNCH: &str = "launch";
+/// Re-enumerate devices. The host does not always emit a device event, and the
+/// panel must be recoverable without being closed and reopened.
+pub const EV_REFRESH: &str = "refresh";
+/// Typed device address: the only path that needs no `device` grant at all.
+pub const EV_MANUAL: &str = "manual-addr";
 
 const MUTED: &str = "#8A94A6";
 const TEXT: &str = "#E8EEF5";
@@ -60,6 +67,16 @@ pub fn build(state: &State) -> Element {
         sending,
     ));
 
+    // Advanced escape hatch: when the host refuses to hand out its device list,
+    // a typed address skips enumeration entirely (and the `device` grant).
+    form = form.child(field_label("设备地址（高级，可留空）"));
+    form = form.child(field(
+        "留空=自动检测；填了直接用它",
+        &state.manual_addr,
+        EV_MANUAL,
+        sending,
+    ));
+
     // A click re-enumerates devices, including a watch connected after render.
     let send_disabled = matches!(state.status, Status::Sending);
     let mut button = Element::new(ElementType::Button, Some(button_caption(&state.status)))
@@ -74,20 +91,92 @@ pub fn build(state: &State) -> Element {
     }
     form = form.child(button);
 
+    // Same as the known-good TOTP plugin: open the quick app first, then send.
+    // Talk only listens on interconnect while its setup page is in front.
+    let mut launch = Element::new(ElementType::Button, Some("打开手表上的 Talk"))
+        .width_full()
+        .padding(8)
+        .radius(8)
+        .bg("#1F252C")
+        .text_color(TEXT)
+        .on(Event::Click, EV_LAUNCH);
+    if send_disabled {
+        launch = launch.disabled();
+    }
+    form = form.child(launch);
+
+    // Always enabled, including while a send is waiting for the ACK: this is
+    // the escape hatch when the device list or the pending send goes stale.
+    // Before the first probe it is the primary action, because the `device`
+    // lookup is deliberately user-triggered (a permission prompt raised while
+    // the panel is still rendering is what used to leave the panel empty).
+    let detected = state.addr.is_some() || state.probed;
+    let detect_label = if detected {
+        "重新检测设备"
+    } else {
+        "检测设备"
+    };
+    form = form.child(
+        Element::new(ElementType::Button, Some(detect_label))
+            .width_full()
+            .padding(8)
+            .radius(8)
+            .bg(if detected { "#1F252C" } else { ACCENT })
+            .text_color(if detected { MUTED } else { "#FFFFFF" })
+            .on(Event::Click, EV_REFRESH),
+    );
+
     // Connection hints: which device we push to, and whether Talk is installed.
     if let Some(problem) = preflight_message(state) {
-        form = form.child(Element::new(ElementType::P, Some(&problem)).size(12).text_color("#FF8A80"));
+        form = form.child(
+            Element::new(ElementType::P, Some(&problem))
+                .size(12)
+                .text_color("#FF8A80"),
+        );
+    }
+
+    // Which watch we will push to. Enumeration carries a name, so this shows up
+    // without waiting for a device-action event; fall back to the address when
+    // the host only knows that.
+    if let Some(addr) = state.addr.as_deref() {
+        let target = if state.device_name.is_empty() {
+            format!("目标：{}", addr)
+        } else {
+            format!("目标：{}", state.device_name)
+        };
+        form = form.child(
+            Element::new(ElementType::P, Some(&target))
+                .size(11)
+                .text_color(MUTED),
+        );
+    }
+
+    // Only useful when nothing was found: tells an OS/host change apart from a
+    // device that is simply not connected.
+    if state.addr.is_none() && !state.host.is_empty() {
+        let host = format!("系统：{}", state.host);
+        form = form.child(
+            Element::new(ElementType::P, Some(&host))
+                .size(11)
+                .text_color(MUTED),
+        );
     }
 
     if let Some((text, color)) = status_line(&state.status) {
-        form = form.child(Element::new(ElementType::P, Some(&text)).size(13).text_color(color));
+        form = form.child(
+            Element::new(ElementType::P, Some(&text))
+                .size(13)
+                .text_color(color),
+        );
     }
 
     form
 }
 
 fn field_label(text: &str) -> Element {
-    Element::new(ElementType::P, Some(text)).size(12).text_color(MUTED)
+    Element::new(ElementType::P, Some(text))
+        .size(12)
+        .text_color(MUTED)
 }
 
 fn field(placeholder: &str, value: &str, event_id: &str, disabled: bool) -> Element {
@@ -113,14 +202,53 @@ fn button_caption(status: &Status) -> &'static str {
 }
 
 fn preflight_message(state: &State) -> Option<String> {
+    // Progress and watchdog verdicts outrank a stale error line: they explain
+    // why the panel cannot see a device.
+    if state.probing && state.addr.is_none() && !state.multiple_devices {
+        return Some("正在检测设备…（一直停在这里说明宿主的设备枚举没有返回）".to_string());
+    }
+    if state.probe_hung && state.addr.is_none() && !state.multiple_devices {
+        return Some(
+            "设备枚举超时：宿主没有返回设备列表。请确认 AstroBox 里手表处于「已连接」，\
+             并在插件权限里允许「设备」。"
+                .to_string(),
+        );
+    }
     if matches!(state.status, Status::Err(_)) {
         return None;
     }
     if state.multiple_devices {
         return Some(MULTIPLE_DEVICES.to_string());
     }
+    // Nothing has been enumerated yet: say so, instead of claiming the host has
+    // no device records. Detection is user-triggered on purpose, so the very
+    // first click is what asks the host for the device list.
+    if state.addr.is_none() && !state.probed {
+        return Some("点「检测设备」查找已经连上的手表。".to_string());
+    }
     if state.addr.is_none() {
-        return Some("没有已连接的设备：先在 AstroBox 里连接手表。".to_string());
+        if state.known_devices > 1 {
+            return Some(format!(
+                "已配对的 {} 台设备都没有连接：只保留要配置的手表，再点「重新检测」。",
+                state.known_devices
+            ));
+        }
+        if state.known_devices == 0 && state.connected_devices == 0 {
+            return Some(
+                "宿主里没有任何设备记录（已连接 0 / 已配对 0）：先在 AstroBox 的「设备」页添加并连接手表；\
+                 若那边明明有设备，就是本插件的「设备」权限没有开启。"
+                    .to_string(),
+            );
+        }
+        return Some(format!(
+            "没有已连接的设备（宿主报告：已连接 {} / 已配对 {}）：在 AstroBox 里连接手表后点「重新检测」。",
+            state.connected_devices, state.known_devices
+        ));
+    }
+    if !state.link_connected {
+        return Some(
+            "设备已配对但当前未连接：发送时会尝试连接，失败请先在 AstroBox 里连接。".to_string(),
+        );
     }
     if state.app_installed == Some(false) {
         return Some("这台设备上没找到 Talk 应用，请先安装 rpk。".to_string());

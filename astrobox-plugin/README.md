@@ -22,7 +22,7 @@ AstroBox (插件 UI)  ──interconnect──>  手表 Talk (pages/setup)
 astrobox-plugin/
 ├── Cargo.toml              # cdylib，target 见 .cargo/config.toml
 ├── .cargo/config.toml      # build.target = wasm32-wasip2
-├── manifest.json           # 插件清单（版本 0.1.3、entry / wasi_version / api_level / permissions）
+├── manifest.json           # 插件清单（版本 0.1.10、entry / wasi_version / api_level / permissions）
 ├── icon.png
 ├── src/
 │   ├── lib.rs              # 生命周期、事件入口、发送流程
@@ -52,7 +52,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.3.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.10.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里同时装了发行版 rustc（没有 wasm std），`build_dist.py` 调用的 `cargo` 可能是错的那个，会报 `can't find crate for core`。用 rustup 的 cargo：
@@ -60,6 +60,20 @@ dist/nctalk-credential-0.1.3.abp  # 直接拖进 AstroBox 安装（ASCII 文件�
 ```bash
 PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 ```
+
+### 为什么没有迁到 Level 4
+
+宿主 `src/v4/host/device.rs` 与 v3 完全一致：
+
+```rust
+if !check_permission_declared(&app_handle, permissions, "device", ...).await {
+    return Ok(Vec::new());
+}
+```
+
+Level 4 换的是 wasmtime 48 / WASI p3、`async fn` 导出和 `astrobox:psys-host-v4` 这组包，**权限流程没有任何变化**：仍是「manifest 声明 + 前端授权」，前端拒绝就静默返回空列表。因此 Level 4 重写解决不了「设备枚举被拒」，而且 `astrobox-ng-wit` 在 crates.io 上只有 0.3.1（没有 v4 世界），得改成 git 依赖 master 的 0.4.0。
+
+真正绕开它的办法是**不枚举**：地址可以从 `device-action` 事件（`{action, addr, name}`，不校验权限）里拿，或者在「设备地址（高级）」里手填。
 
 ### 为什么固定 Rust 1.92
 
@@ -108,16 +122,18 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 ## 用起来
 
-1. 手表上安装 Talk（rpk），打开它 → 设置 → **从手机配置**，页面停在「等待手机发送…」。
+1. 手表上安装 Talk（rpk），打开它 → 设置 → **从手机配置**，页面停在「等待手机发送…」；或直接点插件里的「打开手表上的 Talk」，由 `thirdpartyapp::launch-qa` 启动到 `pages/setup`。
 2. AstroBox 里打开「Talk 凭据配置」，填服务器地址、用户名、应用密码。
-3. 点「发送到手表」。插件重新枚举设备，只在恰好连接一台设备时订阅其 `com.hanyixuanten.nctalk` 互联消息并发送凭据。若表单打开后才连接手表，也可以直接点发送重试。
+3. 先点「检测设备」找手表，再点「发送到手表」。两者都会按「唯一候选」规则定位：恰好一台已连接设备，或恰好一台已配对设备（发送时会尝试建立连接）。多台即拒绝猜测。设备连上/断开时宿主的 `device-action` 事件也会自动触发重测。
+   **设备枚举只由点击触发，不在渲染时发起**：已上架且能正常读到设备的两个插件（BandTOTP、otp-helper）都是从点击回调里调 `get_connected_device_list()`，渲染期请求 `device` 权限是唯一会拿到「未授权 → 空列表」的时机。同理，`get_thirdparty_app_list`（宿主上限 12 秒）不在检测链上：枚举一回来就出结论并绘制「目标：<手表名>」，应用列表与 ack 订阅随后在后台补，失败或过时都不影响结论。
+   若设备列表始终为空（`device` 权限被前端拒绝时宿主只返回空列表），把 AstroBox 设备详情里的地址填进「设备地址（高级）」——填了就不再枚举，启动与发送只依赖 `thirdpartyapp` / `interconnect` 权限。
 4. 手表请求 `/ocs/v2.php/cloud/user` 校验，保存后回复 ACK。宿主发送成功不等于已保存；只有匹配的成功 ACK 才会清空密码和显示「已保存」。
 
 ### 线上路由和协议
 
 - **手机 → 手表：** `interconnect.send-qaic-message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v1 JSON（`kind: "credentials"`、`base_url`、`user`、`app_password`），新版插件额外发送字符串 `request_id`。
 - **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 为 `ok`、可选 `message` 和 `display_name`，且须回显本次字符串 `request_id`。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件要求来源设备、包名和请求 ID 全部匹配，不接受无 request_id 的旧 ACK。
-- **超时：** 点发送后立即独立启动 15 秒计时器，不依赖设备/互联宿主调用返回；`Timer` 事件包装为 `{timerId, kind: "timeout", payload}`，`payload` 含本次请求 ID，不会让上一次定时器中断新请求。宿主调用自身若永不返回，页面事件仍可能被挂起；目标 AstroBox 运行时行为待实机确认。
+- **超时：** 点发送后立即独立启动 15 秒计时器，不依赖设备/互联宿主调用返回；`Timer` 事件包装为 `{timerId, kind: "timeout", payload}`，`payload` 含本次请求 ID，不会让上一次定时器中断新请求。若宿主调用自身永不返回（例如枚举设备挂起），计时器仍会结束等待；此外超过 15 秒 + 5 秒宽限的挂起请求会在下次重绘、输入或点「重新检测」时被自动清除，UI 不会永久停在「正在发送…」。
 
 ## 权限
 

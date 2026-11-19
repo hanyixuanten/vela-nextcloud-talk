@@ -21,6 +21,8 @@ pub struct PendingSend {
     pub id: String,
     /// Set only when registration has succeeded and a send is about to start.
     pub addr: Option<String>,
+    /// Wall-clock start, so a send whose ACK never arrives cannot wedge the UI.
+    pub started_ms: u64,
 }
 
 #[derive(Clone)]
@@ -30,6 +32,28 @@ pub struct State {
     /// Device address we push to (only when exactly one device is connected).
     pub addr: Option<String>,
     pub multiple_devices: bool,
+    /// The single device in `addr` has an active transport right now.
+    pub link_connected: bool,
+    /// Device name carried by the last device-action event, for display.
+    pub device_name: String,
+    /// Address typed by the user. When set, enumeration is skipped entirely:
+    /// the `device` permission is only needed to *look up* the address.
+    pub manual_addr: String,
+    /// How many devices the host knows about (paired), connected or not.
+    pub known_devices: usize,
+    /// How many devices the host reported as connected during the last probe.
+    pub connected_devices: usize,
+    /// A probe is in flight; the panel shows progress instead of a verdict.
+    pub probing: bool,
+    /// At least one enumeration finished, so "no device" is a real verdict
+    /// rather than "we have not looked yet".
+    pub probed: bool,
+    /// The host never answered the last probe (watchdog fired).
+    pub probe_hung: bool,
+    /// Monotonic probe id, so a stale watchdog cannot clear a newer probe.
+    pub probe_seq: u64,
+    /// Host platform + AstroBox version, shown only when no device is found.
+    pub host: String,
     /// None = not probed yet, Some(false) = Talk is not installed.
     pub app_installed: Option<bool>,
     pub server: String,
@@ -46,6 +70,16 @@ impl Default for State {
             element_id: None,
             addr: None,
             multiple_devices: false,
+            link_connected: false,
+            device_name: String::new(),
+            manual_addr: String::new(),
+            known_devices: 0,
+            connected_devices: 0,
+            probing: false,
+            probed: false,
+            probe_hung: false,
+            probe_seq: 0,
+            host: String::new(),
             app_installed: None,
             server: String::new(),
             user: String::new(),
