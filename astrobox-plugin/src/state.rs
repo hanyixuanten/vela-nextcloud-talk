@@ -48,8 +48,6 @@ pub struct State {
     /// At least one enumeration finished, so "no device" is a real verdict
     /// rather than "we have not looked yet".
     pub probed: bool,
-    /// The host never answered the last probe (watchdog fired).
-    pub probe_hung: bool,
     /// Monotonic probe id, so a stale watchdog cannot clear a newer probe.
     pub probe_seq: u64,
     /// Host platform + AstroBox version, shown only when no device is found.
@@ -77,7 +75,6 @@ impl Default for State {
             connected_devices: 0,
             probing: false,
             probed: false,
-            probe_hung: false,
             probe_seq: 0,
             host: String::new(),
             app_installed: None,

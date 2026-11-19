@@ -22,15 +22,6 @@ const TIMEOUT_MS: u64 = 15_000;
 /// timer can be lost (panel closed, runtime restarted), so the UI must not rely
 /// on it alone.
 const PENDING_GRACE_MS: u64 = 5_000;
-/// A device enumeration that takes longer than this is reported as hung. The
-/// host has no error channel on the device API, so a watchdog is the only way
-/// to tell "no device" apart from "the call never came back".
-///
-/// Only the enumeration call sits inside this window. The host's app-list call
-/// (`get_thirdparty_app_list`) has a 12 s ceiling of its own, so anything that
-/// needs it runs afterwards and never decides whether a device was found.
-const PROBE_TIMEOUT_MS: u64 = 8_000;
-const PROBE_PREFIX: &str = "nctalk-probe:";
 /// Page that subscribes to interconnect on the watch. Launching straight into
 /// it saves the user from walking 设置 → 从手机配置 every time.
 const SETUP_PAGE: &str = "pages/setup";
@@ -190,7 +181,6 @@ fn handle_device_action(payload: &str) {
                 state.link_connected = true;
                 state.device_name = name.unwrap_or_default();
                 state.probing = false;
-                state.probe_hung = false;
             });
             tracing::info!("device connected event supplied the target address");
         }
@@ -226,42 +216,23 @@ async fn check_installed(addr: &str) -> Option<bool> {
         })
 }
 
-/// Register the ACK channel and ask whether Talk is installed.
+/// Ask the host for the devices it can reach, then decide.
 ///
-/// Both steps need a live link and both are slow: `get_thirdparty_app_list` has
-/// a 12 s ceiling on the host side, and each host call may round-trip to the
-/// frontend for authorization. They therefore run *after* the device verdict,
-/// detached, and their result is dropped if a newer probe has taken over. This
-/// is the split BandTOTP / otp-helper make by never mixing the app list into
-/// device detection at all.
-async fn refresh_installed(seq: u64, addr: String) {
-    if register::register_interconnect_recv(&addr, protocol::PKG_NAME)
-        .await
-        .is_err()
-    {
-        tracing::warn!("could not register Talk interconnect receiver");
-    }
-    let installed = check_installed(&addr).await;
-    let changed = state::with(|state| {
-        // A newer probe, or a different target, owns the panel now.
-        if state.probe_seq != seq || state.addr.as_deref() != Some(addr.as_str()) {
-            return false;
-        }
-        state.app_installed = installed;
-        true
-    });
-    if changed {
-        ui::render(&state::snapshot());
-    }
-}
-
+/// This is deliberately the *only* host work on the detection path, and it is
+/// always driven by `block_on` from a callback -- never by `spawn`. wit-bindgen
+/// documents that spawned tasks only run inside the async computation they were
+/// spawned in; a task queued from a callback that returns immediately may simply
+/// never be polled, in which case the plugin makes no host call at all: no
+/// `device` permission request, no dialog, and a panel that sits on "no device"
+/// forever. Both published plugins that work (BandTOTP, otp-helper) call
+/// `block_on` inside the callback for exactly this reason.
 async fn probe_device() {
     clear_stale_pending();
     // A typed address removes the need for `device` enumeration altogether:
     // that permission only exists to look the address up.
     let manual = state::with(|state| state.manual_addr.clone());
     if !manual.is_empty() {
-        let seq = state::with(|state| {
+        state::with(|state| {
             state.addr = Some(manual.clone());
             state.device_name.clear();
             state.link_connected = true;
@@ -271,31 +242,22 @@ async fn probe_device() {
             state.app_installed = None;
             state.probed = true;
             state.probing = false;
-            state.probe_hung = false;
             state.probe_seq += 1;
-            state.probe_seq
         });
         ui::render(&state::snapshot());
-        astrobox_ng_wit::spawn(async move { refresh_installed(seq, manual).await });
         return;
     }
     let seq = state::with(|state| {
         state.probe_seq += 1;
         state.probing = true;
-        state.probe_hung = false;
         state.probe_seq
     });
-    // Show "detecting…" immediately: if the panel never leaves this state, the
-    // host device call is hanging rather than reporting zero devices.
     ui::render(&state::snapshot());
-    start_probe_watchdog(seq);
 
     let target = resolve_target().await;
 
-    // Commit the verdict the moment enumeration answers, and nothing later.
-    // Previously the app-list call sat in this chain, so a watch that was found
-    // in 50 ms could still be reported as "no device / probe timed out" for the
-    // 4–12 s the app list took.
+    // Commit the verdict the moment enumeration answers, and nothing later: the
+    // verdict must never wait on the 12 s app-list call.
     let accepted = state::with(|state| {
         if state.probe_seq != seq {
             return false;
@@ -320,7 +282,6 @@ async fn probe_device() {
         state.connected_devices = if target.connected { 1 } else { 0 };
         state.multiple_devices = target.multiple;
         state.probing = false;
-        state.probe_hung = false;
         state.probed = true;
         true
     });
@@ -330,85 +291,35 @@ async fn probe_device() {
     }
     ui::render(&state::snapshot());
 
-    match state::with(|state| state.addr.clone()) {
-        // An offline (paired-only) device has no link to query, and sending
-        // registers and checks it on its own path anyway.
-        Some(addr) if state::with(|state| state.link_connected) => {
-            astrobox_ng_wit::spawn(async move { refresh_installed(seq, addr).await })
-        }
-        Some(_) => {}
-        // With an empty device list the host version is the first thing worth
-        // knowing: an AstroBox update can move or reset its device store.
-        None => fetch_host_info(),
+    // With an empty device list the host version is the first thing worth
+    // knowing: an AstroBox update can move or reset its device store.
+    if state::with(|state| state.addr.is_none()) {
+        fetch_host_info().await;
     }
 }
 
-/// Detached so a slow `os` call can never hold up the form.
-fn fetch_host_info() {
-    astrobox_ng_wit::spawn(async move {
-        let platform = os::platform().await;
-        let version = os::version().await;
-        let text = format!("{} {}", platform.trim(), version.trim())
-            .trim()
-            .to_string();
-        if text.is_empty() {
-            return;
-        }
-        let changed = state::with(|state| {
-            if state.host == text {
-                false
-            } else {
-                state.host = text;
-                true
-            }
-        });
-        if changed {
-            ui::render(&state::snapshot());
-        }
-    });
-}
-
-fn start_probe_watchdog(seq: u64) {
-    let payload = format!("{PROBE_PREFIX}{seq}");
-    astrobox_ng_wit::spawn(async move {
-        let _ = timer::set_timeout(PROBE_TIMEOUT_MS, &payload).await;
-    });
-}
-
-/// The host may deliver a timer payload bare or wrapped as
-/// `{timerId, kind: "timeout", payload}` (same shape as the ACK timeout).
-fn probe_seq_from_payload(payload: &str) -> Option<u64> {
-    if let Some(seq) = payload
-        .strip_prefix(PROBE_PREFIX)
-        .and_then(|rest| rest.parse().ok())
-    {
-        return Some(seq);
+/// Only queried when nothing was found, and only two cheap `os` calls, so it
+/// runs inline instead of being deferred to a task that may never be polled.
+async fn fetch_host_info() {
+    let platform = os::platform().await;
+    let version = os::version().await;
+    let text = format!("{} {}", platform.trim(), version.trim())
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return;
     }
-    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let inner = value.get("payload")?.as_str()?;
-    inner.strip_prefix(PROBE_PREFIX)?.parse().ok()
-}
-
-/// Returns true when the payload was a probe watchdog (handled or stale), so
-/// the caller does not treat it as an ACK timeout.
-fn handle_probe_timeout(payload: &str) -> bool {
-    let Some(seq) = probe_seq_from_payload(payload) else {
-        return false;
-    };
-    let marked = state::with(|state| {
-        if state.probing && state.probe_seq == seq {
-            state.probing = false;
-            state.probe_hung = true;
-            true
-        } else {
+    let changed = state::with(|state| {
+        if state.host == text {
             false
+        } else {
+            state.host = text;
+            true
         }
     });
-    if marked {
-        tracing::warn!("device enumeration did not answer within {PROBE_TIMEOUT_MS} ms");
+    if changed {
         ui::render(&state::snapshot());
     }
-    true
 }
 
 fn parse_input_value(payload: &str) -> String {
@@ -496,7 +407,6 @@ async fn start_send(id: String, payload: String) {
         state.multiple_devices = target.multiple;
         state.probed = true;
         state.probing = false;
-        state.probe_hung = false;
         if !target.name.is_empty() {
             state.device_name = target.name.clone();
         }
@@ -508,6 +418,15 @@ async fn start_send(id: String, payload: String) {
             return;
         }
     };
+
+    match check_installed(&addr).await {
+        Some(false) => {
+            fail_send(&id, "手表上没有安装 Talk（rpk），请先安装后再发送。");
+            return;
+        }
+        Some(true) => state::with(|state| state.app_installed = Some(true)),
+        None => {}
+    }
 
     if register::register_interconnect_recv(&addr, protocol::PKG_NAME)
         .await
@@ -597,9 +516,6 @@ fn handle_ack(payload: &str) {
 }
 
 fn handle_timer(payload: &str) {
-    if handle_probe_timeout(payload) {
-        return;
-    }
     let request_id = state::with(|state| {
         state
             .pending
@@ -636,14 +552,17 @@ impl event_v3::Guest for TalkCredentialPlugin {
                 // no `device` permission, so it works even when enumeration is
                 // denied.
                 handle_device_action(&event_payload);
-                astrobox_ng_wit::spawn(async move {
+                // `block_on`, not `spawn`: spawned tasks are only polled inside
+                // the async computation that spawned them, and this callback has
+                // none, so the probe would silently never run.
+                astrobox_ng_wit::block_on(async {
                     probe_device().await;
                     ui::render(&state::snapshot());
                 });
             }
             _ => {}
         }
-        astrobox_ng_wit::spawn(async move {
+        astrobox_ng_wit::block_on(async move {
             let _ = writer.write(String::new()).await;
         });
         reader
@@ -655,19 +574,16 @@ impl event_v3::Guest for TalkCredentialPlugin {
         event_payload: String,
     ) -> FutureReader<String> {
         let (writer, reader) = wit_future::new::<String>(String::new);
-        // Finish the host-facing future only after the send and timer setup;
-        // don't leave detached host work for the old runtime to drain.
-        astrobox_ng_wit::spawn(async move {
+        // Drive the handler here, synchronously. This is what BandTOTP and
+        // otp-helper do (`block_on` inside the event callback); a `spawn`ed
+        // body is never polled and the click appears to do nothing.
+        astrobox_ng_wit::block_on(async move {
             if event_id == ui::EV_SEND && matches!(event, Event::Click) {
                 let send = begin_send();
                 ui::render(&state::snapshot());
                 if let Some((id, payload)) = send {
-                    let timeout_id = id.clone();
-                    let timeout_payload = protocol::timeout_payload(&timeout_id);
-                    let timer_payload = timeout_payload.clone();
-                    astrobox_ng_wit::spawn(async move {
-                        let _ = timer::set_timeout(TIMEOUT_MS, &timer_payload).await;
-                    });
+                    let timeout_payload = protocol::timeout_payload(&id);
+                    let _ = timer::set_timeout(TIMEOUT_MS, &timeout_payload).await;
                     start_send(id, payload).await;
                 }
             } else if event_id == ui::EV_REFRESH && matches!(event, Event::Click) {
@@ -723,7 +639,6 @@ impl event_v3::Guest for TalkCredentialPlugin {
                         state.multiple_devices = false;
                         state.probed = true;
                         state.probing = false;
-                        state.probe_hung = false;
                     }
                 });
                 ui::render(&state::snapshot());
@@ -759,14 +674,16 @@ impl event_v3::Guest for TalkCredentialPlugin {
     fn on_ui_render(element_id: String) -> FutureReader<()> {
         let (writer, reader) = wit_future::new::<()>(|| ());
         state::with(|state| state.element_id = Some(element_id));
-        // Paint only. Device enumeration is user-triggered: both published
+        // Paint only. Two reasons detection is user-triggered: both published
         // plugins that work (BandTOTP, otp-helper) read the device list from a
-        // click handler, never while the host is still building the panel. A
-        // `device` permission prompt raised at render time is the one case
-        // where the frontend answers "not granted" and the host then returns an
-        // empty list, which reads exactly like "no watch connected".
+        // click handler, and a `device` permission prompt raised while the host
+        // is still building the panel is the one case the frontend can answer
+        // "not granted" -- after which the host returns an empty list, which
+        // reads exactly like "no watch connected".
         ui::render(&state::snapshot());
-        astrobox_ng_wit::spawn(async move {
+        // Resolve the host-facing future before returning. A `spawn`ed write is
+        // only polled inside an async computation, and a sync export has none.
+        astrobox_ng_wit::block_on(async move {
             let _ = writer.write(()).await;
         });
         reader
@@ -774,7 +691,7 @@ impl event_v3::Guest for TalkCredentialPlugin {
 
     fn on_card_render(_card_id: String) -> FutureReader<()> {
         let (writer, reader) = wit_future::new::<()>(|| ());
-        astrobox_ng_wit::spawn(async move {
+        astrobox_ng_wit::block_on(async move {
             let _ = writer.write(()).await;
         });
         reader

@@ -207,13 +207,6 @@ fn preflight_message(state: &State) -> Option<String> {
     if state.probing && state.addr.is_none() && !state.multiple_devices {
         return Some("正在检测设备…（一直停在这里说明宿主的设备枚举没有返回）".to_string());
     }
-    if state.probe_hung && state.addr.is_none() && !state.multiple_devices {
-        return Some(
-            "设备枚举超时：宿主没有返回设备列表。请确认 AstroBox 里手表处于「已连接」，\
-             并在插件权限里允许「设备」。"
-                .to_string(),
-        );
-    }
     if matches!(state.status, Status::Err(_)) {
         return None;
     }

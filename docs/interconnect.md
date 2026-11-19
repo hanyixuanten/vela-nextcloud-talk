@@ -32,17 +32,17 @@ AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 T
 - AstroBox 通过已连接设备地址和已安装快应用的包名定位目标。`send_qaic_message` 返回成功不等于手表已经处理。当前宿主的 `interconnect-message` 用 `{addr,pkgName,payloadText,payloadHex}` 包装回执；插件须解包后读取 `ok`。定时器事件也有宿主包装，应用应识别它并结束等待。
 - 设备状态是**实时**的：宿主在连接变化时推 `device-action`，插件收到后重新枚举并重绘；界面另有「检测设备」/「重新检测设备」按钮，点击时同样重测。二者都不依赖 `pending` 状态，因此上一次发送卡住也不会把面板锁死在旧结论上。
 - **设备枚举只由点击触发，不在 `on_ui_render` 里发起。** 两个已上架、能正常找到设备的插件（BandTOTP、otp-helper）都是从点击回调调 `get_connected_device_list()`；渲染期请求 `device` 授权是唯一会拿到「未授权 → 空列表」的时机，而空列表与「真的没设备」在宿主侧无法区分。打开面板只绘制，第一步是让用户点「检测设备」。
-- **检测链只包含枚举。** 宿主 `get_thirdparty_app_list` 自带 12 秒上限（`QUICK_APP_LIST_TIMEOUT`），早期版本把它和 `register_interconnect_recv` 串在枚举之后，state 又在链条末尾才提交，于是手表明明 50 ms 就被找到，4 秒看门狗却先把面板标成「设备枚举超时」。现在枚举一返回就提交结论并绘制「目标：<手表名 或 地址>」，应用列表与 ack 订阅在后台补，结果带 `probe_seq` 守卫，过期即丢弃。
+- **宿主调用一律用 `block_on`，不用 `spawn`。** wit-bindgen 明确写了：spawned task 只在「发起它的那个 async 计算」内部被 poll。导出回调里 `spawn` 出去的任务很可能一次都不会执行——表现就是插件**根本没发起过任何宿主调用**：没有 `device` 权限请求、没有权限弹窗、面板永远停在「没有设备」。BandTOTP 与 otp-helper 都是在回调里 `block_on(...)` 同步跑完再返回 future，这里照抄。因此探测不再有看门狗：枚举是同步等待的，卡住会卡住这一次点击，但不会假装「没设备」。
+- **检测链只包含枚举。** 宿主 `get_thirdparty_app_list` 自带 12 秒上限（`QUICK_APP_LIST_TIMEOUT`），早期版本把它和 `register_interconnect_recv` 串在枚举之后，手表明明 50 ms 就被找到，面板却要等完整条链才有结论。现在枚举一返回就提交并绘制「目标：<手表名 或 地址>」；应用列表只在「发送」「打开 Talk」这两条点击路径上查，用来把「没装 rpk」和「蓝牙/IPC 失败」区分开。
 - **`device-action` 自带地址。** 宿主派发的载荷是 `{"action":"connected"|"disconnected","addr":"…","name":"…"}`（见宿主 `interconnect_link.rs`），插件直接把它当目标，**不需要 `device` 权限**；而 `launch_qa` / `send_qaic_message` 只要 `thirdpartyapp` / `interconnect` / `register_interconnect_recv`。所以「设备枚举被拒」不再等于「无法配置」：打开面板后在 AstroBox 里断开再连一次手表，状态行出现「目标：<手表名>」即可继续。
-- 宿主的 `device` 接口没有错误通道：未授权或内部失败时只是返回空列表。因此插件用 8 秒看门狗把「没有设备」和「调用没返回」区分开，并在无设备时把宿主报告的「已连接 / 已配对」数量显示出来。
+- 宿主的 `device` 接口没有错误通道：未授权或内部失败时只是返回空列表。因此面板在无设备时把宿主报告的「已连接 N / 已配对 M」数量显示出来，并区分「还没检测」与「检测过、确实没有」。
 - [Vela 官方 Android 三方 App 互联](https://iot.mi.com/vela/quickapp/zh/features/network/interconnect.html)要求 Android 应用和快应用包名、签名一致。这里使用 AstroBox 的插件宿主及其设备通道，不改变 Android 签名或包名；是否能收发仍应以对应设备、固件和 AstroBox 版本的真机验证为准。工作流只能验证构建及协议，不跑蓝牙真机测试。
 
 ## 排错
 
 | 现象 | 先检查 |
 | --- | --- |
-| 面板停在「正在检测设备…」 | 宿主的设备枚举没有返回。先点「重新检测」；仍不动就重开面板或重启 AstroBox。超过 8 秒会自动转成「设备枚举超时」。 |
-| 面板显示「设备枚举超时」 | 同上：宿主没有回答 `get-connected-device-list`。检查 AstroBox 版本与插件的「设备」权限。 |
+| 面板停在「正在检测设备…」 | 枚举是同步等待的：宿主没返回就一直停在这句。看 AstroBox 日志里有没有 `permission request start 'device'`——有就是前端权限弹窗在等确认，没有就是插件没有发起调用（版本不对，重装 0.1.11）。 |
 | 面板显示「已连接 0 / 已配对 0」 | 说明 `device` 权限没有拿到（前端授权被拒时宿主只返回空列表，不报错）。三条出路：① 在插件权限里把「设备」打开，恢复自动枚举；② 保持面板打开，在 AstroBox 里断手表再连一次，插件会从 `device-action` 直接拿到地址并显示「目标：<手表名>」；③ 把 AstroBox 设备详情里的地址填进「设备地址（高级）」，填了就不再枚举——启动与发送只需要 `thirdpartyapp` / `interconnect` 权限。 |
 | 面板一直显示「没有已连接的设备」 | 先点「重新检测设备」。插件会枚举 AstroBox 当前**已连接**的设备，只配对未连接不算；仍然为空时在 AstroBox 里断开重连手表。设备单独连上/断开时宿主会推 `device-action`，面板会自动重测，不必关掉重开。 |
 | 面板显示「已配对但当前未连接」 | 宿主管道暂时没建立，发送时会再尝试一次；失败请先在 AstroBox 里连接手表。 |

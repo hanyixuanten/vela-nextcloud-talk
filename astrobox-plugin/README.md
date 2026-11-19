@@ -22,7 +22,7 @@ AstroBox (插件 UI)  ──interconnect──>  手表 Talk (pages/setup)
 astrobox-plugin/
 ├── Cargo.toml              # cdylib，target 见 .cargo/config.toml
 ├── .cargo/config.toml      # build.target = wasm32-wasip2
-├── manifest.json           # 插件清单（版本 0.1.10、entry / wasi_version / api_level / permissions）
+├── manifest.json           # 插件清单（版本 0.1.11、entry / wasi_version / api_level / permissions）
 ├── icon.png
 ├── src/
 │   ├── lib.rs              # 生命周期、事件入口、发送流程
@@ -52,7 +52,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.10.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.11.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里同时装了发行版 rustc（没有 wasm std），`build_dist.py` 调用的 `cargo` 可能是错的那个，会报 `can't find crate for core`。用 rustup 的 cargo：
@@ -133,6 +133,7 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 - **手机 → 手表：** `interconnect.send-qaic-message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v1 JSON（`kind: "credentials"`、`base_url`、`user`、`app_password`），新版插件额外发送字符串 `request_id`。
 - **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 为 `ok`、可选 `message` 和 `display_name`，且须回显本次字符串 `request_id`。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件要求来源设备、包名和请求 ID 全部匹配，不接受无 request_id 的旧 ACK。
+- **异步驱动：** 所有宿主调用都在回调里用 `block_on` 同步跑完，不用 `spawn`。wit-bindgen 的 `spawn` 只在「发起它的 async 计算」内部被 poll，导出回调里的 spawned task 可能一次都不执行——那会让插件看起来**从未请求过任何权限**（没有弹窗、没有枚举、永远「没有设备」）。两个能用的第三方插件（BandTOTP、otp-helper）都是 `block_on`。
 - **超时：** 点发送后立即独立启动 15 秒计时器，不依赖设备/互联宿主调用返回；`Timer` 事件包装为 `{timerId, kind: "timeout", payload}`，`payload` 含本次请求 ID，不会让上一次定时器中断新请求。若宿主调用自身永不返回（例如枚举设备挂起），计时器仍会结束等待；此外超过 15 秒 + 5 秒宽限的挂起请求会在下次重绘、输入或点「重新检测」时被自动清除，UI 不会永久停在「正在发送…」。
 
 ## 权限
@@ -158,7 +159,7 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 **只连接一台设备时才发送。** 如果 `device.get_connected_device_list()` 返回多台，断开其他设备再重试，避免把凭据发给错误的手表。
 
-计时器现在从开始发送时独立启动（见上面的「线上路由和协议」）。如果设备枚举、订阅或发送的宿主调用永不返回，UI 事件回调仍可能挂起；恢复/取消行为待目标 AstroBox 运行时验证。
+计时器在发送前同步建立（见上面的「线上路由和协议」）。由于宿主调用改为 `block_on` 同步等待，枚举/订阅/发送若永不返回，这一次点击会一直挂着——这正是 BandTOTP 的行为，也比「假装没设备」更诚实；面板侧仍用 15 秒 + 5 秒宽限清理挂起的发送。
 
 **无文件日志。** 官方模板的 `logger.rs` 用 `tracing-appender` 写滚动文件，而它内部调用 `symlink::symlink_file`，在 wasm 目标上被编译掉，直接编译失败。这里改成只写 stdout（AstroBox 会捕获）。如果你从模板起步，第一件事就是把这段换掉。
 
