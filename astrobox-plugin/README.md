@@ -22,7 +22,7 @@ AstroBox (插件 UI)  ──interconnect──>  手表 Talk (pages/setup)
 astrobox-plugin/
 ├── Cargo.toml              # cdylib，target 见 .cargo/config.toml
 ├── .cargo/config.toml      # build.target = wasm32-wasip2
-├── manifest.json           # 插件清单（版本 0.1.11、entry / wasi_version / api_level / permissions）
+├── manifest.json           # 插件清单（版本 0.1.12、entry / wasi_version / api_level / permissions）
 ├── icon.png
 ├── src/
 │   ├── lib.rs              # 生命周期、事件入口、发送流程
@@ -52,7 +52,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.11.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.12.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里同时装了发行版 rustc（没有 wasm std），`build_dist.py` 调用的 `cargo` 可能是错的那个，会报 `can't find crate for core`。用 rustup 的 cargo：
@@ -133,7 +133,7 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 - **手机 → 手表：** `interconnect.send-qaic-message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v1 JSON（`kind: "credentials"`、`base_url`、`user`、`app_password`），新版插件额外发送字符串 `request_id`。
 - **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 为 `ok`、可选 `message` 和 `display_name`，且须回显本次字符串 `request_id`。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件要求来源设备、包名和请求 ID 全部匹配，不接受无 request_id 的旧 ACK。
-- **异步驱动：** 所有宿主调用都在回调里用 `block_on` 同步跑完，不用 `spawn`。wit-bindgen 的 `spawn` 只在「发起它的 async 计算」内部被 poll，导出回调里的 spawned task 可能一次都不执行——那会让插件看起来**从未请求过任何权限**（没有弹窗、没有枚举、永远「没有设备」）。两个能用的第三方插件（BandTOTP、otp-helper）都是 `block_on`。
+- **异步驱动：宿主调用 `block_on`，返回的 future `spawn`。** 回调是同步函数，`spawn` 出去的任务在里面不保证被 poll（那会让插件看起来**从未请求过任何权限**：没弹窗、没枚举、永远「没有设备」）；但也不能 `block_on` 去写要返回给宿主的未来——宿主拿到 reader 之前无法读取，会 trap `deadlock detected: event loop cannot make further progress`。顺序固定为：`block_on(宿主调用)` → `spawn(writer.write)` → 返回 reader，与 BandTOTP / otp-helper 一致。
 - **超时：** 点发送后立即独立启动 15 秒计时器，不依赖设备/互联宿主调用返回；`Timer` 事件包装为 `{timerId, kind: "timeout", payload}`，`payload` 含本次请求 ID，不会让上一次定时器中断新请求。若宿主调用自身永不返回（例如枚举设备挂起），计时器仍会结束等待；此外超过 15 秒 + 5 秒宽限的挂起请求会在下次重绘、输入或点「重新检测」时被自动清除，UI 不会永久停在「正在发送…」。
 
 ## 权限

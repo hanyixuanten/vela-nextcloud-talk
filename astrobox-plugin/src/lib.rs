@@ -552,9 +552,9 @@ impl event_v3::Guest for TalkCredentialPlugin {
                 // no `device` permission, so it works even when enumeration is
                 // denied.
                 handle_device_action(&event_payload);
-                // `block_on`, not `spawn`: spawned tasks are only polled inside
-                // the async computation that spawned them, and this callback has
-                // none, so the probe would silently never run.
+                // Run the probe blocking. A task queued with `spawn` from a sync
+                // callback is not guaranteed to be polled at all, which shows up
+                // as "the plugin never asked for the device permission".
                 astrobox_ng_wit::block_on(async {
                     probe_device().await;
                     ui::render(&state::snapshot());
@@ -562,7 +562,10 @@ impl event_v3::Guest for TalkCredentialPlugin {
             }
             _ => {}
         }
-        astrobox_ng_wit::block_on(async move {
+        // The returned future is resolved *after* this callback returns: the
+        // host only receives its reader once we hand it back, so blocking on the
+        // write here traps with "event loop cannot make further progress".
+        astrobox_ng_wit::spawn(async move {
             let _ = writer.write(String::new()).await;
         });
         reader
@@ -574,10 +577,11 @@ impl event_v3::Guest for TalkCredentialPlugin {
         event_payload: String,
     ) -> FutureReader<String> {
         let (writer, reader) = wit_future::new::<String>(String::new);
-        // Drive the handler here, synchronously. This is what BandTOTP and
-        // otp-helper do (`block_on` inside the event callback); a `spawn`ed
-        // body is never polled and the click appears to do nothing.
-        astrobox_ng_wit::block_on(async move {
+        // Run the work blocking -- this is what BandTOTP and otp-helper do, and
+        // it is the only reliable way to make host calls from these callbacks.
+        // The writer is deliberately *not* captured here: see below.
+        let mut pending_write = Some(writer);
+        astrobox_ng_wit::block_on(async {
             if event_id == ui::EV_SEND && matches!(event, Event::Click) {
                 let send = begin_send();
                 ui::render(&state::snapshot());
@@ -666,7 +670,11 @@ impl event_v3::Guest for TalkCredentialPlugin {
                     ui::render(&state::snapshot());
                 }
             }
-            let _ = writer.write(String::new()).await;
+        });
+        astrobox_ng_wit::spawn(async move {
+            if let Some(writer) = pending_write.take() {
+                let _ = writer.write(String::new()).await;
+            }
         });
         reader
     }
@@ -681,9 +689,9 @@ impl event_v3::Guest for TalkCredentialPlugin {
         // "not granted" -- after which the host returns an empty list, which
         // reads exactly like "no watch connected".
         ui::render(&state::snapshot());
-        // Resolve the host-facing future before returning. A `spawn`ed write is
-        // only polled inside an async computation, and a sync export has none.
-        astrobox_ng_wit::block_on(async move {
+        // Nothing to wait for, and blocking on the write would deadlock: the
+        // host cannot read this future until the callback returns.
+        astrobox_ng_wit::spawn(async move {
             let _ = writer.write(()).await;
         });
         reader
@@ -691,7 +699,7 @@ impl event_v3::Guest for TalkCredentialPlugin {
 
     fn on_card_render(_card_id: String) -> FutureReader<()> {
         let (writer, reader) = wit_future::new::<()>(|| ());
-        astrobox_ng_wit::block_on(async move {
+        astrobox_ng_wit::spawn(async move {
             let _ = writer.write(()).await;
         });
         reader
