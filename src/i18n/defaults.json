@@ -21,7 +21,7 @@
     "next": "下一个",
     "done": "完成",
     "errRequired": "请填写全部三项",
-    "errScheme": "地址需以 http:// 或 https:// 开头",
+    "errScheme": "服务器地址必须使用 https://",
     "saved": "已连接"
   },
   "index": {
@@ -33,6 +33,7 @@
     "settings": "设置"
   },
   "chat": {
+    "offline": "离线",
     "placeholder": "点击输入消息…",
     "loadolder": "加载更早消息",
     "backlatest": "返回最新消息",
@@ -59,12 +60,14 @@
     "about": "关于",
     "screenCircle": "圆形",
     "screenRect": "方形",
-    "screenPill": "胶囊",
     "fontSmall": "小",
     "fontNormal": "中",
     "fontLarge": "大",
+    "saveFailed": "保存失败，请重试",
     "seconds": "秒",
-    "cleared": "已清除"
+    "cleared": "已清除",
+    "clearFailed": "清除失败，请重试",
+    "clearAgain": "再次点击确认清除"
   },
   "setup": {
     "title": "从手机配置",

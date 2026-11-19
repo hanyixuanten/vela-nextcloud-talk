@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS = {
 
   // Keyboard: QWERTY | T9 (forwarded to the InputMethod component).
   keyboardType: 'QWERTY',
-  // Screen shape: circle | rect | pill (forwarded to the InputMethod component).
+  // Screen shape: circle | rect (forwarded to the InputMethod component).
   screenType: 'circle',
   // Milliseconds between background polls of the open conversation.
   pollInterval: 15000,
@@ -95,11 +95,15 @@ function saveMarkers(markers) {
 }
 
 function clearAll() {
-  return new Promise((resolve) => {
-    storage.clear({
-      success: () => resolve(),
-      fail: () => resolve()
-    })
+  return new Promise((resolve, reject) => {
+    try {
+      storage.clear({
+        success: () => resolve(),
+        fail: (data, code) => reject(new Error('storage clear failed, code=' + code))
+      })
+    } catch (err) {
+      reject(err)
+    }
   })
 }
 

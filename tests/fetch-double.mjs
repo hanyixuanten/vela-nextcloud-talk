@@ -10,11 +10,18 @@
 
 export default {
   fetch(options) {
+    if (options.url.indexOf('/hang') >= 0) return
     const init = { method: options.method || 'GET', headers: options.header || {} }
     if (options.data !== undefined) init.body = options.data
 
+    // The production API enforces HTTPS before attaching Basic credentials.
+    // Tests use a local plain-HTTP server, so this adapter maps only loopback
+    // HTTPS URLs to that test server while preserving the production URL contract.
+    const url = new URL(options.url)
+    if (url.hostname === '127.0.0.1' && url.protocol === 'https:') url.protocol = 'http:'
+
     globalThis
-      .fetch(options.url, init)
+      .fetch(url, init)
       .then(async (response) => {
         const text = await response.text()
         const headers = {}

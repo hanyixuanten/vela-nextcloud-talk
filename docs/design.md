@@ -25,7 +25,7 @@ half_width(y) = sqrt(240² - (y - 240)²)
 1. **顶部不放导航。** 聊天页标题栏 `margin-top: 60px`，而不是贴顶。
 2. **内容列宽 360px、左偏移 60px。** 即 `x ∈ [60, 420]`，在 y ∈ [60, 420] 区间内都能完整显示，只有滚动到极上/极下时列表边缘会被裁掉一点，这是可接受的。
 
-聊天页底部输入条宽 248px 而不是撑满 360px，因为 y=440 处只剩 266px 可用宽度。
+聊天页底部输入条宽 244px 而不是撑满 360px，因为 y=440 处只剩 266px 可用宽度。
 
 ## 2. 输入法占用与双状态
 
@@ -75,7 +75,7 @@ half_width(y) = sqrt(240² - (y - 240)²)
 app.ux onCreate
    └─ store.load() → api.configure()
                      └─ hasAccount?
-                         ├─ 否 → pages/index onShow → replace('/login')
+                         ├─ 否 → pages/index onShow → replace('/setup')
                          └─ 是 → pages/index refresh()
 
 pages/login  ──submit──> api.getCurrentUser()
@@ -106,7 +106,7 @@ pages/chat   onInit  → 读取配置
   "appPassword": "xxxxx-xxxxx-xxxxx-xxxxx-xxxxx",
   "displayName": "Alice",
   "keyboardType": "QWERTY",   // QWERTY | T9
-  "screenType": "circle",     // circle | rect | pill
+  "screenType": "circle",     // circle | rect
   "pollInterval": 15000,
   "fontScale": "normal"       // small | normal | large
 }
@@ -124,8 +124,8 @@ pages/chat   onInit  → 读取配置
 | 项 | 现状 | 说明 |
 | --- | --- | --- |
 | 凭证类型 | 应用密码 | 不用账号密码；丢失设备只需吊销单条应用密码 |
-| 传输 | HTTPS（建议强制） | 请求里不做证书 pinning，明文 HTTP 时代理即可读到密码 |
-| 本地存储 | 明文 | **Vela 没有 keystore API**，`@system.storage` 是应用沙箱内的普通存储，root 或提权后可见 |
+| 传输 | 强制 HTTPS | 客户端拒绝 HTTP；请求里不做证书 pinning，仍依赖系统 TLS 校验 |
+| 本地存储 | 明文 | **Vela 没有 keystore API**，`@system.storage` 是应用沙箱内的普通存储，root 或提权后可见；清除本地账号后应在 Nextcloud 吊销应用密码 |
 | 密码回显 | 掩码为 `•` | 输入态也只显示掩码 |
 | 日志 | 不打印凭证 | `api.js` 只在失败时打错误文案，不打 header |
 

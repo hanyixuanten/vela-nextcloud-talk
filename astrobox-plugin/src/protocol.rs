@@ -19,11 +19,33 @@ struct CredentialMessage<'a> {
     request_id: &'a str,
 }
 
+pub fn normalize_server(server: &str) -> Option<String> {
+    let trimmed = server.trim();
+    let (scheme, rest) = trimmed.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("https") || rest.is_empty() || rest.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = if authority.starts_with('[') {
+        authority.split_once(']').map(|(host, _)| host).unwrap_or("")
+    } else {
+        authority.rsplit_once(':').map_or(authority, |(host, port)| {
+            if port.bytes().all(|byte| byte.is_ascii_digit()) { host } else { authority }
+        })
+    };
+    if authority.is_empty() || host.is_empty() || host.starts_with(':') || authority.contains('@') || authority.chars().any(char::is_control) {
+        return None;
+    }
+    let normalized = format!("https://{}", rest.trim_end_matches('/'));
+    Some(normalized)
+}
+
 pub fn build_credential_message(server: &str, user: &str, password: &str, request_id: &str) -> String {
+    let normalized_server = normalize_server(server).unwrap_or_default();
     let message = CredentialMessage {
         v: PROTOCOL_VERSION,
         kind: "credentials",
-        base_url: server.trim().trim_end_matches('/'),
+        base_url: normalized_server.as_str(),
         user: user.trim(),
         app_password: password,
         request_id,
@@ -52,11 +74,11 @@ pub struct ReceivedAck {
 
 impl ReceivedAck {
     pub fn matches(&self, addr: &str, request_id: &str) -> bool {
-        self.addr.as_deref().is_none_or(|from| {
-            let normalize = |value: &str| value.trim().replace('-', ":").to_ascii_uppercase();
-            normalize(from) == normalize(addr)
-        }) && self.pkg_name.as_deref().is_none_or(|pkg| pkg == PKG_NAME)
-            && self.ack.request_id.as_deref().is_none_or(|id| id == request_id)
+        let normalize = |value: &str| value.trim().replace('-', ":").to_ascii_uppercase();
+        let source_matches = self.addr.as_deref().is_some_and(|from| normalize(from) == normalize(addr));
+        let package_matches = self.pkg_name.as_deref().is_some_and(|pkg| pkg == PKG_NAME);
+        let request_matches = self.ack.request_id.as_deref().is_some_and(|id| id == request_id);
+        source_matches && package_matches && request_matches
     }
 }
 

@@ -52,7 +52,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.2.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.3.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里同时装了发行版 rustc（没有 wasm std），`build_dist.py` 调用的 `cargo` 可能是错的那个，会报 `can't find crate for core`。用 rustup 的 cargo：

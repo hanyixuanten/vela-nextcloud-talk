@@ -123,7 +123,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 通知推送 | ❌ | Vela 暂无第三方 app 的推送通道 |
 | 引用回复 | ✅ | 长按可回复的消息 →「回复」；点 × 可取消引用 |
 | 表情反应 | ✅ | 长按普通消息 →「表情」，可添加或撤销 👍、❤️、😂（Talk 14+） |
-| 通话、表情回应 | ❌ | 尚未实现 |
+| 通话 | ❌ | 尚未实现 |
 
 ---
 
@@ -177,7 +177,13 @@ vela-nextcloud-talk/
 │   ├── fetch-double.mjs          # @system.fetch 的 Node 替身
 │   ├── api.test.mjs              # api.js 集成测试
 │   ├── protocol.test.mjs         # 凭据协议单元测试
-│   └── units.test.mjs            # base64 / format 单元测试
+│   ├── units.test.mjs            # base64 / format 单元测试
+│   ├── chat.test.mjs             # 聊天交互测试
+│   └── seed-watch-chat.test.mjs  # seed/watch 聊天测试
+├── scripts/seed-watch-chat.mjs   # 向真机写入测试消息
+└── docs/
+    ├── image-preview.md          # 附件显示调查
+    └── watch-memory-baseline.md  # 手表基线内存
 └── sign/                         # 证书放这里（.gitignore 已排除 pem）
 ```
 
@@ -272,11 +278,11 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 ## 已知限制
 
-- **短轮询**：使用 `lookIntoFuture=1&timeout=0`，每次请求结束后再开始计时。浏览历史或离开页面时暂停轮询。
-- **明文 HTTP**：`manifest.json` 没有声明网络安全例外，实际请务必用 HTTPS，否则应用密码在链路上是裸的。
-- **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。
+- **短轮询**：使用 `lookIntoFuture=1` 拉取新消息，每次请求结束后再开始计时；按设置每 15s（可改 30s / 60s）轮询。浏览历史或离开页面时暂停轮询。
+- **HTTPS-only**：手动登录、候选账号校验与手机凭据协议均拒绝明文 HTTP；客户端依赖系统 TLS 校验，不做证书 pinning。
+- **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。清除本地账号后也应在 Nextcloud 吊销对应应用密码。
 - **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。不提供缩略图，也不下载或解码图片，原因见[图片预览评估](docs/image-preview.md)。
-- **消息窗口**：单页 12 条、界面最多 24 条，单条正文保留前 512 个 UTF-16 代码单元以内并加省略号；完整长消息请在手机或网页端查看。
+- **消息窗口**：每次拉取 12 条，界面最多保留 24 条；支持加载更早消息，单条正文保留前 512 个 UTF-16 代码单元以内并加省略号。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
 - **互联真机验证**：AstroBox 按已连接设备地址与已安装快应用包名投递；仍须在目标固件与 AstroBox 版本上验证收发。Android 官方互联签名要求与排错见[凭据互联说明](docs/interconnect.md)。
 - **插件不持久化密码**：AstroBox 的 Host API 里确实没有文件系统函数（`os` 只给 arch/hostname/locale），运行时虽然提供 WASI std fs（限定在插件自己的目录内），但这一版**故意没有**写盘——密码每次都要重填，真正的保存只发生在手表的 `@system.storage`，发送成功后插件立刻清空内存里的密码。
@@ -289,7 +295,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 2. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）。
 3. 离线草稿队列。
 
-手表端不做缩略图或图片预览。
+手表端不做缩略图或图片预览；更多撤回、复制等操作暂未实现。
 
 ---
 

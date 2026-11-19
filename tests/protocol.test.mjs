@@ -86,15 +86,17 @@ test('rejects missing fields', () => {
   assert.equal(result.silent, undefined)
 })
 
-test('rejects a bad scheme', () => {
-  const raw = JSON.stringify({
-    v: 1,
-    kind: 'credentials',
-    base_url: 'cloud.example.com',
-    user: 'u',
-    app_password: 'p'
-  })
-  assert.match(protocol.parseCredentialMessage(raw).error, /https?:\/\//)
+test('rejects a bad scheme and plaintext HTTP', () => {
+  for (const base_url of ['cloud.example.com', 'http://cloud.example.com']) {
+    const raw = JSON.stringify({
+      v: 1,
+      kind: 'credentials',
+      base_url,
+      user: 'u',
+      app_password: 'p'
+    })
+    assert.equal(protocol.parseCredentialMessage(raw).ok, false)
+  }
 })
 
 test('ack always carries the three fields', () => {

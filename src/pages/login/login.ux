@@ -179,7 +179,7 @@ export default {
       this.error = this.$t('login.errRequired')
       return
     }
-    if (!/^https?:\/\//i.test(baseUrl)) {
+    if (!/^https:\/\//i.test(baseUrl)) {
       this.error = this.$t('login.errScheme')
       return
     }

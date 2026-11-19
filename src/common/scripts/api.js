@@ -18,6 +18,7 @@ import base64Encode from './base64'
 const OCS = '/ocs/v2.php'
 const TALK_V1 = OCS + '/apps/spreed/api/v1'
 const TALK_V4 = OCS + '/apps/spreed/api/v4'
+const REQUEST_TIMEOUT_MS = 20000
 
 let account = { baseUrl: '', user: '', appPassword: '' }
 
@@ -100,8 +101,24 @@ function apiError(status, message) {
  */
 function request(options, credentials = account) {
   return new Promise((resolve, reject) => {
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      const err = apiError(0, '网络请求超时')
+      err.code = 'TIMEOUT'
+      reject(err)
+    }, REQUEST_TIMEOUT_MS)
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      callback(value)
+    }
+
     if (!credentials.baseUrl) {
-      reject(apiError(0, '尚未设置服务器地址'))
+      finish(reject, apiError(0, '尚未设置服务器地址'))
       return
     }
 
@@ -120,7 +137,7 @@ function request(options, credentials = account) {
         const status = response.code
 
         if (status === 304) {
-          resolve({ status: 304, data: null, headers: response.headers || {}, meta: null })
+          finish(resolve, { status: 304, data: null, headers: response.headers || {}, meta: null })
           return
         }
 
@@ -140,7 +157,7 @@ function request(options, credentials = account) {
         )
 
         if (httpOk && (ocsOk || (!meta && payload))) {
-          resolve({
+          finish(resolve, {
             status: status,
             data: ocs ? ocs.data : payload,
             headers: response.headers || {},
@@ -153,13 +170,13 @@ function request(options, credentials = account) {
         const serverMessage = meta && meta.message && meta.message !== 'OK' ? meta.message : ''
         const err = apiError(status, serverMessage || describeStatus(status))
         err.payload = payload
-        reject(err)
+        finish(reject, err)
       },
       fail: (data, code) => {
         const detail = typeof data === 'string' ? data : (data && data.data) || ''
         const err = apiError(0, '网络请求失败' + (detail ? '：' + detail : ''))
         err.code = code
-        reject(err)
+        finish(reject, err)
       }
     }
 
@@ -168,7 +185,11 @@ function request(options, credentials = account) {
       params.data = JSON.stringify(options.body)
     }
 
-    fetch.fetch(params)
+    try {
+      fetch.fetch(params)
+    } catch (err) {
+      finish(reject, apiError(0, '网络请求失败：' + ((err && err.message) || err)))
+    }
   })
 }
 
@@ -176,6 +197,12 @@ function request(options, credentials = account) {
 function getCurrentUser(settings) {
   // A candidate account should not replace the live credentials until saved.
   const credentials = settings ? normaliseAccount(settings) : account
+  if (!credentials.baseUrl) {
+    return Promise.reject(apiError(0, '尚未设置服务器地址'))
+  }
+  if (!/^https:\/\//i.test(credentials.baseUrl)) {
+    return Promise.reject(apiError(0, '服务器地址必须使用 HTTPS'))
+  }
   return request({ path: OCS + '/cloud/user' }, credentials).then((res) => {
     const data = res.data || {}
     return {
@@ -207,7 +234,7 @@ function getMessages(token, options) {
     setReadMarker: 0,
     markNotificationsAsRead: 0
   }
-  if (opts.lookIntoFuture) query.timeout = opts.timeout === undefined ? 0 : opts.timeout
+  if (opts.lookIntoFuture && opts.timeout !== undefined) query.timeout = opts.timeout
   if (opts.lastKnownMessageId) query.lastKnownMessageId = opts.lastKnownMessageId
 
   return request({ path: TALK_V1 + '/chat/' + encodeURIComponent(token), query: query }).then(
@@ -273,5 +300,6 @@ export default {
   getMessages,
   sendMessage,
   setReaction,
-  markRead
+  markRead,
+  REQUEST_TIMEOUT_MS
 }
