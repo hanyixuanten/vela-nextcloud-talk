@@ -7,9 +7,12 @@
     "node": ">=14"
   },
   "scripts": {
-    "start": "aiot start --watch",
-    "build": "aiot build",
-    "release": "aiot release",
+    "build": "npm run build:circle --",
+    "build:circle": "node scripts/build-watch.cjs build circle",
+    "build:rect": "node scripts/build-watch.cjs build rect",
+    "release": "npm run release:circle --",
+    "release:circle": "node scripts/build-watch.cjs release circle",
+    "release:rect": "node scripts/build-watch.cjs release rect",
     "icon": "python3 scripts/gen-icon.py",
     "test": "sh tests/run.sh",
     "sync:ime": "sh scripts/sync-input-method.sh"

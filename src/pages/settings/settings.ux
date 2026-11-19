@@ -21,9 +21,14 @@
           <text class="row-value">{{ keyboardType }}</text>
         </div>
 
-        <div class="row" @click="cycleScreen">
+        <div class="row">
           <text class="row-label">{{ $t('settings.screen') }}</text>
-          <text class="row-value">{{ screenLabel }}</text>
+          <!-- if true: process.env.SHAPE === 'CIRCLE' -->
+          <text class="row-value">{{ $t('settings.screenCircle') }}</text>
+          <!-- endif -->
+          <!-- if true: process.env.SHAPE === 'RECT' -->
+          <text class="row-value">{{ $t('settings.screenRect') }}</text>
+          <!-- endif -->
         </div>
 
         <div class="row" @click="cyclePoll">
@@ -62,12 +67,6 @@ import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import api from '../../common/scripts/api'
 
-const SCREENS = ['circle', 'rect', 'pill']
-const SCREEN_LABEL_KEYS = {
-  circle: 'settings.screenCircle',
-  rect: 'settings.screenRect',
-  pill: 'settings.screenPill'
-}
 const FONTS = ['small', 'normal', 'large']
 const FONT_LABEL_KEYS = {
   small: 'settings.fontSmall',
@@ -86,8 +85,6 @@ export default {
     version: '0.2.2',
     accountLabel: '',
     keyboardType: 'QWERTY',
-    screenType: 'circle',
-    screenLabel: '',
     pollInterval: 15000,
     pollLabel: '',
     fontScale: 'normal',
@@ -99,7 +96,6 @@ export default {
       state.settings = settings
       state.ready = store.hasAccount(settings)
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.screenType = settings.screenType || 'circle'
       this.pollInterval = settings.pollInterval || 15000
       this.fontScale = settings.fontScale || 'normal'
       this.refreshLabels(settings)
@@ -113,7 +109,6 @@ export default {
     } else {
       this.accountLabel = this.$t('settings.notSet')
     }
-    this.screenLabel = this.$t(SCREEN_LABEL_KEYS[this.screenType] || SCREEN_LABEL_KEYS.circle)
     this.fontLabel = this.$t(FONT_LABEL_KEYS[this.fontScale] || FONT_LABEL_KEYS.normal)
     this.pollLabel = this.pollInterval / 1000 + this.$t('settings.seconds')
   },
@@ -133,13 +128,6 @@ export default {
     const value = this.keyboardType === 'QWERTY' ? 'T9' : 'QWERTY'
     this.keyboardType = value
     this.persist({ keyboardType: value }).catch(() => undefined)
-  },
-
-  cycleScreen() {
-    const value = nextInList(SCREENS, this.screenType)
-    this.screenType = value
-    this.screenLabel = this.$t(SCREEN_LABEL_KEYS[value])
-    this.persist({ screenType: value }).catch(() => undefined)
   },
 
   cyclePoll() {
@@ -284,4 +272,45 @@ export default {
   font-size: 20px;
   color: #a9b5c2;
 }
+
+.row-value {
+  lines: 1;
+}
+
+/* if true: process.env.SHAPE === 'CIRCLE' */
+.header {
+  width: 260px;
+  height: 84px;
+  padding-top: 22px;
+}
+.footer {
+  height: 76px;
+  padding-bottom: 18px;
+}
+.foot-btn {
+  height: 50px;
+}
+/* endif */
+
+/* if true: process.env.SHAPE === 'RECT' */
+.header, .list, .row, .footer, .foot-btn {
+  width: 432px;
+}
+.header, .footer {
+  height: 76px;
+}
+.list {
+  margin-left: 24px;
+}
+.row {
+  height: 68px;
+}
+.row-value {
+  width: 200px;
+}
+.foot-btn {
+  height: 54px;
+  border-radius: 20px;
+}
+/* endif */
 </style>

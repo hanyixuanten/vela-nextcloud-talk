@@ -1,111 +1,43 @@
-# 手机侧配置凭据（interconnect）
+# 从手机配置 Nextcloud 凭据
 
-在手表上输入 `https://cloud.example.com` 加一串应用密码实在太痛苦。这条链路让用户在 AstroBox（手机/桌面）里打字，凭据经蓝牙送到手表，由手表自己校验并落盘。
+AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 Talk。手表用自己的网络调用 `GET /ocs/v2.php/cloud/user` 校验；只有认证通过且本地保存成功才确认。已有账号不受失败的验证影响。插入的应用密码只应授予此设备并通过 HTTPS 使用；插件不把密码写盘。
 
-```
-┌──────────────┐   interconnect.send-qaic-message    ┌───────────────────┐
-│ AstroBox 插件 │ ──────────────────────────────────> │ 手表 Talk          │
-│ (Rust/wasm)   │   {"v":1,"kind":"credentials",…}    │ pages/setup        │
-│              │ <────────────────────────────────── │                    │
-└──────────────┘        ack {"ok":true,…}            └───────────────────┘
-                                                              │
-                                                    GET /ocs/v2.php/cloud/user
-                                                              │
-                                                       @system.storage
-```
+## 使用和真机验收
 
-## 为什么校验放在手表
+1. 安装与手表屏幕相符的 RPK，包名必须是 `com.hanyixuanten.nctalk`；同时在手机 AstroBox 安装同一次构建的 ABP，并连接目标手表。
+2. 打开表上的 Talk，停留在「从手机配置」。首次启动默认进该页，有账号时可从设置进入。
+3. 打开手机的「Talk 凭据配置」，确保 AstroBox 只连接需要配置的那一块表，输入 HTTPS 地址、用户名和应用密码后发送。确认手表先显示校验、随后保存并进入会话列表；同时确认手机收到成功回执。重开 Talk，确保配置仍存在。
+4. 再用错误的应用密码测试：两边都应显示失败，手表原有账号仍可用。最后退出手表配置页再发送，确认手机报告超时而不是一直显示发送中，且可重试。
+5. 两种屏幕分别检查主页、设置、配置页，以及登录和聊天的键盘、返回键、发送键是否可见且可点。
 
-插件端可以做网络请求（WASI p2 有 http，清单里也能声明 `network`），但故意不做：
+## 协议（v1）
 
-- 密码只经过一条链路（插件 → 蓝牙 → 手表），AstroBox 侧不产生任何对外请求；
-- 校验逻辑与运行时共用同一份 `api.js`，错误文案、超时行为完全一致，不会出现「插件说成功、手表连不上」的分歧；
-- 手表本来就要连 Nextcloud，多一个 HTTP 客户端只是多一份要维护的东西。
-
-## 协议
-
-请求（插件 → 手表），JSON 字符串：
+手机发送 UTF-8 JSON 字符串；手表的 `onmessage` 也兼容已解码的对象：
 
 ```json
-{
-  "v": 1,
-  "kind": "credentials",
-  "base_url": "https://cloud.example.com",
-  "user": "alice",
-  "app_password": "xxxxx-xxxxx-xxxxx-xxxxx-xxxxx"
-}
+{"v":1,"kind":"credentials","request_id":"cfg-1","base_url":"https://cloud.example.com","user":"alice","app_password":"example"}
 ```
 
-应答（手表 → 插件），JSON 字符串：
+手表将对象交给 Vela `connect.send({ data: … })` 序列化：
 
 ```json
-{ "ok": true, "message": "已保存", "display_name": "Alice" }
+{"ok":true,"message":"已保存","display_name":"Alice","request_id":"cfg-1"}
 ```
 
-字段约定：
+`request_id` 是可选字符串：手表在回执原样带回，用于区分重试后到达的旧回执。旧版请求无此字段时仍能处理。非凭据消息或无法解析的消息忽略；`kind: credentials` 但版本或参数不正确时返回失败回执。协议实现见 [手表端](../src/common/scripts/protocol.js) 与 [插件端](../astrobox-plugin/src/protocol.rs)。
 
-| 字段 | 说明 |
-| --- | --- |
-| `v` | 协议版本，当前 `1`。版本不匹配时手表**明确报错**而不是半解析 |
-| `kind` | 固定 `credentials`，用于在共享通道上区分别的消息 |
-| `base_url` | 两端都会 trim 并去掉尾部 `/` |
-| `ok` | 手表是否配置成功 |
-| `message` | 展示给人看的一句话，失败时就是失败原因 |
-| `display_name` | 校验成功时 Nextcloud 返回的显示名 |
+## 宿主事件与限制
 
-`kind` 不匹配或 JSON 解析失败时，手表**静默忽略**（`silent: true`）：interconnect 是共享通道，别的应用的消息不该弹到用户脸上。
-
-两侧实现：
-
-- 手表：`src/common/scripts/protocol.js`（`parseCredentialMessage` / `buildAck`）
-- 插件：`astrobox-plugin/src/protocol.rs`（`build_credential_message` / `parse_ack`）
-
-改协议时两边一起改，并把 `PROTOCOL_VERSION` 加一。
-
-## 时序
-
-```
-插件 on_load        枚举设备 → register_interconnect_recv(addr, pkg) → 探测快应用是否安装
-手表 启动/设置页    首次启动直接落在这里；已有账号时走 设置 → 从手机配置
-                    → interconnect.instance() → onmessage 挂好
-用户               填三个字段 → 点「发送到手表」
-插件               校验格式 → send_qaic_message(addr, pkg, json) → set_timeout(15s)
-手表 onmessage      解析 → 校验必填与 scheme → api.getCurrentUser()
-      成功          store.save → 回 ack{ok:true} → 1.6s 后跳回会话列表
-      失败          （不清空原有配置）→ 回 ack{ok:false, message}
-插件 on_event       interconnect-message → 解析 ack → 更新状态；成功则清空内存密码
-插件 timer          15s 内没收到 ack → 提示「确认 Talk 已打开并停在配置页」
-```
-
-## 前置条件（重要）
-
-1. **手表上必须先打开 Talk 并停在「从手机配置」**。Vela 快应用退到后台会被挂起，收不到 interconnect 消息。这也是首次启动直接进这一页的原因：登录页不监听，插件发过去也没人接。
-2. **快应用与手机端签名一致**。官方 Vela 文档写得很明确：`interconnect` 要求快应用 `package` 与手机端 App 包名一致、且 rpk 用同一张证书签名。AstroBox 的 `interconnect` host API 按 `pkg-name` 投递，是否绕开这条限制**未在真机验证**——这也是本项目目前最大的未知项。
-3. 插件需要在 AstroBox 里被授予 `device` / `interconnect` / `thirdpartyapp` / `ui` 权限。
-
-## 手表侧实现
-
-`src/pages/setup/setup.ux`：
-
-```js
-import interconnect from '@system.interconnect'
-
-const connect = interconnect.instance()
-connect.onmessage = (evt) => {
-  const parsed = protocol.parseCredentialMessage(evt.data)
-  if (!parsed.ok) { /* silent 就直接 return */ }
-  // 校验 -> 保存 -> connect.send({ data: protocol.buildAck({...}) })
-}
-```
-
-`manifest.json` 需要 `{ "name": "system.interconnect" }`。入口在设置页的「从手机配置」一行。
+- 插件使用 AstroBox API Level 3（WASI Preview 2），属于官方 [V2 系列接口](https://abox.run/docs/plugin-development/v2/host-api/interconnect)；Level 4 与之共存，本次不要求升级运行时。
+- AstroBox 通过已连接设备地址和已安装快应用的包名定位目标。`send_qaic_message` 返回成功不等于手表已经处理。当前宿主的 `interconnect-message` 用 `{addr,pkgName,payloadText,payloadHex}` 包装回执；插件须解包后读取 `ok`。定时器事件也有宿主包装，应用应识别它并结束等待。
+- [Vela 官方 Android 三方 App 互联](https://iot.mi.com/vela/quickapp/zh/features/network/interconnect.html)要求 Android 应用和快应用包名、签名一致。这里使用 AstroBox 的插件宿主及其设备通道，不改变 Android 签名或包名；是否能收发仍应以对应设备、固件和 AstroBox 版本的真机验证为准。工作流只能验证构建及协议，不跑蓝牙真机测试。
 
 ## 排错
 
-| 现象 | 先看 |
+| 现象 | 先检查 |
 | --- | --- |
-| 插件点发送后一直「正在发送…」，15s 后超时 | 手表没停在配置页；或 interconnect 被签名限制挡住 |
-| 手表停在「等待手机发送…」不动 | 插件 send 返回了 `Err`，看 AstroBox 日志里插件的 stdout |
-| 手表报「账号或应用密码错误」 | 应用密码填错，或用了账号密码。去 Nextcloud → 安全 → 应用密码 重新生成 |
-| 手表报「会话参数缺失」之类无关错误 | 协议版本不匹配，确认插件与 rpk 是同一版本 |
-| 插件根本看不到表单 | 插件 manifest 的 `permissions` 有 Host 不认的名字，逐个删掉排查 |
+| 手机提示没找到手表或 Talk | 蓝牙连接、AstroBox 授权、是否选对设备、是否装了指定包名的 RPK。 |
+| 手机超时，手表一直等待 | 手表是否停留在配置页前台，以及手机端是否与目标设备保持连接。 |
+| 手表提示保存成功但手机收不到确认 | 更新两端到同一次构建，检查手机与手表蓝牙连接。在手表打开会话列表确认配置是否已保存，避免误以为密码失效。 |
+| 手表验证失败 | 检查手表自身能否访问 Nextcloud、证书是否可信、是否使用有效的应用密码。 |
+| 装不上或不能覆盖旧版 | 核对旧、新 RPK 的包名和签名。必须卸载时先准备好重新配置，卸载可能清除手表端数据。 |

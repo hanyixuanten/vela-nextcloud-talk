@@ -23,7 +23,7 @@ toolkit 按 `signRoot`（默认 `./sign`）依次找，**第一个存在的就�
 | `aiot build`（调试） | `sign/debug/` → `sign/` → toolkit 自带的默认调试证书 |
 | `aiot release`（发布） | `sign/release/` → `sign/` |
 
-也就是说：只放 `sign/*.pem` 就够了，调试包和发布包会共用同一张证书。都找不到时会退回 `node_modules/@aiot-toolkit/aiotpack/lib/compiler/javascript/vela/utils/signature/pem/` 下的默认证书——能用，但换机器重打包签名就变了，覆盖安装容易失败。
+只放 `sign/*.pem` 即可让调试包和发布包共用一张证书。若没有配置证书，只有调试构建会退回 Toolkit 默认证书；发布构建不会产出 RPK。用不同证书构建的包不能覆盖安装。
 
 `.gitignore` 已排除所有 `*.pem`，不要提交私钥。
 

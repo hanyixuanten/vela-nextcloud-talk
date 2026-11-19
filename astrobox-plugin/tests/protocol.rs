@@ -1,68 +1,80 @@
-// Protocol tests, compiled for the host so they can actually run.
-//
-// The plugin itself is a wasm32-wasip2 component that pulls in wit-bindgen and
-// cannot be built for the host, but src/protocol.rs is pure serde. Including it
-// by path keeps a single copy of the protocol while still being testable:
-//
-//   cargo test --target x86_64-unknown-linux-gnu --test protocol
-
+// Compile the same protocol module for the native test target:
+// cargo test --locked --target x86_64-unknown-linux-gnu --test protocol
 #[path = "../src/protocol.rs"]
-#[allow(dead_code)]
 mod protocol;
 
+use protocol::{PKG_NAME, parse_ack, timeout_matches, timeout_payload};
+use serde_json::json;
+
 #[test]
-fn builds_expected_json() {
-    let raw = protocol::build_credential_message(" https://cloud.example.com/ ", " alice ", "app-pass");
+fn builds_v1_credentials_with_request_id() {
+    let raw = protocol::build_credential_message(
+        " https://cloud.example.com/nextcloud/ ", " alice ", " app-pass ", "123-1",
+    );
     let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-
-    assert_eq!(value["v"], 1);
-    assert_eq!(value["kind"], "credentials");
-    // Trailing slash trimmed, whitespace trimmed.
-    assert_eq!(value["base_url"], "https://cloud.example.com");
-    assert_eq!(value["user"], "alice");
-    assert_eq!(value["app_password"], "app-pass");
+    assert_eq!(value, json!({
+        "v": 1, "kind": "credentials", "base_url": "https://cloud.example.com/nextcloud",
+        "user": "alice", "app_password": " app-pass ", "request_id": "123-1"
+    }));
 }
 
 #[test]
-fn keeps_path_prefix_of_server_url() {
-    let raw = protocol::build_credential_message("https://example.com/nextcloud/", "bob", "x");
-    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(value["base_url"], "https://example.com/nextcloud");
+fn reads_current_astrobox_ack_envelope_and_checks_routing() {
+    let inner = json!({"ok":true,"message":"已保存","display_name":"Alice","request_id":"123-1"});
+    let event = json!({
+        "addr":"aa-bb-cc-dd-ee-ff", "pkgName":PKG_NAME,
+        "payloadHex":"", "payloadText":inner.to_string()
+    });
+    let received = parse_ack(&event.to_string()).unwrap();
+    assert!(received.ack.ok);
+    assert_eq!(received.ack.message, "已保存");
+    assert_eq!(received.ack.display_name, "Alice");
+    assert!(received.matches("AA:BB:CC:DD:EE:FF", "123-1"));
+    assert!(!received.matches("AA:BB:CC:DD:EE:FF", "123-2"));
+    assert!(!received.matches("00:BB:CC:DD:EE:FF", "123-1"));
+
+    let mut foreign = event;
+    foreign["pkgName"] = json!("example.other.app");
+    assert!(!parse_ack(&foreign.to_string()).unwrap().matches("AA:BB:CC:DD:EE:FF", "123-1"));
 }
 
 #[test]
-fn parses_plain_ack() {
-    let ack = protocol::parse_ack(r#"{"ok":true,"message":"已保存","display_name":"Alice"}"#).unwrap();
-    assert!(ack.ok);
-    assert_eq!(ack.message, "已保存");
-    assert_eq!(ack.display_name, "Alice");
+fn accepts_legacy_and_string_encoded_ack() {
+    let legacy = parse_ack(r#"{"ok":false}"#).unwrap();
+    assert!(legacy.matches("AA:BB", "123-1"));
+    assert!(!legacy.ack.ok);
+    assert_eq!(legacy.ack.message, "");
+    assert_eq!(legacy.ack.display_name, "");
+    assert!(legacy.ack.request_id.is_none());
+
+    for event in [
+        json!({"addr":"AA:BB","data":r#"{"ok":false,"message":"密码错误"}"#}),
+        json!({"payload":{"ok":false,"message":"密码错误"}}),
+        json!({"payloadText":json!(r#"{"ok":false,"message":"密码错误"}"#).to_string()}),
+    ] {
+        assert_eq!(parse_ack(&event.to_string()).unwrap().ack.message, "密码错误");
+    }
 }
 
 #[test]
-fn parses_wrapped_ack() {
-    let ack = protocol::parse_ack(r#"{"addr":"AA:BB","data":"{\"ok\":false,\"message\":\"密码错误\"}"}"#)
-        .unwrap();
-    assert!(!ack.ok);
-    assert_eq!(ack.message, "密码错误");
+fn ignores_unrelated_and_malformed_events() {
+    for event in [
+        "", "[]", "not json", r#"{"addr":"AA:BB"}"#, r#"{"ok":"true"}"#,
+        r#"{"ok":true,"request_id":42}"#, r#"{"addr":0,"payloadText":"{\"ok\":true}"}"#,
+        r#"{"payloadText":"not json","ok":true}"#, r#"{"payloadHex":"ff","ok":true}"#,
+    ] {
+        assert!(parse_ack(event).is_none(), "accepted {event}");
+    }
 }
 
 #[test]
-fn ack_defaults_are_lenient() {
-    // The watch may omit optional fields; missing strings must not fail parsing.
-    let ack = protocol::parse_ack(r#"{"ok":false}"#).unwrap();
-    assert!(!ack.ok);
-    assert_eq!(ack.message, "");
-    assert_eq!(ack.display_name, "");
-}
-
-#[test]
-fn ignores_json_without_ok_field() {
-    assert!(protocol::parse_ack(r#"{"addr":"AA:BB"}"#).is_none());
-}
-
-#[test]
-fn ignores_garbage() {
-    assert!(protocol::parse_ack("not json").is_none());
-    assert!(protocol::parse_ack("").is_none());
-    assert!(protocol::parse_ack("[]").is_none());
+fn only_current_request_timeout_is_accepted() {
+    let payload = timeout_payload("123-2");
+    let event = json!({"timerId":17,"kind":"timeout","payload":payload}).to_string();
+    assert!(timeout_matches(&event, "123-2"));
+    assert!(!timeout_matches(&event, "123-1"));
+    assert!(timeout_matches(&payload, "123-2"));
+    assert!(!timeout_matches("nctalk-send-timeout", "123-2"));
+    let interval = json!({"timerId":17,"kind":"interval","payload":payload}).to_string();
+    assert!(!timeout_matches(&interval, "123-2"));
 }

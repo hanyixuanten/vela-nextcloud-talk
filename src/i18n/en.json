@@ -71,6 +71,8 @@
     "manual": "Type manually",
     "unsupported": "This device does not support interconnect",
     "linkError": "Link to phone failed",
+    "busy": "Watch is still processing the previous request. Try again shortly.",
+    "ackFailed": "Saved on the watch, but could not reply to the phone.",
     "saved": "Saved",
     "done": "Configured: {name}",
     "failed": "Setup failed"

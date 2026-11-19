@@ -32,6 +32,7 @@ cp "$ROOT/tests/fetch-double.mjs" "$BUILD/fetch-double.mjs"
 fail=0
 "$NODE" "$ROOT/tests/units.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/protocol.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/setup.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then

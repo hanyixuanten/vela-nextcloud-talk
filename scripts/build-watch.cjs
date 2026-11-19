@@ -1,0 +1,80 @@
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+const { spawnSync } = require('child_process')
+
+const [mode, shape, ...options] = process.argv.slice(2)
+if (!['build', 'release'].includes(mode) || !['circle', 'rect'].includes(shape)) {
+  throw new Error('Usage: node scripts/build-watch.cjs build|release circle|rect')
+}
+
+// Toolkit 2.0.5 parses local UX files before its webpack hooks run. Apply the
+// official Vela conditional comments to staged UX sources before invoking aiot.
+// Limit conditions to the watch shapes we support; no arbitrary expression evaluation.
+function compileUx(source, filename) {
+  const directive = /^\s*(?:<!--|\/\*)\s*(if true: process\.env\.SHAPE === '(CIRCLE|RECT)'|endif)\s*(?:-->|\*\/)\s*$/
+  let target
+  const output = []
+  for (const line of source.split(/\r?\n/)) {
+    const match = directive.exec(line)
+    if (match) {
+      if (match[1] === 'endif' ? !target : target) {
+        throw new Error(`Unbalanced shape conditional in ${filename}`)
+      }
+      target = match[2]?.toLowerCase()
+    } else if (/(?:<!--|\/\*)\s*(?:if true:|endif\b)/.test(line)) {
+      throw new Error(`Unsupported shape conditional in ${filename}: ${line.trim()}`)
+    } else if (!target || target === shape) {
+      output.push(line)
+    }
+  }
+  if (target) throw new Error(`Unclosed shape conditional in ${filename}`)
+  return output.join('\n')
+}
+
+function copySources(source, destination) {
+  fs.mkdirSync(destination, { recursive: true })
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name)
+    const to = path.join(destination, entry.name)
+    if (entry.isDirectory()) copySources(from, to)
+    else if (entry.name.endsWith('.ux')) fs.writeFileSync(to, compileUx(fs.readFileSync(from, 'utf8'), from))
+    else fs.copyFileSync(from, to)
+  }
+}
+
+const root = path.resolve(__dirname, '..')
+const output = path.join(root, 'dist')
+const stagingRoot = os.tmpdir()
+const temp = fs.mkdtempSync(path.join(stagingRoot, 'vela-watch-'))
+try {
+  // Keep Toolkit's own sibling .temp directory inside the staging tree too.
+  const project = path.join(temp, 'project')
+  copySources(path.join(root, 'src'), path.join(project, 'src'))
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(project, 'package.json'))
+  fs.symlinkSync(path.join(root, 'node_modules'), path.join(project, 'node_modules'), 'junction')
+  const signing = path.join(root, 'sign')
+  if (fs.existsSync(signing)) fs.symlinkSync(signing, path.join(project, 'sign'), 'junction')
+
+  const result = spawnSync(process.execPath, [require.resolve('aiot-toolkit/lib/bin.js'), mode, ...options], {
+    cwd: project,
+    stdio: 'inherit'
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`aiot ${mode} failed (${result.signal || result.status})`)
+
+  const dist = path.join(project, 'dist')
+  const packages = fs.existsSync(dist) ? fs.readdirSync(dist).filter(name => name.endsWith('.rpk')) : []
+  // aiot 2.0.5 can report signing/compilation errors with status 0.
+  if (packages.length !== 1) throw new Error(`aiot ${mode} did not produce exactly one RPK`)
+  fs.mkdirSync(output, { recursive: true })
+  const name = packages[0]
+  const targetName = `${path.basename(name, '.rpk')}-${shape}.rpk`
+  fs.copyFileSync(path.join(dist, name), path.join(output, targetName))
+  console.log(`${shape}: dist/${targetName}`)
+} finally {
+  if (path.dirname(temp) !== stagingRoot || !path.basename(temp).startsWith('vela-watch-')) {
+    throw new Error(`Unexpected build staging path: ${temp}`)
+  }
+  fs.rmSync(temp, { recursive: true, force: true })
+}

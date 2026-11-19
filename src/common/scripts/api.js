@@ -20,21 +20,25 @@ const TALK_V4 = OCS + '/apps/spreed/api/v4'
 
 let account = { baseUrl: '', user: '', appPassword: '' }
 
-function configure(settings) {
+function normaliseAccount(settings) {
   const s = settings || {}
-  account = {
+  return {
     baseUrl: String(s.baseUrl || '').replace(/\/+$/, ''),
     user: String(s.user || ''),
     appPassword: String(s.appPassword || '')
   }
 }
 
+function configure(settings) {
+  account = normaliseAccount(settings)
+}
+
 function isConfigured() {
   return Boolean(account.baseUrl && account.user && account.appPassword)
 }
 
-function buildUrl(path, query) {
-  let url = account.baseUrl + path
+function buildUrl(baseUrl, path, query) {
+  let url = baseUrl + path
   if (!query) return url
 
   const parts = []
@@ -93,9 +97,9 @@ function apiError(status, message) {
  * Perform one OCS request.
  * Resolves with { status, data, headers, meta }; `data` is `ocs.data`.
  */
-function request(options) {
+function request(options, credentials = account) {
   return new Promise((resolve, reject) => {
-    if (!account.baseUrl) {
+    if (!credentials.baseUrl) {
       reject(apiError(0, '尚未设置服务器地址'))
       return
     }
@@ -103,11 +107,11 @@ function request(options) {
     const headers = {
       Accept: 'application/json',
       'OCS-APIRequest': 'true',
-      Authorization: 'Basic ' + base64Encode(account.user + ':' + account.appPassword)
+      Authorization: 'Basic ' + base64Encode(credentials.user + ':' + credentials.appPassword)
     }
 
     const params = {
-      url: buildUrl(options.path, options.query),
+      url: buildUrl(credentials.baseUrl, options.path, options.query),
       method: options.method || 'GET',
       header: headers,
       responseType: 'text',
@@ -165,12 +169,14 @@ function request(options) {
 }
 
 /** Validate credentials and return { id, displayName }. */
-function getCurrentUser() {
-  return request({ path: OCS + '/cloud/user' }).then((res) => {
+function getCurrentUser(settings) {
+  // A candidate account should not replace the live credentials until saved.
+  const credentials = settings ? normaliseAccount(settings) : account
+  return request({ path: OCS + '/cloud/user' }, credentials).then((res) => {
     const data = res.data || {}
     return {
-      id: data.id || account.user,
-      displayName: data.displayname || data.id || account.user
+      id: data.id || credentials.user,
+      displayName: data.displayname || data.id || credentials.user
     }
   })
 }

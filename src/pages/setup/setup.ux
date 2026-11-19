@@ -42,35 +42,62 @@ export default {
   },
 
   onInit() {
-    this.connect = null
+    this.link = null
     this.busy = false
-
+    this.exitTimer = null
     this.setWaiting()
+  },
 
+  onShow() {
+    if (this.link) return
+    this.setWaiting()
     try {
-      this.connect = interconnect.instance()
+      const connect = interconnect.instance()
+      if (!connect || typeof connect.send !== 'function') throw new Error('interconnect unavailable')
+      const link = { connect }
+      this.link = link
+      connect.onopen = () => {
+        if (this.link === link && !this.busy && this.exitTimer === null && this.statusClass !== 'status-ok') {
+          this.setWaiting()
+        }
+      }
+      connect.onclose = (evt) => this.onLinkError(link, evt)
+      connect.onerror = (evt) => this.onLinkError(link, evt)
+      connect.onmessage = (evt) => {
+        if (this.link === link) this.onMessage(link, evt && evt.data)
+      }
     } catch (e) {
+      this.detachLink()
       this.setError(this.$t('setup.unsupported'))
-      return
     }
+  },
 
-    // The connection is created and torn down by the system; these callbacks
-    // only exist to explain problems to the user.
-    this.connect.onopen = () => {
-      console.log('interconnect opened')
-    }
-    this.connect.onclose = () => {
-      console.log('interconnect closed')
-    }
-    this.connect.onerror = (evt) => {
-      const code = evt && evt.code ? '（' + evt.code + '）' : ''
-      this.setError(this.$t('setup.linkError') + code)
-    }
-    this.connect.onmessage = (evt) => { this.onMessage(evt) }
+  onHide() {
+    this.detachLink()
   },
 
   onDestroy() {
-    this.connect = null
+    this.detachLink()
+  },
+
+  detachLink() {
+    if (this.exitTimer !== null) clearTimeout(this.exitTimer)
+    this.exitTimer = null
+    const link = this.link
+    this.link = null
+    if (!link) return
+    // interconnect.instance() is shared: do not leave callbacks on a hidden page.
+    const connect = link.connect
+    connect.onmessage = null
+    connect.onopen = null
+    connect.onclose = null
+    connect.onerror = null
+  },
+
+  onLinkError(link, evt) {
+    if (this.link !== link || this.busy || this.statusClass === 'status-ok') return
+    const code = evt && evt.code ? '（' + evt.code + '）' : ''
+    this.setError(this.$t('setup.linkError') + code)
   },
 
   setWaiting() {
@@ -83,18 +110,17 @@ export default {
     this.statusClass = 'status-error'
   },
 
-  onMessage(evt) {
-    if (this.busy) return
-
-    const raw = evt && evt.data
-    const text = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : ''
-    const parsed = protocol.parseCredentialMessage(text)
-
+  onMessage(link, raw) {
+    const parsed = protocol.parseCredentialMessage(raw)
+    if (parsed.silent) return
+    const requestId = parsed.requestId
+    if (this.busy || this.statusClass === 'status-ok') {
+      this.reply(link, { ok: false, requestId, message: this.$t('setup.busy') })
+      return
+    }
     if (!parsed.ok) {
-      // Silent failures are traffic that belongs to another app on the channel.
-      if (parsed.silent) return
       this.setError(parsed.error)
-      this.reply({ ok: false, message: parsed.error })
+      this.reply(link, { ok: false, requestId, message: parsed.error })
       return
     }
 
@@ -104,52 +130,55 @@ export default {
     this.statusText = this.$t('setup.verifying')
     this.statusClass = 'status-waiting'
 
-    // Validate before persisting: a typo in the app password should surface
-    // here, where the phone can still show it, not as a login failure later.
     const candidate = Object.assign({}, state.settings || {}, parsed.config)
-    api.configure(candidate)
-
-    api.getCurrentUser()
+    api.getCurrentUser(candidate)
       .then((profile) => {
+        // Leaving the setup page invalidates any outstanding validation.
+        if (this.link !== link) return null
         candidate.displayName = profile.displayName
         return store.save(candidate)
       })
       .then((saved) => {
+        this.busy = false
+        if (!saved) return
         state.settings = saved
         state.ready = true
         state.loggedInOnce = true
         api.configure(saved)
-
-        this.busy = false
+        if (this.link !== link) return
         this.statusText = this.$t('setup.done', { name: saved.displayName || saved.user })
         this.statusClass = 'status-ok'
-        this.reply({ ok: true, message: this.$t('setup.saved'), displayName: saved.displayName })
-
-        setTimeout(() => {
-          router.replace({ uri: '/' })
-        }, 1600)
+        this.reply(link, { ok: true, requestId, message: this.$t('setup.saved'), displayName: saved.displayName }, () => {
+          this.exitTimer = setTimeout(() => {
+            this.exitTimer = null
+            if (this.link === link) router.replace({ uri: '/' })
+          }, 1600)
+        })
       })
       .catch((err) => {
         this.busy = false
+        if (this.link !== link) return
         const message = (err && err.message) || this.$t('setup.failed')
         this.setError(message)
-        this.reply({ ok: false, message: message })
-        // Never leave a half-configured client behind.
-        api.configure(state.settings || {})
+        this.reply(link, { ok: false, requestId, message })
       })
   },
 
-  reply(payload) {
-    if (!this.connect) return
+  reply(link, payload, onSent) {
+    if (this.link !== link) return
+    const failed = (_data, code) => {
+      if (this.link !== link) return
+      console.log('ack failed, code = ' + code)
+      if (payload.ok) this.setError(this.$t('setup.ackFailed'))
+    }
     try {
-      this.connect.send({
+      link.connect.send({
         data: protocol.buildAck(payload),
-        fail: (data, code) => {
-          console.log('ack failed, code = ' + code)
-        }
+        success: () => { if (this.link === link && onSent) onSent() },
+        fail: failed
       })
-    } catch (e) {
-      console.log('ack send threw: ' + e)
+    } catch (_) {
+      failed(null, 'send')
     }
   },
 
@@ -268,4 +297,48 @@ export default {
   font-size: 20px;
   color: #cbd5e1;
 }
+
+.info-value {
+  lines: 1;
+}
+
+/* if true: process.env.SHAPE === 'CIRCLE' */
+.info {
+  width: 350px;
+}
+.actions {
+  width: 272px;
+  margin-bottom: 46px;
+}
+.ghost {
+  width: 128px;
+  height: 50px;
+}
+/* endif */
+
+/* if true: process.env.SHAPE === 'RECT' */
+.head {
+  height: 132px;
+  margin-top: 24px;
+}
+.status, .hint, .info, .actions {
+  width: 432px;
+}
+.info-value {
+  width: 396px;
+}
+.info {
+  margin-top: 16px;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.actions {
+  height: 64px;
+}
+.ghost {
+  width: 208px;
+  height: 56px;
+  border-radius: 20px;
+}
+/* endif */
 </style>

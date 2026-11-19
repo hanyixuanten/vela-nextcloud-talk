@@ -1,78 +1,122 @@
-// Message protocol between the AstroBox plugin (host side) and the Vela app.
-//
-// Keep this file and src/common/scripts/protocol.js in the watch project in
-// sync: the plugin writes CredentialMessage, the watch app answers with Ack.
+// Message protocol between the AstroBox plugin and the Vela app.
+// Keep the inner JSON in sync with src/common/scripts/protocol.js.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-/// Package name of the watch app. Must match manifest.json's `package`.
+/// Package name of the watch app. Must match the watch manifest's `package`.
 pub const PKG_NAME: &str = "com.hanyixuanten.nctalk";
-
-/// Bumped on breaking changes; the watch app rejects unknown versions instead
-/// of half-parsing them.
 pub const PROTOCOL_VERSION: u32 = 1;
+const TIMEOUT_PREFIX: &str = "nctalk-send-timeout:";
 
-/// Payload sent to the watch.
-#[derive(Debug, Serialize)]
-pub struct CredentialMessage<'a> {
-    pub v: u32,
-    pub kind: &'a str,
-    pub base_url: &'a str,
-    pub user: &'a str,
-    pub app_password: &'a str,
+#[derive(Serialize)]
+struct CredentialMessage<'a> {
+    v: u32,
+    kind: &'a str,
+    base_url: &'a str,
+    user: &'a str,
+    app_password: &'a str,
+    request_id: &'a str,
 }
 
-pub fn build_credential_message(server: &str, user: &str, password: &str) -> String {
+pub fn build_credential_message(server: &str, user: &str, password: &str, request_id: &str) -> String {
     let message = CredentialMessage {
         v: PROTOCOL_VERSION,
         kind: "credentials",
         base_url: server.trim().trim_end_matches('/'),
         user: user.trim(),
         app_password: password,
+        request_id,
     };
-
-    // Serialising a struct of &str cannot fail, but stay defensive: a panic here
-    // would take down the whole plugin instance.
-    serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string())
+    // A struct containing only strings and a u32 always serializes to JSON.
+    serde_json::to_string(&message).expect("credential message serialization")
 }
 
-/// Acknowledgement sent back by the watch app.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Ack {
-    #[serde(default)]
     pub ok: bool,
     #[serde(default)]
     pub message: String,
     #[serde(default)]
     pub display_name: String,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
-/// Host event payloads are stringly typed and may be wrapped one level deep
-/// (for example `{"addr":"..","data":"{...}"}`). Try the plain form first, then
-/// look inside the usual wrapper keys.
-pub fn parse_ack(raw: &str) -> Option<Ack> {
-    if let Some(ack) = try_ack(raw) {
-        return Some(ack);
-    }
-
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    for key in ["data", "payload", "message"] {
-        if let Some(inner) = value.get(key).and_then(|v| v.as_str()) {
-            if let Some(ack) = try_ack(inner) {
-                return Some(ack);
-            }
-        }
-    }
-
-    None
+#[derive(Debug)]
+pub struct ReceivedAck {
+    addr: Option<String>,
+    pkg_name: Option<String>,
+    pub ack: Ack,
 }
 
-fn try_ack(raw: &str) -> Option<Ack> {
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+impl ReceivedAck {
+    pub fn matches(&self, addr: &str, request_id: &str) -> bool {
+        self.addr.as_deref().is_none_or(|from| {
+            let normalize = |value: &str| value.trim().replace('-', ":").to_ascii_uppercase();
+            normalize(from) == normalize(addr)
+        }) && self.pkg_name.as_deref().is_none_or(|pkg| pkg == PKG_NAME)
+            && self.ack.request_id.as_deref().is_none_or(|id| id == request_id)
+    }
+}
 
-    // Require the `ok` field, otherwise any JSON object would look like an ack
-    // and errors from unrelated payloads would be swallowed as "failed".
-    value.get("ok")?;
+/// Current AstroBox emits {addr, pkgName, payloadHex, payloadText}. Preserve
+/// its routing metadata, and accept older bare or one-level wrapped ACKs.
+pub fn parse_ack(raw: &str) -> Option<ReceivedAck> {
+    let value: Value = serde_json::from_str(raw).ok()?;
+    let obj = value.as_object()?;
+    let addr = obj.get("addr").map(read_string).transpose().ok()?;
+    let pkg_name = obj.get("pkgName").map(read_string).transpose().ok()?;
 
-    serde_json::from_value(value).ok()
+    let ack = if let Some(inner) = obj.get("payloadText") {
+        // The official envelope uses UTF-8 text for JSON. Don't reinterpret
+        // envelope fields as an ACK when the actual payload doesn't parse.
+        parse_inner_ack(inner)?
+    } else if obj.contains_key("payloadHex") {
+        return None;
+    } else if obj.contains_key("ok") {
+        serde_json::from_value(value).ok()?
+    } else {
+        ["data", "payload", "message"]
+            .into_iter()
+            .filter_map(|key| obj.get(key))
+            .find_map(parse_inner_ack)?
+    };
+
+    Some(ReceivedAck { addr, pkg_name, ack })
+}
+
+fn read_string(value: &Value) -> Result<String, ()> {
+    value.as_str().map(str::to_owned).ok_or(())
+}
+
+fn parse_inner_ack(value: &Value) -> Option<Ack> {
+    // The watch normally sends an object. Some clients send JSON as a
+    // string value, which can give us one more JSON string encoding.
+    let decoded = match value {
+        Value::String(text) => match serde_json::from_str(text).ok()? {
+            Value::String(inner) => serde_json::from_str(&inner).ok()?,
+            other => other,
+        },
+        other => other.clone(),
+    };
+    decoded.as_object()?;
+    serde_json::from_value(decoded).ok()
+}
+
+pub fn timeout_payload(request_id: &str) -> String {
+    format!("{TIMEOUT_PREFIX}{request_id}")
+}
+
+/// Current host wraps timer payloads; older hosts may return the bare marker.
+pub fn timeout_matches(event_payload: &str, request_id: &str) -> bool {
+    let expected = timeout_payload(request_id);
+    if event_payload == expected {
+        return true;
+    }
+    serde_json::from_str::<Value>(event_payload).is_ok_and(|value| {
+        value.get("timerId").and_then(Value::as_u64).is_some()
+            && value.get("kind").and_then(Value::as_str) == Some("timeout")
+            && value.get("payload").and_then(Value::as_str) == Some(expected.as_str())
+    })
 }

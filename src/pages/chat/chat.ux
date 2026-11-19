@@ -57,7 +57,12 @@
     <input-method
       hide="{{!editing}}"
       keyboardtype="{{keyboardType}}"
-      screentype="{{screenType}}"
+      <!-- if true: process.env.SHAPE === 'CIRCLE' -->
+      screentype="circle"
+      <!-- endif -->
+      <!-- if true: process.env.SHAPE === 'RECT' -->
+      screentype="rect"
+      <!-- endif -->
       maxlength="5"
       vibratemode="short"
       @complete="onKeyComplete"
@@ -103,8 +108,7 @@ export default {
     sending: false,
     error: '',
     fontSize: FONT_SIZES.normal,
-    keyboardType: 'QWERTY',
-    screenType: 'circle'
+    keyboardType: 'QWERTY'
   },
 
   onInit() {
@@ -122,7 +126,6 @@ export default {
       this.myUser = String(settings.user || '').toLowerCase()
       this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.screenType = settings.screenType || 'circle'
       this.pollInterval = settings.pollInterval || 15000
     })
 
@@ -142,7 +145,6 @@ export default {
       api.configure(settings)
       this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.screenType = settings.screenType || 'circle'
       this.pollInterval = settings.pollInterval || 15000
     })
     this.settingsReady.then(() => this.startPolling())
@@ -486,4 +488,76 @@ export default {
 .ghost-primary-text {
   color: #ffffff;
 }
+
+.title, .editor-name {
+  lines: 1;
+  text-overflow: ellipsis;
+}
+.editor-text {
+  lines: 2;
+  text-overflow: ellipsis;
+}
+
+/* if true: process.env.SHAPE === 'CIRCLE' */
+.inputbar {
+  width: 244px;
+  margin-bottom: 38px;
+}
+.editor {
+  height: 150px;
+}
+.editor-name {
+  width: 204px;
+  text-align: center;
+}
+.editor-text {
+  width: 272px;
+}
+/* endif */
+
+/* if true: process.env.SHAPE === 'RECT' */
+.header, .list, .inputbar, .editor-actions {
+  width: 432px;
+}
+.header {
+  height: 76px;
+  margin-top: 0px;
+}
+.title {
+  width: 376px;
+}
+.list {
+  margin-left: 24px;
+}
+.msg {
+  width: 390px;
+  align-self: flex-start;
+}
+.msg-mine {
+  align-self: flex-end;
+}
+.placeholder {
+  width: 432px;
+}
+.inputbar {
+  height: 60px;
+  margin-bottom: 16px;
+  border-radius: 20px;
+}
+.editor {
+  height: 246px;
+}
+.editor-name, .editor-text {
+  width: 432px;
+  text-align: center;
+}
+.editor-text {
+  lines: 3;
+}
+.ghost {
+  width: 208px;
+  height: 56px;
+  border-radius: 20px;
+}
+/* endif */
 </style>

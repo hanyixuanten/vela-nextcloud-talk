@@ -16,18 +16,28 @@ pub enum Status {
     Err(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+pub struct PendingSend {
+    pub id: String,
+    /// Set only when registration has succeeded and a send is about to start.
+    pub addr: Option<String>,
+}
+
+#[derive(Clone)]
 pub struct State {
     /// Element id AstroBox handed us in on_ui_render; needed to re-render.
     pub element_id: Option<String>,
-    /// Device address we push to (first connected device).
+    /// Device address we push to (only when exactly one device is connected).
     pub addr: Option<String>,
+    pub multiple_devices: bool,
     /// None = not probed yet, Some(false) = Talk is not installed.
     pub app_installed: Option<bool>,
     pub server: String,
     pub user: String,
     pub password: String,
     pub status: Status,
+    pub pending: Option<PendingSend>,
+    pub next_request: u64,
 }
 
 impl Default for State {
@@ -35,11 +45,14 @@ impl Default for State {
         Self {
             element_id: None,
             addr: None,
+            multiple_devices: false,
             app_installed: None,
             server: String::new(),
             user: String::new(),
             password: String::new(),
             status: Status::Idle,
+            pending: None,
+            next_request: 0,
         }
     }
 }
@@ -56,8 +69,4 @@ pub fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
 
 pub fn snapshot() -> State {
     with(|state| state.clone())
-}
-
-pub fn set_status(status: Status) {
-    with(|state| state.status = status);
 }

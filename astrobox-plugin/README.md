@@ -10,7 +10,7 @@ AstroBox (插件 UI)  ──interconnect──>  手表 Talk (pages/setup)
 
 ## 形态
 
-AstroBox v2 插件是一个 **Rust 库编译成的 `wasm32-wasip2` WebAssembly Component**，通过 WIT 定义的接口与宿主交互（无共享内存、无 syscall）。所以：
+插件使用 **API Level 3 / WASI Preview 2**，将 Rust 编译为 `wasm32-wasip2` WebAssembly Component，通过 WIT 接口与宿主交互。[AstroBox v4 文档](https://abox.run/docs/plugin-development/v4/whats-new)确认 Level 2/3 继续由旧运行时支持；[Level 4 互联接口](https://github.com/AstralSightStudios/AstroBox-NG-Module-PluginSystem/blob/7e718be5294722af49b9e166cc76b9b49150a392/src/v4/host/interconnect.rs)与 Level 3 共用 QAIC 发送实现，因此修复通信不需要迁移到 WASI Preview 3。
 
 - 入口是 `src/lib.rs`，实现 `lifecycle::Guest` 与 `event_v3::Guest`；
 - UI 不是 HTML，是宿主渲染的**声明式元素树**（`ui-v3` 的链式 Builder）；
@@ -110,8 +110,14 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 1. 手表上安装 Talk（rpk），打开它 → 设置 → **从手机配置**，页面停在「等待手机发送…」。
 2. AstroBox 里打开「Talk 凭据配置」，填服务器地址、用户名、应用密码。
-3. 点「发送到手表」。插件把凭据通过 interconnect 发给 `com.hanyixuanten.nctalk`。
-4. 手表校验（真的去请求 `/ocs/v2.php/cloud/user`）→ 回一条 ack → 插件显示「已保存（显示名）」。
+3. 点「发送到手表」。插件重新枚举设备，只在恰好连接一台设备时订阅其 `com.hanyixuanten.nctalk` 互联消息并发送凭据。若表单打开后才连接手表，也可以直接点发送重试。
+4. 手表请求 `/ocs/v2.php/cloud/user` 校验，保存后回复 ACK。宿主发送成功不等于已保存；只有匹配的成功 ACK 才会清空密码和显示「已保存」。
+
+### 线上路由和协议
+
+- **手机 → 手表：** `interconnect.send-qaic-message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v1 JSON（`kind: "credentials"`、`base_url`、`user`、`app_password`），新版插件额外发送字符串 `request_id`。
+- **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 仍为 `ok`、可选 `message` 和 `display_name`，并在收到字符串 `request_id` 时原样回显。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件检查设备、包名和请求 ID（有值时）。仍兼容未携带 `request_id` 的旧 ACK，但无法区分同一设备上迟到的旧 ACK 和当前 ACK。
+- **超时：** 发送调用返回后开始计时。当前 `Timer` 事件包装为 `{timerId, kind: "timeout", payload}`；`payload` 含本次请求 ID，不会让上一次定时器中断新请求。
 
 ## 权限
 
@@ -132,9 +138,9 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 **应用密码输入框是普通文本，不是密码框。** Nextcloud 的应用密码是 `xxxxx-xxxxx-xxxxx-xxxxx-xxxxx` 这种长串，掩码只会让人看不出自己漏了几位；而这个表单本来就跑在用户自己的设备上，掩码换不来安全感，只换来重输。真正的保护在别处：不落盘、发完即清、只经蓝牙一跳。
 
-**密码不在插件里持久化（是选择，不是限制）。** Host API 里没有文件系统函数（`os` 只给 arch/hostname/locale），但运行时确实提供 WASI std fs，只是限定在插件自己的目录内——所以 `std::fs` 是可用的，真要落盘做得到。这一版没做：每次打开重新输入，真正的保存在手表的 `@system.storage`，发送成功后插件立刻清空内存里的密码。少一处明文落盘就少一处泄露面。
+**密码不在插件里持久化（是选择，不是限制）。** Host API 里没有文件系统函数（`os` 只给 arch/hostname/locale），但运行时确实提供 WASI std fs，只是限定在插件自己的目录内——所以 `std::fs` 是可用的，真要落盘做得到。这一版没做：每次打开重新输入，真正的保存在手表的 `@system.storage`，收到匹配的成功 ACK 后插件清空表单里的密码。少一处明文落盘就少一处泄露面。
 
-**只发给第一台已连接设备。** `device.get_connected_device_list()` 返回多台时取第一台。多设备同时连接是罕见场景，为它加选择器会让 UI 复杂一档，先不做。
+**只连接一台设备时才发送。** 如果 `device.get_connected_device_list()` 返回多台，断开其他设备再重试，避免把凭据发给错误的手表。
 
 **15s 超时兜底。** 发完以后用 `timer.set_timeout` 起一个 15 秒计时；手表没回 ack 就提示「确认 Talk 已打开并停在『从手机配置』页面」。否则按钮会永远卡在「正在发送…」。
 
@@ -142,10 +148,6 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 
 ## 已知限制
 
-- **未在真机验证。** 这份代码在这里只验证到「编译通过 + 协议单测通过 + 产物是合法 wasm component」。
-- **interconnect 的签名前提。** 官方 Vela 文档要求快应用与手机端 App 的**包名和签名一致**才能互联。AstroBox 的 `interconnect` host API 是按 `pkg-name` 投递的，是否能绕过这条限制需要实测；若收不到消息，先看插件的 stdout 日志里 send 有没有返回 `Err`。
-- **`ui-v3` 的输入回传格式未知。** `on_ui_event_v3` 的 `event_payload` 可能是裸字符串，也可能是 `{"value":".."}`。`parse_input_value()` 两种都认，但没有文档可对照。
-- **权限名单仍以实测为准。** 现在的取值来自一个已上架插件的清单（`device` / `interconnect` / `thirdpartyapp` / `register_interconnect_recv`），官方文档通篇没有列过 v2 的合法权限枚举。
-- **`api_level: 3` 有版本门槛。** 官方对照表：api_level 2 → AstroBox ≥ 2.0.0，api_level 3 → ≥ 2.1.0。低于 2.1.0 会**直接拒绝加载**，症状和「装不上」几乎一样。
-- **WASI 版本是硬约束。** 见上文；换工具链前先跑 `check_artifact.py`。
-- **仍未在真机验证。** 现在「结构、清单、WASI 版本、权限」四项都能离线校验，但 interconnect 是否真能通到手表应用只能在设备上确认。
+- **真机互联尚未验证。** 需使用支持小米 QAIC 的设备、已安装的 Talk 快应用，并将其停在「从手机配置」页。分别检查成功保存、错误密码返回失败、关闭手表页面导致超时后重试，以及打开表单后才连接设备。应用端的 `@system.interconnect` 支持情况随设备和固件而异。
+- **`api_level: 3` 有版本门槛。** 需要 AstroBox ≥ 2.1.0；低于此版本会拒绝加载插件。
+- **WASI 版本是硬约束。** 更换工具链后需重新运行 `check_artifact.py`。

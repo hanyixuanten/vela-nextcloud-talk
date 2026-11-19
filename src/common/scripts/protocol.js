@@ -18,13 +18,13 @@ function isNonEmptyString(value) {
  *      or { ok: false, error: '<human readable reason>' }.
  */
 export function parseCredentialMessage(raw) {
-  if (typeof raw !== 'string' || raw.trim().length === 0) {
-    return { ok: false, error: '收到的数据为空' }
+  if (raw == null || (typeof raw === 'string' && raw.trim().length === 0)) {
+    return { ok: false, error: '收到的数据为空', silent: true }
   }
 
-  let payload = null
+  let payload = raw
   try {
-    payload = JSON.parse(raw)
+    if (typeof raw === 'string') payload = JSON.parse(raw)
   } catch (e) {
     // Not our message: interconnect is a shared channel, stay quiet.
     return { ok: false, error: '数据格式无法识别', silent: true }
@@ -36,8 +36,9 @@ export function parseCredentialMessage(raw) {
   if (payload.kind !== 'credentials') {
     return { ok: false, error: '不是凭据消息', silent: true }
   }
+  const requestId = typeof payload.request_id === 'string' ? payload.request_id : undefined
   if (payload.v !== PROTOCOL_VERSION) {
-    return { ok: false, error: '插件版本与手表应用不匹配（协议 v' + payload.v + '）' }
+    return { ok: false, requestId, error: '插件版本与手表应用不匹配（协议 v' + payload.v + '）' }
   }
 
   const baseUrl = typeof payload.base_url === 'string' ? payload.base_url.trim().replace(/\/+$/, '') : ''
@@ -45,23 +46,25 @@ export function parseCredentialMessage(raw) {
   const appPassword = typeof payload.app_password === 'string' ? payload.app_password.trim() : ''
 
   if (!isNonEmptyString(baseUrl) || !isNonEmptyString(user) || !isNonEmptyString(appPassword)) {
-    return { ok: false, error: '服务器、用户名、应用密码都不为空' }
+    return { ok: false, requestId, error: '服务器、用户名、应用密码都不能为空' }
   }
   if (!/^https?:\/\//i.test(baseUrl)) {
-    return { ok: false, error: '服务器地址需以 http:// 或 https:// 开头' }
+    return { ok: false, requestId, error: '服务器地址需以 http:// 或 https:// 开头' }
   }
 
-  return { ok: true, config: { baseUrl: baseUrl, user: user, appPassword: appPassword } }
+  return { ok: true, requestId, config: { baseUrl: baseUrl, user: user, appPassword: appPassword } }
 }
 
-/** Build the acknowledgement string sent back to the plugin. */
+/** Vela serialises the object passed to connect.send as JSON. */
 export function buildAck(result) {
   const ack = result || {}
-  return JSON.stringify({
+  const data = {
     ok: Boolean(ack.ok),
     message: typeof ack.message === 'string' ? ack.message : '',
     display_name: typeof ack.displayName === 'string' ? ack.displayName : ''
-  })
+  }
+  if (typeof ack.requestId === 'string') data.request_id = ack.requestId
+  return data
 }
 
 // Also exported as a namespace object: page scripts import the default (keeps

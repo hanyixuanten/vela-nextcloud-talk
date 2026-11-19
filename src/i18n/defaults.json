@@ -71,6 +71,8 @@
     "manual": "手动输入",
     "unsupported": "当前设备不支持互联通信",
     "linkError": "与手机的连接出错",
+    "busy": "手表仍在处理上次请求，请稍后重试。",
+    "ackFailed": "已在手表保存，但未能向手机发送确认。",
     "saved": "已保存",
     "done": "已配置：{name}",
     "failed": "配置失败"

@@ -98,17 +98,27 @@ test('rejects a bad scheme', () => {
 })
 
 test('ack always carries the three fields', () => {
-  const ok = JSON.parse(protocol.buildAck({ ok: true, message: '已保存', displayName: 'Alice' }))
+  const ok = protocol.buildAck({ ok: true, message: '已保存', displayName: 'Alice' })
   assert.deepEqual(ok, { ok: true, message: '已保存', display_name: 'Alice' })
 
   // Missing optional fields must still produce a well-formed ack.
-  const sparse = JSON.parse(protocol.buildAck({ ok: false }))
+  const sparse = protocol.buildAck({ ok: false })
   assert.deepEqual(sparse, { ok: false, message: '', display_name: '' })
 })
 
 test('ack coerces ok to a boolean', () => {
-  assert.equal(JSON.parse(protocol.buildAck({ ok: 1 })).ok, true)
-  assert.equal(JSON.parse(protocol.buildAck({})).ok, false)
+  assert.equal(protocol.buildAck({ ok: 1 }).ok, true)
+  assert.equal(protocol.buildAck({}).ok, false)
+})
+
+test('accepts a Vela object and echoes request_id on success and failure', () => {
+  const message = { ...JSON.parse(VALID), request_id: 'cfg-2' }
+  const success = protocol.parseCredentialMessage(message)
+  const failure = protocol.parseCredentialMessage({ ...message, v: 99 })
+  assert.equal(success.ok, true)
+  assert.equal(failure.ok, false)
+  assert.equal(protocol.buildAck(success).request_id, 'cfg-2')
+  assert.equal(protocol.buildAck(failure).request_id, 'cfg-2')
 })
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed')

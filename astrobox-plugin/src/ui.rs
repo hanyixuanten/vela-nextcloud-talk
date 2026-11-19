@@ -14,6 +14,7 @@ const TEXT: &str = "#E8EEF5";
 const BORDER: &str = "#2A3038";
 const FIELD_BG: &str = "#14181D";
 const ACCENT: &str = "#0082C9";
+pub const MULTIPLE_DEVICES: &str = "连接了多台设备：请断开其他设备，只保留要配置的手表。";
 
 pub fn build(state: &State) -> Element {
     let mut form = Element::new(ElementType::Div, None)
@@ -37,15 +38,17 @@ pub fn build(state: &State) -> Element {
         .text_color(MUTED),
     );
 
+    let sending = matches!(state.status, Status::Sending);
     form = form.child(field_label("服务器"));
     form = form.child(field(
         "https://cloud.example.com",
         &state.server,
         EV_SERVER,
+        sending,
     ));
 
     form = form.child(field_label("用户名"));
-    form = form.child(field("用户名或邮箱", &state.user, EV_USER));
+    form = form.child(field("用户名或邮箱", &state.user, EV_USER, sending));
 
     form = form.child(field_label("应用密码"));
     // Plain text on purpose: app passwords are long and easy to mistype, and
@@ -54,9 +57,11 @@ pub fn build(state: &State) -> Element {
         "Nextcloud → 设置 → 安全 → 应用密码",
         &state.password,
         EV_PASSWORD,
+        sending,
     ));
 
-    let send_disabled = matches!(state.status, Status::Sending) || state.addr.is_none();
+    // A click re-enumerates devices, including a watch connected after render.
+    let send_disabled = matches!(state.status, Status::Sending);
     let mut button = Element::new(ElementType::Button, Some(button_caption(&state.status)))
         .width_full()
         .padding(12)
@@ -85,8 +90,8 @@ fn field_label(text: &str) -> Element {
     Element::new(ElementType::P, Some(text)).size(12).text_color(MUTED)
 }
 
-fn field(placeholder: &str, value: &str, event_id: &str) -> Element {
-    Element::new(ElementType::Input, None)
+fn field(placeholder: &str, value: &str, event_id: &str, disabled: bool) -> Element {
+    let input = Element::new(ElementType::Input, None)
         .prop("placeholder", placeholder)
         .prop("value", value)
         .width_full()
@@ -96,7 +101,8 @@ fn field(placeholder: &str, value: &str, event_id: &str) -> Element {
         .bg(FIELD_BG)
         .text_color(TEXT)
         .on(Event::Input, event_id)
-        .on(Event::Change, event_id)
+        .on(Event::Change, event_id);
+    if disabled { input.disabled() } else { input }
 }
 
 fn button_caption(status: &Status) -> &'static str {
@@ -107,6 +113,12 @@ fn button_caption(status: &Status) -> &'static str {
 }
 
 fn preflight_message(state: &State) -> Option<String> {
+    if matches!(state.status, Status::Err(_)) {
+        return None;
+    }
+    if state.multiple_devices {
+        return Some(MULTIPLE_DEVICES.to_string());
+    }
     if state.addr.is_none() {
         return Some("没有已连接的设备：先在 AstroBox 里连接手表。".to_string());
     }

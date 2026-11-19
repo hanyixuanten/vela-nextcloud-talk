@@ -34,6 +34,11 @@ await test('getCurrentUser returns id and display name', async () => {
   assert.equal(user.displayName, 'Alice A.')
 })
 
+await test('validating a rejected candidate preserves the live account', async () => {
+  await assert.rejects(api.getCurrentUser({ baseUrl: base, user: 'alice', appPassword: 'wrong' }))
+  assert.equal((await api.getCurrentUser()).id, 'alice')
+})
+
 await test('listConversations sorts by lastActivity desc', async () => {
   const rooms = await api.listConversations()
   assert.equal(rooms.length, 2)

@@ -1,111 +1,31 @@
 # CI（GitHub Actions）
 
-工作流在 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)，触发条件：push 到 `main`、打 `v*` tag、PR、以及手动 `workflow_dispatch`。同一分支的新推送会取消上一次还在跑的任务（`concurrency`）。
+[工作流](../.github/workflows/ci.yml)在推送到 `main`、推送 `v*` tag、PR 和手动 `workflow_dispatch` 时运行。同一分支的新 push 会取消上一次未完成的运行。`ubuntu-latest` runner 负责打包，本机不需要编译工具链。
 
-> 历史：这份工作流最早写在 `.gitea/workflows/` 下，用在自建 Gitea 的 act_runner 上跑通过一轮。现在源码主仓在 GitHub，`git.vblg.top` 上的那个仓库是它的**只读镜像**（`mirror: True`，8 小时同步），所以 CI 只保留 `.github/workflows/`。
+| 任务 | 内容 | Artifact |
+| --- | --- | --- |
+| `test` | `npm test`（纯 Node，不需要安装打包工具） | — |
+| `test-plugin` | Rust 插件协议回归测试 | — |
+| `build-rpk` | JS 测试通过后，按 `circle` / `rect` 矩阵分别编译并验证 RPK | `rpk-xiaomi-watch-s3-s4-s4-sport`、`rpk-redmi-watch-5` |
+| `build-plugin` | 协议测试通过后打包 `wasm32-wasip2` 插件并验证 ABP | `abp` |
 
-## 四个 job
+## 签名
 
-| job | 依赖 | 干什么 | 产物 |
-| --- | --- | --- | --- |
-| `test` | — | `npm ci` + `npm test`（46 条 JS 断言：base64 / format / protocol 单测 + 对 mock Nextcloud 的 14 条接口集成测试） | — |
-| `test-plugin` | — | `cargo test --target x86_64-unknown-linux-gnu --test protocol`（7 条协议单测，不需要 wasm 目标） | — |
-| `build-rpk` | `test` | 恢复签名证书 → `npm run build` → 检查 `dist/*.rpk` 内容 | `rpk` |
-| `build-plugin` | `test-plugin` | `rustup target add wasm32-wasip2` → `build_dist.py --release --package` → `check_artifact.py` | `abp` |
+在仓库 `Settings → Secrets and variables → Actions → Secrets` 配置 `SIGN_PRIVATE_PEM` 和 `SIGN_CERT_PEM` 时，工作流把它们写到 `sign/release/` 并运行 `release:<shape>`。两个 secret 都缺失时（含 fork PR），运行 `build:<shape>` 并使用 Toolkit 调试证书；只配置其中一个会报错。签名不同可能无法覆盖旧包；如需卸载重装，请准备好重新配置手表。
 
-`build-*` 用 `needs:` 卡住：测试挂了就不浪费一次 `cargo build` 和一次 aiot 打包。
+需要代理的 runner 可设置仓库变量 `HTTP_PROXY`。插件 Rust 版本由 [rust-toolchain.toml](../astrobox-plugin/rust-toolchain.toml) 固定，勿随意升级，否则新组件可能要求宿主还不支持的 WASI 版本。
 
-`build-plugin` 里多了 `check_artifact.py` 一步——它把「manifest 权限写错 / entry 指错文件 / 打成 core module 而不是 component / 文件名非 ASCII」这类**装不上**的问题挡在 CI，而不是等装到手机上才发现。
+## 获取产物
 
-## 需要的配置
+把改动推到有权限的 GitHub 仓库，等待 **Actions → CI → Artifacts** 出现结果。解开 Artifact 的外层 ZIP 后选 `.rpk` 或 `.abp`，无需解开安装包本身。打 tag 会运行构建，不会自动创建 GitHub Release。
 
-### 1. Runner
-
-`runs-on: ubuntu-latest` —— GitHub 托管 runner 开箱可用，不需要自建。实测镜像里 **Node 是 v24**，够新，所以没用 `actions/setup-node`。
-
-### 2. 签名证书（可选，但强烈建议）
-
-`Settings → Secrets and variables → Actions → Secrets` 新增两个：
-
-| Secret | 内容 |
-| --- | --- |
-| `SIGN_PRIVATE_PEM` | `sign/private.pem` 全文（含 `-----BEGIN ...-----`） |
-| `SIGN_CERT_PEM` | `sign/certificate.pem` 全文 |
-
-不配也能过：aiot-toolkit 会退回自带的调试证书（`sign/debug/` → `sign/` → 内置）。代价是**签名会变**，拿 CI 产物覆盖安装旧包会失败。工作流会明确打印「没有签名密钥，将使用 toolkit 调试证书」，不会静默。
-
-### 3. 代理（按需）
-
-走仓库变量而不是硬编码：
-
-```yaml
-env:
-  HTTP_PROXY: ${{ vars.HTTP_PROXY }}
+```sh
+# 本地可选：分别打两款调试包
+npm ci
+npm run build:circle
+npm run build:rect
+# 轻量回归测试：
+npm test
 ```
 
-在 `Settings → Secrets and variables → Actions → Variables` 建一个 `HTTP_PROXY`（如 `http://host:port`）即可。变量未定义时展开为空串，所有联网步骤都是：
-
-```bash
-if [ -n "${HTTP_PROXY:-}" ]; then
-  export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
-fi
-```
-
-空值不会被导出，不会出现空 `http_proxy` 把工具带偏。国内 runner 拉 crates.io 慢时这一项很有用。
-
-## 为什么只有两个外部 action
-
-`actions/checkout@v4` 和 `actions/upload-artifact@v4`，剩下全是 shell。
-
-- 不用 `actions/setup-node`：镜像自带 Node ≥ 18，工作流里 `node -v` 打出来便于核对；
-- 不用 `dtolnay/rust-toolchain`：改成 `if ! command -v cargo`，有就用、没有才装 rustup；
-- 不用 `actions/cache`：Rust 依赖每次重编，插件 release 构建约 12s，不值得为它多一个依赖。
-
-少一个 action 就少一个会因为上游变更或网络问题挂掉的环节。
-
-## 看产物
-
-跑完在 run 页面底部 **Artifacts** 下载 `rpk` / `abp`。`abp` 解压出来就是 `dist/` 的内容（manifest + icon + wasm），直接拖进 AstroBox 安装。
-
-要长期分发，建议给 `v*` tag 建 Release 把这两个文件挂上去，而不是塞进 git 历史。
-
-## 本地复现
-
-```bash
-# test
-npm ci && npm test
-
-# test-plugin
-cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protocol
-
-# build-rpk
-npm run build && ls -l dist/
-
-# build-plugin
-cd astrobox-plugin && PATH="$HOME/.cargo/bin:$PATH" \
-  python3 scripts/build_dist.py --release --package
-python3 scripts/check_artifact.py
-```
-
-这套命令在干净 clone 里验证过：`npm ci` 装 718 个包，JS 46 条断言全绿，Rust 7 条全绿，rpk 与 abp 都能产出并通过自检。
-
-## 实跑记录（踩过的坑）
-
-第一版在自建 act_runner 上跑时挂过一次：
-
-```
-/var/run/act/workflow/1.sh: line 7: cargo: command not found
-##[error]Process completed with exit code 127
-```
-
-镜像里没有 cargo，rustup 装完只写进了 shell profile，`echo $HOME/.cargo/bin >> $GITHUB_PATH` 只对**后续 step** 生效，当步里紧接着的 `cargo --version` 自然找不到。修法是当步再 `export PATH` 一次——现在两个 rust job 都是这么写的。
-
-同一轮还确认了两件事：`test (js)` 在 Node v24 上直接过，不需要 `setup-node`；`build (rpk)` 在没有签名 secrets 时也能出包并成功上传 artifact。
-
-## 已知限制
-
-- **没有缓存**，每次全量 `npm ci` + `cargo build`。想要就加 `actions/cache`，键用 `Cargo.lock` 与 `package-lock.json` 的哈希。
-- **不跑模拟器**。Vela 的 UI 只能靠 AIoT-IDE + AVD 验证，CI 里没有，所以 `build-rpk` 只证明「能编过、产物结构对」，不证明「跑起来对」。
-- **不校验签名一致性**。除非配了 secrets，否则只打印证书 subject，不比对是不是预期那张。
-- **插件工具链是钉死的**。`astrobox-plugin/rust-toolchain.toml` 指定 1.92.0，CI 从该文件读 channel 再装工具链；升级它就会改变组件声明的 WASI 版本，而宿主只到 0.2.6。
-- **插件包只做静态校验**。`check_artifact.py` 能挡格式与清单问题，挡不住运行时问题（比如 interconnect 被签名限制挡住）。
+CI 包结构检查不能代替屏幕渲染与蓝牙真机测试，参见[真机验收步骤](interconnect.md#使用和真机验收)。

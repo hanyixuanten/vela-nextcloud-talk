@@ -56,7 +56,12 @@
     <input-method
       hide="{{!editing}}"
       keyboardtype="{{keyboardType}}"
-      screentype="{{screenType}}"
+      <!-- if true: process.env.SHAPE === 'CIRCLE' -->
+      screentype="circle"
+      <!-- endif -->
+      <!-- if true: process.env.SHAPE === 'RECT' -->
+      screentype="rect"
+      <!-- endif -->
       maxlength="5"
       vibratemode="short"
       @complete="onKeyComplete"
@@ -93,8 +98,7 @@ export default {
     activeIndex: -1,
     submitting: false,
     error: '',
-    keyboardType: 'QWERTY',
-    screenType: 'circle'
+    keyboardType: 'QWERTY'
   },
 
   onInit() {
@@ -104,7 +108,6 @@ export default {
       this.appPassword = settings.appPassword || ''
       this.syncMasked()
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.screenType = settings.screenType || 'circle'
     })
   },
 
@@ -352,4 +355,73 @@ export default {
   font-size: 22px;
   color: #cbd5e1;
 }
+
+.field-value, .edit-value {
+  lines: 1;
+  text-overflow: ellipsis;
+}
+.error {
+  lines: 2;
+  text-overflow: ellipsis;
+}
+
+/* if true: process.env.SHAPE === 'CIRCLE' */
+.top {
+  height: 114px;
+  padding-top: 24px;
+}
+.field {
+  width: 344px;
+  height: 52px;
+  margin-top: 8px;
+}
+.primary {
+  width: 276px;
+  height: 50px;
+  margin-top: 14px;
+}
+.link, .error {
+  width: 270px;
+  margin-top: 8px;
+}
+.edit-top {
+  width: 274px;
+  justify-content: flex-end;
+}
+.edit-actions {
+  width: 288px;
+}
+/* endif */
+
+/* if true: process.env.SHAPE === 'RECT' */
+.top {
+  height: 112px;
+}
+.form, .field, .primary, .link, .error, .edit-top, .edit-actions {
+  width: 432px;
+}
+.field {
+  height: 70px;
+}
+.primary {
+  border-radius: 20px;
+}
+.link {
+  height: 50px;
+  font-size: 20px;
+}
+.edit-top {
+  height: 172px;
+  justify-content: flex-end;
+  padding-bottom: 14px;
+}
+.edit-actions {
+  height: 74px;
+}
+.ghost {
+  width: 208px;
+  height: 56px;
+  border-radius: 20px;
+}
+/* endif */
 </style>

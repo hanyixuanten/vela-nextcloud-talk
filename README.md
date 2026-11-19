@@ -2,7 +2,7 @@
 
 小米 Vela（Xiaomi Watch / 手环）上的 Nextcloud Talk 客户端，纯 Vela JS 快应用实现。
 
-骨架仓库：登录、会话列表、收发消息、设置四条主链路都已跑通，UI 按 480 设计宽度的圆形表盘排布，输入法接入 [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)（已内置到 `src/components/InputMethod/`，支持中文拼音 / 英文 / 日语罗马字）。
+骨架仓库：登录、会话列表、收发消息、设置四条主链路都已跑通，UI 以 480 为设计宽度，并针对圆屏和矩形屏分别打包，输入法接入 [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)（已内置到 `src/components/InputMethod/`，支持中文拼音 / 英文 / 日语罗马字）。
 
 ```
 手表 ──HTTPS Basic Auth（应用密码）──> Nextcloud Talk OCS API
@@ -18,27 +18,28 @@
 
 两种方式任选：
 
-- **AIoT-IDE**（官方，推荐）：安装后在「打开项目」里选择本仓库根目录即可，内置模拟器与打包按钮。
+- **AIoT-IDE**（官方）：先用下面的构建命令或 GitHub Actions 生成对应屏幕的 RPK，再用 IDE 模拟器或真机调试。不要直接用 IDE 打包按钮构建原始源码，因为它不会执行本项目的屏幕条件预处理。
 - **命令行**：需要 Node ≥ 18（本项目在 v22.22.2 + aiot-toolkit 2.0.5 上验证过），然后
 
   ```bash
-  npm install          # 装 aiot-toolkit
-  npm start            # 启动模拟器并运行
-  npm run build        # 产出 dist/*.debug.rpk
+  npm ci               # 安装 aiot-toolkit
+  npm run build:circle # Xiaomi Watch S3 / S4 / S4 Sport
+  npm run build:rect   # REDMI Watch 5
   ```
 
   仓库自带的 `.npmrc` 指向 npmmirror，若在国外可自行删掉。
 
 ### 2. 安装到手表
 
-已构建好的包在 `dist/`：
+本机不必编译。把代码推送到有权限的 GitHub 仓库后，从 **Actions → CI → 对应运行 → Artifacts** 下载并解压：
 
-```
-dist/com.hanyixuanten.nctalk.debug.0.2.2.rpk   412 KB
-package : com.hanyixuanten.nctalk
-version : 0.2.2 (versionCode 4)
-sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
-```
+| Artifact | 适用设备 |
+| --- | --- |
+| `rpk-xiaomi-watch-s3-s4-s4-sport` | Xiaomi Watch S3 / S4 / S4 Sport（466 × 466 圆屏） |
+| `rpk-redmi-watch-5` | REDMI Watch 5（432 × 514 矩形屏） |
+| `abp` | 手机 AstroBox 插件，用于从手机配置凭据 |
+
+两个 RPK 包名均为 `com.hanyixuanten.nctalk`，同一块表只安装对应的一个。
 
 安装步骤：
 
@@ -47,17 +48,11 @@ sign    : sign/certificate.pem (CN=vela-nextcloud-talk)
 3. 或者用社区工具（[minstall](https://github.com/HyperionD/minstall) 等）走蓝牙安装。
 4. 手表上打开 Talk。**首次启动直接进「从手机配置」页**（它才是监听 interconnect 的那一页），要么等手机推，要么点「手动输入」自己填三项。
 
-自己重新打包：
-
-```bash
-npm run build        # → dist/com.hanyixuanten.nctalk.debug.0.2.2.rpk
-```
-
-签名证书的查找顺序是 `sign/debug/` → `sign/` → toolkit 内置的默认调试证书。本仓库的 rpk 用的是 `sign/*.pem`（自签名）。`sign/*.pem` 已在 `.gitignore` 里，所以**克隆后不生成证书也能打包**，只是会退回 toolkit 的默认证书——那样每次换机器重打包签名就变了，覆盖安装可能失败。要固定签名，按 [`sign/README.md`](sign/README.md) 生成一次即可。
+本地调试构建用 `build:circle` 或 `build:rect`；正式签名分别用 `npm run release:circle`、`npm run release:rect`，需按 [`sign/README.md`](sign/README.md) 配置证书。没有 CI 签名密钥时会产出调试包，不一定能覆盖旧签名的安装。
 
 ### 3. 从手机配置凭据（可选，但要装插件）
 
-在 480px 圆屏上敲服务器地址加一长串应用密码实在难受，所以有一个 AstroBox 插件：在手机上填表，凭据经蓝牙推到手表，由手表自己校验并保存。
+在手表上敲服务器地址加一长串应用密码实在难受，所以有一个 AstroBox 插件：在手机上填表，凭据经蓝牙推到手表，由手表自己校验并保存。
 
 ```
 手表：首次启动就在「从手机配置」页；已有账号时走 设置 → 从手机配置
@@ -94,7 +89,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-46 条 JS 断言：`base64` / `format` / `protocol` 的单元测试，加上针对 `tests/mock-server.mjs` 这个假 Nextcloud 的 14 条接口集成测试（认证头、OCS 信封、游标、错误映射、网络失败）。测试里 `api.js` 是**原样执行**的，只把 `@system.fetch` 换成 `tests/fetch-double.mjs` 这个替身。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程，以及针对模拟 Nextcloud 的接口集成测试。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -104,7 +99,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 
 ### 6. CI
 
-`.github/workflows/ci.yml`（GitHub Actions）四个 job：`test`（JS 46 条断言）、`test-plugin`（Rust 7 条协议断言）、`build-rpk`、`build-plugin`，后两个用 `needs:` 卡在前两个通过之后，产物走 Artifacts。`build-plugin` 还会跑 `check_artifact.py`，把装不上的包挡在 CI。签名证书从 `SIGN_PRIVATE_PEM` / `SIGN_CERT_PEM` 两个 secret 注入，不配也能出包（退回 toolkit 调试证书）。
+[GitHub Actions 工作流](.github/workflows/ci.yml)运行 JS 与 Rust 测试，之后用矩阵分别打包圆屏、矩形屏 RPK，并构建 ABP。配置 `SIGN_PRIVATE_PEM` 和 `SIGN_CERT_PEM` 两个 Secret 会生成正式签名 RPK；都不配置时生成调试 RPK。
 
 细节、runner 标签要求和本地复现命令见 [`docs/ci.md`](docs/ci.md)。
 
@@ -121,7 +116,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 已读标记 | ✅ | 打开会话后 PUT `/chat/{token}/read` |
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
-| 设置 | ✅ | 键盘布局、屏幕形状、轮询间隔、字号、清除数据 |
+| 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表校验后保存 |
 | 图片 / 文件消息 | ❌ | 只渲染文本，附件显示为占位文字 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
@@ -257,7 +252,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 <input-method
   hide="{{!editing}}"          <!-- true 隐藏，false 弹出 -->
   keyboardtype="{{keyboardType}}"  <!-- QWERTY | T9 -->
-  screentype="{{screenType}}"      <!-- circle | rect | pill -->
+  screentype="circle"             <!-- 圆屏构建；矩形屏构建使用 rect -->
   maxlength="5"
   vibratemode="short"
   @complete="onKeyComplete"    <!-- evt.detail.content -->
@@ -269,16 +264,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 ### 屏幕形状
 
-`manifest.json` 的 `config.designWidth` 默认 480，对应圆形表盘（Watch S1 Pro / S3 / S4 / S5）。换设备时：
-
-| 设备 | 分辨率 | designWidth | screentype |
-| --- | --- | --- | --- |
-| Watch S1 Pro / S5 | 480×480 | 480 | `circle` |
-| Watch S3 / S4 / H1 | 466×466 | 480（会被缩放） | `circle` |
-| Band 8 Pro / 9 Pro | 336×480 | 336 | `pill` |
-| Band 9 / 10 | 192×490 等 | 192 | `pill` |
-
-`designWidth` 需要改 `manifest.json` 后重新打包；`screentype` 只是传给输入法组件的布局参数，可以在设置页里实时切换。
+两种目标共用 `config.designWidth: 480`；Vela 会按物理宽度缩放单位。构建时选择圆屏或矩形屏布局与对应键盘，圆屏避开裁切区域，矩形屏使用更宽的内容区；不用手动修改 manifest。
 
 ---
 
@@ -290,7 +276,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 - **无附件渲染**：文件/图片消息会显示成 Rich Object String 展开后的文件名文本。
 - **消息上限**：一次只取 40 条，没有上滑加载更早消息。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
-- **interconnect 的签名前提**：官方 Vela 文档要求快应用与手机端 App 包名/签名一致才能互联，而 AstroBox 的 `interconnect` host API 是按 `pkg-name` 投递的。这条限制是否被绕开**未在真机验证**，如果手表收不到推送，先看插件的 stdout 日志里 send 是否返回 `Err`。细节见 [`docs/interconnect.md`](docs/interconnect.md)。
+- **互联真机验证**：AstroBox 按已连接设备地址与已安装快应用包名投递；仍须在目标固件与 AstroBox 版本上验证收发。Android 官方互联签名要求与排错见[凭据互联说明](docs/interconnect.md)。
 - **插件不持久化密码**：AstroBox 的 Host API 里确实没有文件系统函数（`os` 只给 arch/hostname/locale），运行时虽然提供 WASI std fs（限定在插件自己的目录内），但这一版**故意没有**写盘——密码每次都要重填，真正的保存只发生在手表的 `@system.storage`，发送成功后插件立刻清空内存里的密码。
 
 ## 下一步
@@ -308,7 +294,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 ## 参考
 
 - [Vela JS 应用开发文档](https://iot.mi.com/vela/quickapp/zh/guide/)
-- [AstroBox 插件文档](https://plugindoc.astrobox.online/)
+- [AstroBox 插件文档](https://abox.run/docs/plugin-development/v2/host-api/interconnect)
 - [项目配置 manifest.json](https://iot.mi.com/vela/quickapp/zh/guide/framework/manifest.html)
 - [数据请求 fetch](https://iot.mi.com/vela/quickapp/zh/features/network/fetch.html)
 - [Nextcloud Talk Conversation API](https://nextcloud-talk.readthedocs.io/en/latest/conversation/)

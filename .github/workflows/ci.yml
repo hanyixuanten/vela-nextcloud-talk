@@ -36,15 +36,7 @@ jobs:
           node -v
           npm -v
 
-      - name: Install
-        run: |
-          if [ -n "${HTTP_PROXY:-}" ]; then
-            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
-          fi
-          npm ci --no-audit --no-fund
-
-      # 46 assertions: base64/format/protocol unit tests plus the api.js
-      # integration suite against tests/mock-server.mjs. No emulator, no device.
+      # Pure Node tests, no toolkit install, emulator or device needed.
       - name: Test
         run: npm test
 
@@ -87,9 +79,17 @@ jobs:
 
   # ---------------------------------------------------------------------- rpk
   build-rpk:
-    name: build (rpk)
+    name: build (rpk-${{ matrix.shape }})
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shape: circle
+            suffix: xiaomi-watch-s3-s4-s4-sport
+          - shape: rect
+            suffix: redmi-watch-5
     steps:
       - uses: actions/checkout@v4
 
@@ -100,37 +100,47 @@ jobs:
           fi
           npm ci --no-audit --no-fund
 
-      # aiot-toolkit looks for signing material in sign/debug/, then sign/, then
-      # falls back to its own bundled debug certificate. With the secrets set the
-      # signature stays stable across builds; without them the rpk is still
-      # produced but signed by the toolkit, which breaks overwrite-installs from
-      # a previously differently-signed build.
-      - name: Restore signing certificate
+      # Release builds require explicit signing material; fork PRs and repos
+      # without signing secrets produce debug packages instead.
+      - name: Configure signing
+        id: signing
         env:
           PRIVATE_PEM: ${{ secrets.SIGN_PRIVATE_PEM }}
           CERT_PEM: ${{ secrets.SIGN_CERT_PEM }}
         run: |
-          mkdir -p sign
           if [ -n "$PRIVATE_PEM" ] && [ -n "$CERT_PEM" ]; then
-            printf '%s\n' "$PRIVATE_PEM" > sign/private.pem
-            printf '%s\n' "$CERT_PEM" > sign/certificate.pem
-            openssl x509 -in sign/certificate.pem -noout -subject -enddate
+            umask 077
+            mkdir -p sign/release
+            printf '%s\n' "$PRIVATE_PEM" > sign/release/private.pem
+            printf '%s\n' "$CERT_PEM" > sign/release/certificate.pem
+            openssl x509 -in sign/release/certificate.pem -noout -subject -enddate
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+          elif [ -n "$PRIVATE_PEM" ] || [ -n "$CERT_PEM" ]; then
+            echo 'Both SIGN_PRIVATE_PEM and SIGN_CERT_PEM must be configured' >&2
+            exit 1
           else
-            echo "no signing secrets; the toolkit debug certificate will be used"
+            echo 'No signing secrets; building a toolkit-signed debug package'
+            echo "mode=build" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build
-        run: npm run build
-
-      - name: Inspect
+      - name: Build and verify package
+        env:
+          MODE: ${{ steps.signing.outputs.mode }}
+          SHAPE: ${{ matrix.shape }}
         run: |
-          ls -l dist/
-          unzip -l dist/*.rpk | tail -3
+          npm run "$MODE:$SHAPE"
+          shopt -s nullglob
+          packages=(dist/*-"$SHAPE".rpk)
+          if [ "${#packages[@]}" -ne 1 ]; then
+            echo "Expected one $SHAPE RPK, got ${#packages[@]}" >&2
+            exit 1
+          fi
+          unzip -tq "${packages[0]}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpk
-          path: dist/*.rpk
+          name: rpk-${{ matrix.suffix }}
+          path: dist/*-${{ matrix.shape }}.rpk
           if-no-files-found: error
 
   # ---------------------------------------------------------------------- abp

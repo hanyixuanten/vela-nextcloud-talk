@@ -305,4 +305,60 @@ export default {
   font-size: 20px;
   color: #a9b5c2;
 }
+
+.room-name, .room-preview {
+  lines: 1;
+}
+
+/* if true: process.env.SHAPE === 'CIRCLE' */
+/* The list and buttons must fit the chord at the top/bottom of their viewports. */
+.header {
+  width: 260px;
+  height: 84px;
+  padding-top: 22px;
+}
+.footer {
+  width: 248px;
+  height: 88px;
+  padding-bottom: 28px;
+}
+.foot-btn {
+  width: 114px;
+  height: 50px;
+}
+.placeholder {
+  width: 360px;
+}
+/* endif */
+
+/* if true: process.env.SHAPE === 'RECT' */
+.header {
+  width: 432px;
+  height: 76px;
+}
+.list, .row {
+  width: 432px;
+}
+.list {
+  margin-left: 24px;
+}
+.row {
+  height: 76px;
+  border-bottom: 1px solid #1c2127;
+}
+.room-name, .room-preview {
+  width: 266px;
+}
+.placeholder {
+  width: 432px;
+}
+.footer {
+  width: 432px;
+  height: 76px;
+}
+.foot-btn {
+  width: 208px;
+  height: 54px;
+}
+/* endif */
 </style>
