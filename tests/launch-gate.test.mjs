@@ -46,11 +46,23 @@ test('the router entry is the gate, not the conversation list', () => {
 
 test('the gate probes the network and routes by its verdict', () => {
   assert.match(splash, /import network from '\.\.\/\.\.\/common\/scripts\/network'/)
-  assert.match(splash, /network\.checkNetwork\(/)
-  assert.match(splash, /routeAfterGate\(online, store\.hasAccount/)
+  assert.match(splash, /network\.checkSignal\(/)
+  assert.match(splash, /routeAfterGate\(signal\.online, store\.hasAccount/)
   // The verdict has to be published before the replace, otherwise the page
   // being entered bounces straight back here.
-  assert.match(splash, /state\.launchAllowed = online\s*\n\s*const target/)
+  assert.match(splash, /state\.launchAllowed = signal\.online\s*\n\s*const target/)
+  // The probes are evidence, not a gate, and they must run *after* the route
+  // decision (that was the "stuck on 没有网络" bug: a slow probe looked exactly
+  // like a dead interface).
+  assert.ok(!/launchAllowed = .*probe/.test(splash), 'the probe must not decide the launch')
+  const routed = splash.indexOf('router.replace({ uri: target })')
+  const probed = splash.indexOf('this.probe()')
+  assert.ok(routed > -1 && probed > routed, 'probe runs after the launch is routed')
+  // bilibili is the control, the configured server is the target; both land in
+  // shared state so the first request's error can say which one failed.
+  assert.match(splash, /network\.probeTargets\(/)
+  assert.match(splash, /state\.controlProbe = result\.control/)
+  assert.match(splash, /state\.serverProbe = result\.server/)
 })
 
 test('the gate builds no main UI of its own', () => {

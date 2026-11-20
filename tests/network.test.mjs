@@ -1,9 +1,23 @@
-// Startup network gate: interface type first, then a fetch probe at the
-// configured server. Run through tests/run.sh (module specifiers rewritten).
+// Startup network gate and its advisory probes.
+//
+// The verdict is the interface type, exactly like HyperBilibili's
+// `NetworkCheck`. The probes (bilibili as control, `<baseUrl>/status.php` as the
+// real target) are evidence only and must never delay or block the launch —
+// that is what produced the "stuck on 没有网络" dead end.
+//
+// Run with: sh tests/run.sh
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import { reset, state } from './.build/network-double.mjs'
-import { checkNetwork, probeServer } from './.build/network.mjs'
+import {
+  CONTROL_URL,
+  checkNetwork,
+  checkSignal,
+  probeServer,
+  probeServerDetailed,
+  probeTargets,
+  probeUrl
+} from './.build/network.mjs'
 
 const SENT = []
 const server = http.createServer((req, res) => {
@@ -15,7 +29,7 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const base = 'http://127.0.0.1:' + server.address().port
 
 // A second server that refuses every request with 401: an auth error still
-// proves the network works, so the gate must not treat it as offline.
+// proves the network works, so it must not be reported as a transport failure.
 const denied = http.createServer((req, res) => {
   res.writeHead(401)
   res.end('unauthorized')
@@ -35,53 +49,80 @@ const test = async (name, fn) => {
   }
 }
 
-await test('a "none" interface is offline and never probes the server', async () => {
+await test('the control probe defaults to bilibili, like the reference app', () => {
+  assert.equal(CONTROL_URL, 'https://www.bilibili.com/')
+})
+
+await test('a "none" interface is offline and sends nothing', async () => {
   reset('none')
-  assert.equal(await checkNetwork({ baseUrl: base }), false)
+  assert.equal(await checkNetwork(), false)
   assert.deepEqual(SENT, [])
 })
 
 await test('an unknown interface type counts as offline', async () => {
   reset('')
-  assert.equal(await checkNetwork({ baseUrl: base }), false)
+  assert.equal(await checkNetwork(), false)
   assert.deepEqual(SENT, [])
 })
 
 await test('a failed getType counts as offline', async () => {
   reset('wifi')
   state.fail = true
-  assert.equal(await checkNetwork({ baseUrl: base }), false)
+  assert.equal(await checkNetwork(), false)
   state.fail = false
   assert.deepEqual(SENT, [])
 })
 
-await test('without a server address the type check is enough', async () => {
+await test('the verdict itself makes no request, so it cannot be slow', async () => {
   reset('wifi')
-  assert.equal(await checkNetwork({}), true)
-  assert.deepEqual(SENT, [], 'no request is made before an account exists')
+  const signal = await checkSignal()
+  assert.equal(signal.online, true)
+  assert.equal(signal.type, 'wifi')
+  assert.deepEqual(SENT, [], 'the gate must resolve without a round trip')
 })
 
-await test('the probe hits /status.php and any answer means online', async () => {
+await test('probes cover bilibili first and the configured server second', async () => {
   reset('wifi')
-  assert.equal(await checkNetwork({ baseUrl: base + '/' }), true)
-  assert.deepEqual(SENT, ['/status.php'])
+  const result = await probeTargets({ baseUrl: base + '/' }, { controlUrl: base })
+  assert.equal(result.control.ok, true)
+  assert.equal(result.server.ok, true)
+  assert.equal(result.server.status, 200)
+  assert.ok(result.control.ms >= 0 && result.server.ms >= 0)
+  assert.deepEqual(SENT.sort(), ['/', '/status.php'])
 })
 
-await test('a 401 still proves the network is up', async () => {
+await test('no account yet: the control probe still runs, the server one does not', async () => {
   reset('wifi')
+  const result = await probeTargets({}, { controlUrl: base })
+  assert.equal(result.control.ok, true)
+  assert.equal(result.server, null)
+  assert.deepEqual(SENT, ['/'])
+})
+
+await test('a 401 counts as reached, not as a transport failure', async () => {
+  reset('wifi')
+  const probe = await probeServerDetailed(deniedBase)
+  assert.equal(probe.ok, true)
+  assert.equal(probe.status, 401)
   assert.equal(await probeServer(deniedBase), true)
 })
 
-await test('an unreachable server is offline, even with a live interface', async () => {
+await test('bilibili ok + server unreachable is the diagnosis, not "offline"', async () => {
   reset('wifi')
-  assert.equal(await checkNetwork({ baseUrl: 'https://127.0.0.1:1' }), false)
+  assert.equal(await checkNetwork(), true, 'an unreachable host must not block the launch')
+  const result = await probeTargets({ baseUrl: 'https://127.0.0.1:1' }, { controlUrl: base })
+  assert.equal(result.control.ok, true, 'the watch does reach the internet')
+  assert.equal(result.server.ok, false)
+  assert.notEqual(String(result.server.code), '', 'the transport code is what explains it')
 })
 
-await test('a hanging request is cut off by the probe timeout', async () => {
+await test('a hanging probe is cut off and reported as a timeout', async () => {
   reset('wifi')
   const started = Date.now()
-  const value = await probeServer(base + '/hang', 60)
-  assert.equal(value, false)
+  const probe = await probeUrl(base + '/hang', 60)
+  assert.equal(probe.ok, false)
+  assert.equal(probe.timedOut, true)
+  assert.equal(probe.code, 'TIMEOUT')
   assert.ok(Date.now() - started < 2000, 'the probe must not wait for the platform')
 })
 
