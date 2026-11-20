@@ -48,6 +48,7 @@ fail=0
 "$NODE" "$ROOT/tests/login-layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/layout-sizing.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat-layout.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/index-layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/seed-watch-chat.test.mjs" || fail=1

@@ -6,7 +6,7 @@
 
     <div class="head">
       <text class="t-title">{{ $t('index.title') }}</text>
-      <text class="t-caption" show="{{accountLabel}}">{{ accountLabel }}</text>
+      <text class="t-caption" if="{{accountLabel}}">{{ accountLabel }}</text>
     </div>
 
     <scroll class="scroll" scroll-y="{{true}}">
@@ -21,23 +21,29 @@
           </div>
           <div class="right">
             <text class="room-time">{{ $item.time }}</text>
-            <div class="badge" show="{{ $item.unread > 0 }}">
+            <!-- `if`, not `show`: the hidden badge kept its 30px and pushed the
+                 timestamp up out of the row. -->
+            <div class="badge" if="{{ $item.unread > 0 }}">
               <text class="badge-text">{{ $item.unread > 99 ? '99+' : $item.unread }}</text>
             </div>
           </div>
         </div>
 
-        <div class="empty" show="{{!loading && !error && rooms.length === 0}}">
+        <!-- The three placeholders are `if` for the same reason the chat page
+             is: a shown=false node still takes its layout height on this Vela
+             build, so all three (~300px together) were appended after the last
+             card and could be scrolled into as empty space. -->
+        <div class="empty" if="{{!loading && !error && rooms.length === 0}}">
           <text class="t-body">{{ $t('index.empty') }}</text>
           <text class="empty-hint">{{ $t('index.emptyHint') }}</text>
         </div>
 
-        <div class="empty" show="{{!loading && error}}">
+        <div class="empty" if="{{!loading && error}}">
           <text class="t-error empty-message">{{ error }}</text>
           <app-pill text="{{ $t('common.retry') }}" width="220px" primary="true" @click="refresh"></app-pill>
         </div>
 
-        <div class="empty" show="{{loading && rooms.length === 0}}">
+        <div class="empty" if="{{loading && rooms.length === 0}}">
           <text class="empty-hint">{{ $t('index.loading') }}</text>
         </div>
       </div>
