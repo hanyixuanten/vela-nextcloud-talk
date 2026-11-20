@@ -78,7 +78,6 @@
     "poll": "Poll interval",
     "font": "Text size",
     "clear": "Clear local data",
-    "clearConfirm": "Delete account, password and read markers?",
     "about": "About",
     "screenCircle": "Round",
     "screenRect": "Square",

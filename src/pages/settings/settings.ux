@@ -174,7 +174,7 @@ export default {
 
   openAbout() {
     prompt.showToast({
-      message: 'Vela Nextcloud Talk 0.2.2',
+      message: 'Vela Nextcloud Talk ' + this.version,
       duration: 2000
     })
   },

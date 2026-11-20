@@ -78,7 +78,6 @@
     "poll": "刷新间隔",
     "font": "字号",
     "clear": "清除本地数据",
-    "clearConfirm": "将删除账号、密码和已读记录，确定吗？",
     "about": "关于",
     "screenCircle": "圆形",
     "screenRect": "方形",

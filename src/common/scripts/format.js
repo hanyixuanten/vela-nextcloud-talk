@@ -56,6 +56,8 @@ function formatTime(seconds) {
 }
 
 function formatClock(seconds) {
+  // A message without a usable timestamp must not render "NaN:NaN".
+  if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return ''
   const date = new Date(Number(seconds) * 1000)
   return pad2(date.getHours()) + ':' + pad2(date.getMinutes())
 }
