@@ -358,6 +358,10 @@ export default {
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
 .head {
   height: 104px;
   padding-top: 4px;

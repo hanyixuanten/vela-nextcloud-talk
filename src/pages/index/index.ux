@@ -185,7 +185,9 @@ export default {
 }
 
 .list {
-  width: 100%;
+  /* Design pixels, not 100%: a <scroll> gives its content no definite width,
+   * so percentages inside it collapse (the conversation cards disappeared). */
+  width: 480px;
   padding-top: 4px;
   padding-bottom: 8px;
   flex-direction: column;
@@ -193,7 +195,7 @@ export default {
 }
 
 .room {
-  width: 82%;
+  width: 394px;
   height: 104px;
   margin-top: 10px;
   border-radius: 28px;
@@ -246,7 +248,7 @@ export default {
 }
 
 .empty {
-  width: 78%;
+  width: 374px;
   padding-top: 56px;
   flex-direction: column;
   align-items: center;
@@ -292,9 +294,16 @@ export default {
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
 .head {
   height: 92px;
   padding-top: 8px;
+}
+.room {
+  width: 413px;
 }
 .footer {
   width: 86%;

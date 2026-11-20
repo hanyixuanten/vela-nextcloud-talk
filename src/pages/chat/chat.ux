@@ -596,7 +596,10 @@ export default {
 }
 
 .list {
-  width: 100%;
+  /* Width in design pixels, not 100%: inside a <scroll> there is no definite
+   * parent width, so a percentage here collapsed the list and every bubble in
+   * it (the "squashed" chat screen). 480px is the design width of both shapes. */
+  width: 480px;
   padding-bottom: 8px;
   flex-direction: column;
   align-items: center;
@@ -605,7 +608,7 @@ export default {
 /* Bubbles, template colours: grey surface for others, the single pink accent
  * for your own messages (dark text keeps it readable on pink). */
 .msg {
-  width: 82%;
+  width: 394px;
   margin-top: 10px;
   border-radius: 26px;
   background-color: #262626;
@@ -661,7 +664,7 @@ export default {
 }
 
 .placeholder {
-  width: 78%;
+  width: 374px;
   padding-top: 48px;
   flex-direction: column;
   align-items: center;
@@ -810,7 +813,7 @@ export default {
   margin-top: 70px;
 }
 .msg {
-  width: 82%;
+  width: 394px;
 }
 .inputbar {
   width: 50%;
@@ -828,11 +831,15 @@ export default {
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
 .bar {
   width: 86%;
 }
 .msg {
-  width: 86%;
+  width: 413px;
 }
 .msg-mine {
   align-self: flex-end;

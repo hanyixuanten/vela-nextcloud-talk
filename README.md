@@ -237,7 +237,7 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 - `src/common/styles/theme.css` 只放令牌类，各页 `<style>` 里 `@import` 后由打包器内联（已验证规则出现在 `pages/*/*.js`），运行时不额外加载。
 - 按钮统一走 `src/components/ui/AppPill.ux`；宽度用 prop 传入，因为 Vela 只应用组件自身的样式块，父级的 `class`/`style` 不会透传。
-- 页面背景是 `scripts/gen-bg.py` 生成的 256×256 辉光 PNG（纯 Python 写 PNG，零依赖），`object-fit: fill` 拉伸铺满。
+- 页面背景是 `scripts/gen-bg.py` 生成的 256×256 辉光 PNG（纯 Python 写 PNG，零依赖），放在 480×480 的盒子里用 `object-fit: cover` 铺满（Vela 不接受 CSS 的 `fill`）。
 
 ### 启动网络门与校验期亮屏
 

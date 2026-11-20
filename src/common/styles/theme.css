@@ -13,8 +13,14 @@
  *   weight 600 headings, 500 body         → the watch font has no real bold
  */
 
+/* No `position: relative` here on purpose. On this firmware a relatively
+ * positioned container stops handing a definite width down to its children:
+ * the background glow kept its 256 px intrinsic size and every percentage-sized
+ * child (titles, cards, bubbles) lost its basis, which is exactly the "small
+ * pink patch, everything else black" and the "squashed chat" that came back
+ * from the device. The page root was a plain 100% x 100% column before the
+ * theme port and every page laid out correctly, so it stays that way. */
 .app-page {
-  position: relative;
   width: 100%;
   height: 100%;
   flex-direction: column;
@@ -25,14 +31,24 @@
   overflow: hidden;
 }
 
-/* Decorative only: sits under the content, so it must never eat a tap. */
+/* Decorative only: sits under the content, so it must never eat a tap.
+ *
+ * Sized in design pixels, never in percentages. The percentage version sized
+ * itself off nothing and fell back to the bitmap's intrinsic size, so the
+ * 256x256 glow was painted in the top-left corner and the rest of the screen
+ * stayed black. 480px is the design width, i.e. exactly the round screen.
+ *
+ * object-fit only accepts contain | cover | none | scale-down on Vela (`fill`
+ * from the CSS spec is not a valid value there); the box and the bitmap are
+ * both square, so `cover` is an exact fill with no crop and no distortion.
+ * Rect pages grow the box in their own RECT block. */
 .app-bg {
   position: absolute;
   left: 0;
   top: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: fill;
+  width: 480px;
+  height: 480px;
+  object-fit: cover;
   opacity: 0.85;
 }
 

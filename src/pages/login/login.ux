@@ -406,6 +406,10 @@ export default {
 
 /* if true: process.env.SHAPE === 'RECT' */
 /* Rect keyboard is 255px tall plus a 28px candidate row. */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
 .top {
   height: 92px;
   padding-top: 8px;

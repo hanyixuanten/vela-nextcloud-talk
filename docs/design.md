@@ -203,5 +203,17 @@ pages/chat   onInit  → 读取配置
 
 - `src/common/styles/theme.css` 只放令牌类（`.app-page` `.app-bg` `.t-*` `.card` `.pill` `.badge` …），各页 `@import` 后在编译期内联（已用产物验证：规则出现在 `pages/*/*.js` 里），因此不增加运行时开销，也不会出现两份拷贝。
 - `src/components/ui/AppPill.ux` 是唯一的按钮组件。宽度通过 prop 传入而不是父级 `class`/`style`——Vela 只应用组件自身的样式块，父级样式不会透传。
-- 页面背景是 `scripts/gen-bg.py` 生成的 256×256 径向辉光 PNG（纯 Python 写 PNG，零依赖、无矢量），`object-fit: fill` 拉伸到全屏。
+- 页面背景是 `scripts/gen-bg.py` 生成的 256×256 径向辉光 PNG（纯 Python 写 PNG，零依赖、无矢量），盒子和位图都是正方形，所以 `object-fit: cover` 正好等于全屏填充、不裁切也不变形（Vela 的 `object-fit` 只接受 `contain` / `cover` / `none` / `scale-down`，CSS 规范里的 `fill` 不是合法值）。
 - 圆屏的所有贴边尺寸仍按第 1 节的弦宽公式取值。
+
+### 尺寸必须落在设计像素上
+
+0.2.5 的主题移植在真机（圆表）上翻过一次车，两条都是尺寸解析问题，记在这里避免重犯：
+
+| 位置 | 错误写法 | 真机表现 | 正确写法 |
+| --- | --- | --- | --- |
+| `.app-page` | `position: relative` | 页面根不再把确定宽度传给子节点 | 静态定位（沿用移植前的 `.page`） |
+| `.app-bg` | `width/height: 100%` | 回退到位图的固有尺寸，粉色辉光只占左上角 256×256，其余纯黑 | `480px` × `480px`（矩形屏在 RECT 块里加高） |
+| `<scroll>` 内容根 `.list` | `width: 100%` | 滚动内容没有确定宽度，百分比解析不到基准，气泡／行全部塌成零宽（「消息界面被压扁」） | `480px`（设计宽度），子卡片用 394 / 413 / 374 这类设计像素 |
+
+这些不变式由 `tests/layout-sizing.test.mjs` 守护：它断言页面根没有相对定位、`.app-bg` 用像素值且 `object-fit` 合法、三个滚动页的 `.list` 与卡片在每种屏幕下都是像素宽度。百分比只在父节点有确定宽度时才用（例如 `.app-page` 的直接子节点）。

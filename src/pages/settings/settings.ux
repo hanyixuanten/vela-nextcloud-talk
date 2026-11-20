@@ -216,7 +216,9 @@ export default {
 }
 
 .list {
-  width: 100%;
+  /* Design pixels, not 100%: <scroll> content has no definite width, so a
+   * percentage here collapsed every row inside it. */
+  width: 480px;
   padding-top: 6px;
   padding-bottom: 12px;
   flex-direction: column;
@@ -225,7 +227,7 @@ export default {
 
 /* One card per row, as in the template: the surface is the divider. */
 .row {
-  width: 82%;
+  width: 394px;
   height: 84px;
   margin-top: 8px;
   border-radius: 26px;
@@ -268,14 +270,18 @@ export default {
 
 /* if true: process.env.SHAPE === 'CIRCLE' */
 .row {
-  width: 78%;
+  width: 374px;
   height: 78px;
 }
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
 .row {
-  width: 86%;
+  width: 413px;
   height: 80px;
   margin-top: 6px;
 }

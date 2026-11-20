@@ -8,7 +8,8 @@ exported from a design tool — pixel data only, no vectors.
 
     python3 scripts/gen-bg.py
 
-Outputs (256x256, scaled up by the layout):
+Outputs (256x256; the layout draws it in a 480x480 box with `object-fit:
+cover`, so the bitmap is upscaled by the page, not by the PNG itself):
     src/common/images/bg/pink.png
     src/common/images/bg/blue.png
 """
