@@ -53,6 +53,8 @@ GET /ocs/v2.php/apps/spreed/api/v4/room?includeStatus=0
 | `lastMessage` | 消息预览（Rich Object String） |
 | `unreadMessages` | 未读角标 |
 
+同一个端点也被后台的 keeper 微服务调用（`src/services/keeper.js`），间隔为 `max(pollInterval, 30s)`，只取上述字段写入本地摘要 `nctalk.keeper`；它不拉消息正文，也不改已读标记。设计见 [design.md 第 12 节](design.md)。
+
 ### 拉取消息
 
 ```

@@ -117,13 +117,14 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 发送消息 | ✅ | POST `/chat/{token}`，发送后本地立即上屏 |
 | 已读标记 | ✅ | 打开会话或收到新消息后 POST `/chat/{token}/read` |
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
+| 后台留存 | ✅ | 微服务在退到后台 / 关闭应用后继续拉会话列表，留存未读、新消息振动；可在设置里关闭 |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
-| 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
+| 设置 | ✅ | 键盘布局、轮询间隔、后台留存、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表先保存再校验；校验期间不熄屏 |
 | 启动网络检测 | ✅ | 先看网络类型，再 fetch `/status.php`；不通则停在离线页，不进入业务 |
 | 图片 / 文件消息 | ❌ | 只显示文件名及文字，不下载图片 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
-| 通知推送 | ❌ | Vela 暂无第三方 app 的推送通道 |
+| 通知推送 | ❌ | Vela 没有第三方 app 的推送通道；后台留存只在本地轮询后振动，不能唤醒屏幕或弹通知 |
 | 引用回复 | ✅ | 长按可回复的消息 →「回复」；点 × 可取消引用 |
 | 表情反应 | ✅ | 长按普通消息 →「表情」，可添加或撤销 👍、❤️、😂（Talk 14+） |
 | 通话 | ❌ | 尚未实现 |
@@ -154,7 +155,11 @@ vela-nextcloud-talk/
 │   │       ├── format.js         # 时间、Rich Object String、头像取色
 │   │       ├── network.js        # 启动网络门（@system.network + /status.php 探针）
 │   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
+│   │       ├── keeper.js         # 后台留存的决策逻辑（纯 JS，可单测）
+│   │       ├── keeperClient.js   # @system.serviceclient 封装（policy always）
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
+│   ├── services/
+│   │   └── keeper.js             # 微服务：后台轮询会话列表、留存未读、振动
 │   ├── components/
 │   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
 │   │   └── InputMethod/          # 三方输入法（vendored，勿手改）
@@ -199,6 +204,8 @@ vela-nextcloud-talk/
 │   ├── index-layout.test.mjs     # 会话列表：无 show、像素宽度、可用高度
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试
+│   ├── keeper.test.mjs           # 后台留存：轮询归属、振动冷却、摘要容错
+│   ├── keeper-service.test.mjs   # 微服务接线：manifest / app.ux / 设置 / i18n
 │   ├── seed-watch-chat.test.mjs  # seed/watch 聊天测试
 │   └── build-watch.test.cjs      # 屏幕条件编译测试
 ├── LICENSE                       # 根仓库 MIT 许可
@@ -249,6 +256,12 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 启动时不直接进主界面，而是照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `splash` 做法：**路由入口页就是网络门**（`router.entry = pages/splash`）。点图标先看到图标 + 「正在检查网络…」，同时 `@system.network.getType` 判类型、已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。探测通过才 `replace` 到会话列表或 `pages/setup`；不通过就停在 `pages/offline`，只给「重试」，重试回到入口页重探。主界面（会话 / 设置 / 聊天）在这种情况下根本不会被创建，`pages/index` 还会检查 `state.launchAllowed`，插件直接拉起会话页时也会被打回网络门。
 
 从手机推来的凭据在手表上要经历「写 storage → 最长 20 秒的校验 → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。写盘排在校验之前，校验失败也保留输入（回执文字带「已保存；」前缀）；只有写盘本身失败才什么都不留。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
+
+### 后台留存为什么是微服务
+
+Vela 的 `config.background` 只认 `system.audio` / `system.request` / `system.geolocation`，而且要求其中之一**正在运行**才允许应用留在后台；聊天轮询走 `@system.fetch`，不在名单里。所以后台留存改成官方[微服务](https://iot.mi.com/vela/quickapp/zh/features/other/serviceclient.html)：`manifest.json` 声明 `services: [{ name: "keeper", path: "services/keeper", autoStart: true }]`，`src/services/keeper.js` 用 `@system.fetch` + `@system.storage` + `@system.vibrator` 轮询会话列表，应用侧用 `serviceclient.connect({ policy: "always" })` 连接。前台由页面轮询、后台由服务轮询，`shouldPoll()` 保证同一时刻只有一个轮询者。
+
+留存的是摘要而不是消息：`nctalk.keeper` 里只有 `{ at, total, account, rooms: [{ token, name, preview, unread, at }] }`，会话页冷启动时先渲染它再发真实请求；`account` 不匹配就丢弃。首次轮询只建立基线不振动，之后未读上升且应用不在前台才 `vibrate({ mode: 'short' })`，60 秒冷却。间隔取 `max(pollInterval, 30s)`。设计细节与**真机待验证项**（微服务机型支持、服务内定时器、`postMessage` 签名）见 [`docs/design.md`](docs/design.md) 第 12 节。
 
 ### 输入态为什么要两个页面状态
 
@@ -312,6 +325,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 ## 已知限制
 
 - **短轮询**：使用 `lookIntoFuture=1` 拉取新消息，每次请求结束后再开始计时；按设置每 15s（可改 30s / 60s）轮询。浏览历史或离开页面时暂停轮询。
+- **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，因此做成设置里可关的开关。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
 - **HTTPS-only**：手动登录、候选账号校验与手机凭据协议均拒绝明文 HTTP；客户端依赖系统 TLS 校验，不做证书 pinning。
 - **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。清除本地账号后也应在 Nextcloud 吊销对应应用密码。
 - **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。不提供缩略图，也不下载或解码图片，原因见[图片预览评估](docs/image-preview.md)。
@@ -338,6 +352,8 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 - [AstroBox 插件文档](https://abox.run/docs/plugin-development/v2/host-api/interconnect)
 - [项目配置 manifest.json](https://iot.mi.com/vela/quickapp/zh/guide/framework/manifest.html)
 - [数据请求 fetch](https://iot.mi.com/vela/quickapp/zh/features/network/fetch.html)
+- [微服务（后台服务能力）](https://iot.mi.com/vela/quickapp/zh/features/other/serviceclient.html)
+- [后台运行](https://iot.mi.com/vela/quickapp/zh/guide/framework/other/background-running.html)
 - [Nextcloud Talk Conversation API](https://nextcloud-talk.readthedocs.io/en/latest/conversation/)
 - [Nextcloud Talk Chat API](https://nextcloud-talk.readthedocs.io/en/latest/chat/)
 - [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)

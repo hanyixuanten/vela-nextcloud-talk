@@ -257,3 +257,75 @@ pages/chat   onInit  → 读取配置
 ### 0.2.5 的两个包不是同一个东西
 
 0.2.5 发版后才修了上面三条尺寸问题，期间 `versionName` 没动，于是「0.2.5」既可以指修复前的包，也可以指修复后的包——真机上「会话列表还是被压扁」的报告就来自修复前那个。**只要改了用户看得见的布局，就必须同时抬版本号**，否则没法从版本号判断表上装的是哪一版。0.2.6 起这条作为发布纪律。
+
+## 12. 后台留存（微服务）
+
+目标：离开应用（回表盘 / 息屏 / 上划关闭）后仍能按间隔拉会话列表，把未读数留住，有新消息时振一下。这不是「消息推送」——Vela 没有给第三方 app 的推送通道，能做的上限就是「后台自己轮询 + 本地留存」。
+
+### 12.1 为什么不用 `config.background`
+
+官方[后台运行](https://iot.mi.com/vela/quickapp/zh/guide/framework/other/background-running.html)的两个条件是硬条件：
+
+1. `manifest.json` 的 `config.background.features` 声明了后台接口——**只有** `system.audio`、`system.request`、`system.geolocation` 三个可选；
+2. 切换后台时**至少有一个已声明的后台接口正在运行**，否则应用被停止。
+
+聊天轮询走 `@system.fetch`，不在名单里；本项目也没有音频、定位或真实的下载任务。为了保活去跑一个假的静音音频或空下载，既过不了「后台运行需求是否合理」的审核，也是纯粹的电量浪费，因此**不声明 `config.background`**。
+
+### 12.2 用微服务承载后台轮询
+
+[微服务](https://iot.mi.com/vela/quickapp/zh/features/other/serviceclient.html)是官方给出的「脱离应用生命周期」的能力：
+
+```json
+"services": [{ "name": "keeper", "path": "services/keeper", "autoStart": true, "permissions": [] }]
+```
+
+- 服务文件 `src/services/keeper.js`，与页面共包、随应用安装；`autoStart: true` 让框架启动时就拉起它，不必等用户打开应用。
+- 客户端 `serviceclient.connect({ name: 'keeper', policy: 'always' })`：`always` 表示**应用关闭后服务不关闭**；`byNeeds` 会在最后一个客户端断开时关掉服务，不适合本场景。
+- 服务端只有 `serviceManager` 全局（`postMessage` / `getClientsInfo` / `disconnectClient` / `terminate`），不能用 `@system.router` / `prompt` / `brightness` 这些页面侧接口。服务侧 feature 能力表里 `fetch`、`storage`、`vibrator`、`file`、`interconnect` 都是 `all`，所以轮询 + 写盘 + 振动都在允许范围内。
+
+### 12.3 轮询归属：同一时刻只有一个轮询者
+
+服务和应用如果都轮询，同一份会话列表会被请求两遍。约定：
+
+| 状态 | 谁轮询 | 说明 |
+| --- | --- | --- |
+| 应用在前台 | 页面 | 会话列表 `onShow` 拉一次；聊天页按 `pollInterval` 拉消息 |
+| 应用在后台 / 已关闭 | keeper 服务 | `app.ux` 的 `onHide` 发 `{type:'background'}` 让服务开始，`onShow` 发 `{type:'foreground'}` 让它停下 |
+
+`shouldPoll()`（`src/common/scripts/keeper.js`）就是这条规则的唯一实现，单测直接钉它。`app.ux` 把服务端的 `{type:'rooms'}` 推送写进 `state.backgroundSummary`，会话页在 `onShow` 先用它渲染一遍，再发真实请求。
+
+### 12.4 留存的数据
+
+`@system.storage` 的 `nctalk.keeper` 只存一份摘要，不存消息正文：
+
+```json
+{ "at": 1732100000000, "total": 3, "account": "alice@https://cloud.example.com",
+  "rooms": [{ "token": "abc", "name": "项目群", "preview": "Alice: 在吗", "unread": 3, "at": 1732099999 }] }
+```
+
+- `account` 是 `user@baseUrl`。换账号后旧摘要不能出现在新账号的列表里，会话页比对不上就丢弃。
+- 读取侧（`parseSummary`）把摘要当不可信输入：损坏 JSON、旧结构、`total` 与 `rooms` 不一致时一律重算或退回空摘要。
+- 清除本地数据走 `storage.clear()`，会一并清掉这份摘要。
+
+### 12.5 振动语义
+
+- **首次成功轮询只建立基线，不振动**：服务启动时已经存在的未读不是「新消息」。
+- 只在未读总数上升且应用不在前台时振 `mode: 'short'`；`BUZZ_COOLDOWN_MS`（60 秒）内不重复振，否则群聊每个轮询周期都会振一次。
+- 未读下降（用户在别处读完）不振动，只更新摘要。
+
+### 12.6 间隔与失败
+
+- 后台轮询间隔 = `max(pollInterval, 30000)`。界面上的 15 秒是给人看的刷新节奏，后台没有屏幕要更新，15 秒一次 OCS 请求纯烧电。
+- 单次失败（断网、超时、401）只写日志，**保留上一份摘要并继续排下一次**：手表离线时还能显示上次的未读数，是有意义的行为，不是降级。
+- 设置里「后台留存」关闭时：服务不再发请求、不再排定时器；重新打开会先 `start()` 再 `refresh()` 立刻同步一次。关闭后服务进程可能仍驻留到重启，但没有任何网络与定时行为。
+
+### 12.7 未在文档中确认的部分（真机必查）
+
+| 项 | 现状 | 处理 |
+| --- | --- | --- |
+| 微服务的机型支持 | 官方只给了 `@system.request`、`vibrator` 等的支持明细，**微服务没有支持明细表** | 真机确认 S3 / S4 / REDMI Watch 5 上 `connect` 返回 1000/1001 与否；连不上时客户端只打日志，应用照旧当前台客户端用 |
+| 服务内 `setTimeout` | 文档未写；打包产物里确实注入了 `setTimeout` / `setInterval` | 真机看日志里是否按 30 秒间隔出现 `keeper: poll failed` / 摘要更新 |
+| `serviceManager.postMessage` 签名 | 文档表格写 `postMessage(clientId, Object)`，唯一示例写 `postMessage({ clientId, params })` | 先按示例调用，抛异常再退回两参数形式（`src/services/keeper.js`） |
+| 后台网络是否被系统挂起 | 未验证 | 观察息屏 10 分钟后摘要时间戳是否还在推进 |
+
+构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。守护这些接线的测试是 `tests/keeper.test.mjs`（服务决策逻辑）和 `tests/keeper-service.test.mjs`（manifest / app.ux / 设置页 / i18n 的一致性）。
