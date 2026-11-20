@@ -105,11 +105,21 @@ function apiError(status, message) {
  */
 function request(options, credentials = account) {
   return new Promise((resolve, reject) => {
+    if (!credentials.baseUrl) {
+      reject(apiError(0, '尚未设置服务器地址'))
+      return
+    }
+
+    const url = buildUrl(credentials.baseUrl, options.path, options.query)
+    const method = options.method || 'GET'
     let settled = false
     const timeout = setTimeout(() => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      // The URL is the only thing that says whether a hang is "no network" or
+      // "pointed at the wrong host/path" — and it is not visible on the watch.
+      console.log('request timeout: ' + method + ' ' + url)
       const err = apiError(0, translated('chat.timeoutError', '网络请求超时'))
       err.code = 'TIMEOUT'
       reject(err)
@@ -121,11 +131,6 @@ function request(options, credentials = account) {
       callback(value)
     }
 
-    if (!credentials.baseUrl) {
-      finish(reject, apiError(0, '尚未设置服务器地址'))
-      return
-    }
-
     const headers = {
       Accept: 'application/json',
       'OCS-APIRequest': 'true',
@@ -133,8 +138,8 @@ function request(options, credentials = account) {
     }
 
     const params = {
-      url: buildUrl(credentials.baseUrl, options.path, options.query),
-      method: options.method || 'GET',
+      url: url,
+      method: method,
       header: headers,
       responseType: 'text',
       success: (response) => {
@@ -178,6 +183,9 @@ function request(options, credentials = account) {
       },
       fail: (data, code) => {
         const detail = typeof data === 'string' ? data : (data && data.data) || ''
+        // `code` is the platform's error code (DNS / TLS / connect); it is the
+        // one piece of evidence a hung handshake leaves behind.
+        console.log('fetch fail: ' + method + ' ' + url + ' code=' + code + (detail ? ' ' + detail : ''))
         const err = apiError(0, translated('index.fetchError', '网络请求失败') + (detail ? '：' + detail : ''))
         err.code = code
         finish(reject, err)
