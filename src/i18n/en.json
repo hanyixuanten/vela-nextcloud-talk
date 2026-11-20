@@ -104,6 +104,7 @@
     "ackFailed": "Saved on the watch, but could not reply to the phone.",
     "saved": "Saved",
     "done": "Configured: {name}",
+    "timeout": "No response from the server: check the watch's Wi-Fi and try again",
     "failed": "Setup failed"
   },
   "offline": {

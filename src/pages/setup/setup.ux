@@ -177,7 +177,11 @@ export default {
         this.busy = false
         this.keepAwake(false)
         if (this.link !== link) return
-        const message = (err && err.message) || this.$t('setup.failed')
+        // A timeout here is almost never a wrong password: the watch never got
+        // an answer. Say what to check instead of echoing "请求超时".
+        const message = (err && err.code === 'TIMEOUT')
+          ? this.$t('setup.timeout')
+          : ((err && err.message) || this.$t('setup.failed'))
         this.setError(message)
         this.reply(link, { ok: false, requestId, message })
       })
