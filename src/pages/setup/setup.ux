@@ -32,6 +32,7 @@ import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import protocol from '../../common/scripts/protocol'
+import brightness from '@system.brightness'
 
 export default {
   data: {
@@ -80,7 +81,21 @@ export default {
     this.detachLink()
   },
 
+  // Vela exposes this on @system.brightness (not @system.screen). Every call
+  // is best effort: a firmware without the API must not break the handoff.
+  keepAwake(on) {
+    try {
+      brightness.setKeepScreenOn({
+        keepScreenOn: Boolean(on),
+        fail: (data, code) => console.log('setKeepScreenOn failed, code = ' + code)
+      })
+    } catch (err) {
+      console.log('setKeepScreenOn threw: ' + ((err && err.message) || err))
+    }
+  },
+
   detachLink() {
+    this.keepAwake(false)
     if (this.exitTimer !== null) clearTimeout(this.exitTimer)
     this.exitTimer = null
     const link = this.link
@@ -125,6 +140,9 @@ export default {
     }
 
     this.busy = true
+    // The validation is a network round trip that can take 20 s; the watch
+    // would blank the screen half way through it and hide the result.
+    this.keepAwake(true)
     this.serverLabel = parsed.config.baseUrl
     this.userLabel = parsed.config.user
     this.statusText = this.$t('setup.verifying')
@@ -140,6 +158,7 @@ export default {
       })
       .then((saved) => {
         this.busy = false
+        this.keepAwake(false)
         if (!saved) return
         state.settings = saved
         state.ready = true
@@ -156,6 +175,7 @@ export default {
       })
       .catch((err) => {
         this.busy = false
+        this.keepAwake(false)
         if (this.link !== link) return
         const message = (err && err.message) || this.$t('setup.failed')
         this.setError(message)

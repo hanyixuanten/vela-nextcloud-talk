@@ -161,7 +161,7 @@ vela-nextcloud-talk/
 │       ├── index/index.ux        # 会话列表
 │       ├── chat/chat.ux          # 聊天（含输入态）
 │       ├── login/login.ux        # 账号录入
-│       ├── setup/setup.ux        # 等手机推送凭据（interconnect）
+│       ├── setup/setup.ux        # 等手机推送凭据（interconnect，校验期间保持亮屏）
 │       ├── offline/offline.ux    # 网络不通时的唯一出口，只提供重试
 │       └── settings/settings.ux  # 设置
 ├── scripts/
@@ -239,9 +239,11 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 - 按钮统一走 `src/components/ui/AppPill.ux`；宽度用 prop 传入，因为 Vela 只应用组件自身的样式块，父级的 `class`/`style` 不会透传。
 - 页面背景是 `scripts/gen-bg.py` 生成的 256×256 辉光 PNG（纯 Python 写 PNG，零依赖），`object-fit: fill` 拉伸铺满。
 
-### 启动网络门
+### 启动网络门与校验期亮屏
 
 启动时不直接进业务：先 `@system.network.getType`，已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。不通就停在 `pages/offline`，只给「重试」，一次进程只探测一次。细节见 [`docs/design.md`](docs/design.md) 第 9 节。
+
+从手机推来的凭据在手表上要经历「最长 20 秒的校验 → 写 storage → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
 
 ### 输入态为什么要两个页面状态
 

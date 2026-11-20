@@ -15,7 +15,8 @@
     { "name": "system.vibrator" },
     { "name": "system.device" },
     { "name": "system.interconnect" },
-    { "name": "system.network" }
+    { "name": "system.network" },
+    { "name": "system.brightness" }
   ],
   "config": {
     "logLevel": "log",

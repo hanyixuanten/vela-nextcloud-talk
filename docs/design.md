@@ -167,6 +167,12 @@ pages/chat   onInit  → 读取配置
 
 结果缓存在 `state.online` / `state.networkChecked`：每次进程只探测一次，从聊天页返回不会重复付代价；`pages/offline` 的重试会把两个标记清掉再探。
 
+## 10. 校验期间不熄屏
+
+配置页收到凭据后要经历「20 秒网络请求 → 写 storage → 发回执」，手表默认亮屏时间通常短于此，屏幕会在校验途中熄灭，用户看不到结果，也看不到失败原因。
+
+因此 `onMessage` 解析成功后立即 `@system.brightness.setKeepScreenOn({ keepScreenOn: true })`，在校验成功、失败以及页面 `onHide` / `onDestroy`（`detachLink`）时一律置回 `false`。设置接口按「尽力而为」处理：部分固件没有该方法，抛错或 fail 只写日志，不能影响凭据流程。
+
 ## 11. 界面系统
 
 视觉与组件规范移植自 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 watch 模板：
