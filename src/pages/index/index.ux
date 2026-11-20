@@ -63,6 +63,8 @@ import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import fmt from '../../common/scripts/format'
 import { ROUTE } from '../../common/scripts/launch'
+import keeperClient from '../../common/scripts/keeperClient'
+import { accountKey } from '../../common/scripts/keeper'
 
 export default {
   data: {
@@ -79,6 +81,15 @@ export default {
       state.ready = store.hasAccount(settings)
       return settings
     })
+    // The keeper service pushes the retained list on connect, which usually
+    // lands after onShow has already started the network refresh.
+    this.unsubscribe = keeperClient.subscribe((summary) => {
+      this.applySummary(summary, state.settings)
+    })
+  },
+
+  onDestroy() {
+    if (typeof this.unsubscribe === 'function') this.unsubscribe()
   },
 
   // onShow also fires when returning from the chat page, so the list refreshes
@@ -101,8 +112,32 @@ export default {
         router.replace({ uri: ROUTE.setup })
         return
       }
+      // Paint the retained list first: on a cold start with no network this is
+      // the only thing that can show how much is unread (design.md §11).
+      this.applySummary(state.backgroundSummary, settings)
       this.refresh()
     })
+  },
+
+  /**
+   * Render a retained keeper summary while the network answer is still
+   * missing. Never overwrites rooms that already came from the server.
+   */
+  applySummary(summary, settings) {
+    if (!summary || !summary.rooms || summary.rooms.length === 0) return
+    if (this.rooms.length > 0 || this.loading) return
+    // A summary written under another account (or before an account switch)
+    // must not leak into this list.
+    if (summary.account && summary.account !== accountKey(settings)) return
+    this.rooms = summary.rooms.map((room) => ({
+      token: room.token,
+      name: room.name,
+      preview: room.preview,
+      time: fmt.formatTime(room.at),
+      unread: room.unread || 0,
+      initial: fmt.initials(room.name),
+      color: fmt.colorFor(room.token)
+    }))
   },
 
   refresh() {

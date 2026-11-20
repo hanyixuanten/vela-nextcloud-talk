@@ -3,9 +3,13 @@ import store from './common/scripts/store'
 import api from './common/scripts/api'
 import fmt from './common/scripts/format'
 import state from './common/scripts/state'
+import keeperClient from './common/scripts/keeperClient'
 
 export default {
   onCreate() {
+    // `onShow` fires after this; assume visible until it says otherwise so a
+    // slow settings read cannot start the background poller in the foreground.
+    this.visible = true
     const translate = (key) => this.$t(key)
     api.setTranslator(translate)
     fmt.setTranslator(translate)
@@ -17,11 +21,40 @@ export default {
         state.settings = settings
         state.ready = store.hasAccount(settings)
         api.configure(settings)
+        this.startKeeper(settings)
         console.log('app created, configured=' + state.ready)
       })
       .catch((err) => {
         console.log('app created, settings load failed: ' + (err && err.message))
       })
+  },
+
+  // The keeper micro service owns polling while the app is away; the pages own
+  // it while the app is visible (they already fetch the same list and chat page
+  // has its own message poll). See docs/design.md §11.
+  startKeeper(settings) {
+    if (settings && settings.backgroundKeep === false) {
+      keeperClient.stop()
+      return
+    }
+    keeperClient.start({
+      onSummary: (summary) => {
+        state.backgroundSummary = summary
+      }
+    })
+    // onShow may have fired before the async settings load finished, in which
+    // case the service would start polling while the app is actually visible.
+    keeperClient.foreground(this.visible !== false)
+  },
+
+  onShow() {
+    this.visible = true
+    keeperClient.foreground(true)
+  },
+
+  onHide() {
+    this.visible = false
+    keeperClient.foreground(false)
   },
 
   onDestroy() {

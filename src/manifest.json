@@ -16,7 +16,16 @@
     { "name": "system.device" },
     { "name": "system.interconnect" },
     { "name": "system.network" },
-    { "name": "system.brightness" }
+    { "name": "system.brightness" },
+    { "name": "system.serviceclient" }
+  ],
+  "services": [
+    {
+      "name": "keeper",
+      "path": "services/keeper",
+      "autoStart": true,
+      "permissions": []
+    }
   ],
   "config": {
     "logLevel": "log",

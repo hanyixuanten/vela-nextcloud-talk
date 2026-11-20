@@ -1,0 +1,124 @@
+// `keeper` micro service: keeps the Talk conversation list warm while the app
+// is in the background (or closed) and remembers the last unread state.
+//
+// Vela runs this file outside the app lifecycle (manifest.json `services`), so
+// it may only use the service-side feature set: system.device / fetch /
+// interconnect / request / storage / file / vibrator / geolocation / sensor /
+// audio / crypto / assetstore / zip. `system.serviceclient` is page-side only;
+// the service talks back through the `serviceManager` global.
+//
+// Everything decision-shaped lives in common/scripts/keeper.js so it can be
+// unit tested without a watch. This file is only the platform binding.
+
+import storage from '@system.storage'
+import vibrator from '@system.vibrator'
+import api from '../common/scripts/api'
+import store from '../common/scripts/store'
+import fmt from '../common/scripts/format'
+import { createKeeper, SUMMARY_KEY, SERVICE_NAME } from '../common/scripts/keeper'
+
+function readSummary() {
+  return new Promise((resolve) => {
+    try {
+      storage.get({
+        key: SUMMARY_KEY,
+        default: '',
+        success: (value) => resolve(value || ''),
+        fail: (data, code) => {
+          // A read failure is not fatal: an empty summary is a valid answer and
+          // the next successful poll overwrites it anyway.
+          console.log('keeper: summary read failed, code=' + code)
+          resolve('')
+        }
+      })
+    } catch (err) {
+      console.log('keeper: summary read threw: ' + ((err && err.message) || err))
+      resolve('')
+    }
+  })
+}
+
+function writeSummary(summary) {
+  return new Promise((resolve, reject) => {
+    try {
+      storage.set({
+        key: SUMMARY_KEY,
+        value: JSON.stringify(summary),
+        success: () => resolve(),
+        fail: (data, code) => reject(new Error('summary write failed, code=' + code))
+      })
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+// serviceManager.postMessage is documented twice with different signatures:
+// postMessage(clientId, Object) in the table and postMessage({ clientId, params })
+// in the only example. Try the documented example first and fall back, so one
+// wrong reading of the docs cannot silently mute the service.
+function notifyClients(payload) {
+  if (typeof serviceManager === 'undefined' || !serviceManager) return
+  try {
+    serviceManager.postMessage({ clientId: 0, params: payload })
+    return
+  } catch (err) {
+    console.log('keeper: postMessage(object) failed: ' + ((err && err.message) || err))
+  }
+  try {
+    serviceManager.postMessage(0, payload)
+  } catch (err) {
+    console.log('keeper: postMessage(clientId, payload) failed: ' + ((err && err.message) || err))
+  }
+}
+
+const keeper = createKeeper({
+  // api.js keeps its own credential copy; configure it from the same read the
+  // decision logic uses, so a changed account or app password is picked up
+  // without restarting the service (and without a second storage read).
+  loadSettings: () => {
+    return store.load().then((settings) => {
+      api.configure(settings)
+      return settings
+    })
+  },
+  listRooms: () => api.listConversations(),
+  loadSummary: readSummary,
+  saveSummary: writeSummary,
+  formatPreview: (message) => fmt.previewWithAuthor(message),
+  vibrate: (mode) => {
+    try {
+      vibrator.vibrate({ mode: mode || 'short' })
+    } catch (err) {
+      console.log('keeper: vibrate failed: ' + ((err && err.message) || err))
+    }
+  },
+  notify: notifyClients,
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (id) => clearTimeout(id),
+  now: () => Date.now()
+})
+
+export default {
+  onCreate(params) {
+    console.log('keeper: service onCreate, name=' + SERVICE_NAME)
+    keeper.start()
+  },
+
+  onConnect(clientId, params) {
+    keeper.onConnect(clientId)
+  },
+
+  onDisConnect(clientId) {
+    keeper.onDisConnect(clientId)
+  },
+
+  onMessage(clientId, params) {
+    return keeper.onMessage(clientId, params)
+  },
+
+  onDestroy() {
+    keeper.stop()
+    console.log('keeper: service onDestroy')
+  }
+}

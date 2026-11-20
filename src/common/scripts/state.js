@@ -21,6 +21,11 @@ export default {
   // Conversation currently open in pages/chat: { token, name, ... }
   activeRoom: null,
 
+  // Last conversation list the keeper service saw while the app was away
+  // (see common/scripts/keeper.js). pages/index renders it before the network
+  // answer arrives, so unread badges survive a cold start.
+  backgroundSummary: null,
+
   // Startup network gate (see common/scripts/network.js and pages/splash).
   // The splash page is the router entry: it probes once per launch and only
   // then sets `launchAllowed`. Every main page (会话 / 设置 / 聊天) checks it,

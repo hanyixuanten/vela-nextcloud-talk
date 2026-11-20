@@ -89,7 +89,10 @@
     "seconds": "s",
     "cleared": "Cleared",
     "clearFailed": "Could not clear data. Please try again.",
-    "clearAgain": "Tap again to confirm clearing"
+    "clearAgain": "Tap again to confirm clearing",
+    "background": "Background",
+    "on": "On",
+    "off": "Off"
   },
   "setup": {
     "title": "Set up from phone",

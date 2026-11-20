@@ -22,6 +22,10 @@ export const DEFAULT_SETTINGS = {
   screenType: 'circle',
   // Milliseconds between background polls of the open conversation.
   pollInterval: 15000,
+  // Keep polling conversations while the app is in the background. Uses the
+  // `keeper` micro service; disabling it stops all background network traffic
+  // (docs/design.md §11).
+  backgroundKeep: true,
   // small | normal | large
   fontScale: 'normal'
 }
