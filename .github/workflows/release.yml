@@ -292,6 +292,12 @@ jobs:
     needs: [prepare, build-rpk, build-plugin]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # This job deliberately does not check the repo out (it only needs the
+    # artifacts), so gh cannot infer the repository from a git remote and fails
+    # with "fatal: not a git repository". GH_REPO tells it explicitly.
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -333,7 +339,6 @@ jobs:
       - name: Compose release notes
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           abp=$(cd artifacts && ls *.abp)
           previous=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
@@ -358,7 +363,6 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           SHA: ${{ needs.prepare.outputs.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # The tag does not exist yet (prepare checked), so let gh create it at
           # the version bump commit rather than at whatever main points to now.
