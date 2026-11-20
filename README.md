@@ -105,6 +105,17 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 
 细节、runner 标签要求和本地复现命令见 [`docs/ci.md`](docs/ci.md)。
 
+### 7. 发布版本（维护者）
+
+发版走手动触发的 [Release 工作流](.github/workflows/release.yml)：**Actions → Release → Run workflow**，输入 `x.x.x`（写成 `v0.3.0` 也认）。一次运行会做完这些事：
+
+1. 校验版本号格式，并拒绝已存在的 tag / Release（发布过的版本不能覆盖）；
+2. 把 `package.json`、`package-lock.json` 的 `version` 和 `src/manifest.json` 的 `versionName` 一起改成新版本，`versionCode` 自增 1，提交 `chore(release): x.y.z (watch)` 并推到 `main`；
+3. 跑 JS 与插件协议测试，再用**正式签名**构建两个形状的 RPK 和 ABP；
+4. 创建 tag `vX.Y.Z` 并发布 GitHub Release，附件是 `com.hanyixuanten.nctalk.release.<版本>-circle.rpk`、`-rect.rpk` 和 `nctalk_credential-<插件版本>.abp`。
+
+两条硬约束是故意留的：没有配置签名 secrets 时工作流直接失败（不会退化成调试包），产物名里出现 `debug` 或者对不上 `release.<版本>` 时也直接失败，所以 Release 里不会出现调试包。`versionCode` 必须严格递增，installer 只认更大的值；插件版本（`astrobox-plugin/manifest.json`）独立维护，不跟随应用版本。
+
 ---
 
 ## 功能
