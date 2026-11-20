@@ -33,6 +33,7 @@ cp "$ROOT/src/common/scripts/base64.js" "$BUILD/base64.mjs"
 cp "$ROOT/src/common/scripts/format.js" "$BUILD/format.mjs"
 cp "$ROOT/src/common/scripts/protocol.js" "$BUILD/protocol.mjs"
 cp "$ROOT/src/common/scripts/launch.js" "$BUILD/launch.mjs"
+cp "$ROOT/src/common/scripts/keeper.js" "$BUILD/keeper.mjs"
 cp "$ROOT/tests/fetch-double.mjs" "$BUILD/fetch-double.mjs"
 cp "$ROOT/tests/storage-double.mjs" "$BUILD/storage-double.mjs"
 cp "$ROOT/tests/network-double.mjs" "$BUILD/network-double.mjs"
@@ -51,6 +52,8 @@ fail=0
 "$NODE" "$ROOT/tests/index-layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/keeper.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/keeper-service.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/seed-watch-chat.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then
