@@ -180,24 +180,40 @@ pages/chat   onInit  → 读取配置
 
 做法照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `pages/app/entry/splash`：**把网络检查放在路由入口页**。`src/manifest.json` 的 `router.entry` 是 `pages/splash`，点图标先落到这一页（图标 + 名称 + 「正在检查网络…」），页面 `onShow` 探测完再 `replace` 到会话列表或 `pages/setup`；失败则 `replace('/offline')`。主界面不是「先渲染再隐藏」，而是**根本没被创建**，所以不存在检查期间点到「设置」的窗口，也没有列表闪一下再跳走的情况。
 
-判断分两步（`common/scripts/network.js`）：
+判断只一步（`common/scripts/network.js`）：`@system.network.getType` 返回空字符串或 `none` 即离线，**与 HyperBilibili 的 `NetworkCheck` 完全一致**。只有「手表确实没有可用网络接口」才停在 `pages/offline`。
 
-1. `@system.network.getType` 返回空字符串或 `none` 即离线（与 HyperBilibili 的 `NetworkCheck` 一致）；
-2. 已配置账号时再 `fetch` 一次 `<baseUrl>/status.php`：**任何 HTTP 状态码都算在线**，只有传输层失败（DNS / TLS / 连接）或 8 秒超时才判离线。
+### 两个探针是证据，不是判决
 
-第二步存在的理由：Wi-Fi 已关联但网关不通时 `getType` 仍会报 `wifi`，只看类型会把用户放进一个每条请求都超时的界面。而把 401/404 当成离线同样不对——那说明网络是通的，问题在账号或地址。
+放行只看接口类型。路由决定之后（`router.replace` 已在执行），`pages/splash` 再跑两个探针，结果只进 `state` 和日志，**不参与放行、也不阻塞启动页**：
 
-路由决策抽成纯函数 `common/scripts/launch.js` 的 `routeAfterGate(online, hasAccount)`：离线一律 `/offline`（账号状态不参与），在线且无账号才 `/setup`，其余进会话列表。`tests/launch-gate.test.mjs` 直接跑这个函数，并静态断言入口页是 `pages/splash`、`pages/index` 在取列表之前检查 `state.launchAllowed`、离线页的重试回到 `/splash`。
+| 探针 | 目标 | 回答的问题 |
+| --- | --- | --- |
+| 对照（control） | `https://www.bilibili.com/` | 这块表本身能不能上外网？（与参考实现同一类公共站点，证书链是主流 CA） |
+| 目标（server） | `<baseUrl>/status.php` | 能不能到达你自己的 Nextcloud？ |
+
+两者组合就是诊断：**对照通、目标不通 → 是域名解析 / 证书链 / 端口这一段的问题，不是手表没网**；两个都不通 → 接口在但没有可用出口。结果分别写进 `state.controlProbe` / `state.serverProbe`（`{ ok, status, code, detail, timedOut, ms, url }`），无账号时 `serverProbe` 为 `null`。
+
+这是修过一次的回归。0.2.4 起探针被当成第二道门：`status.php` 在 8 秒内没有响应就判离线。于是 DNS 慢、TLS 握手慢、应用刚启动 Wi-Fi 还没完全关联、或者目标服务器的证书链/端口在手表上不被接受时，用户看到的是一个**永远停在「没有网络」的死页**——而同一块表上 HyperBilibili 能正常联网，因为参考实现从不因为「服务器探不通」拦人。更糟的是离线页不显示任何 `code`，原因被彻底藏起来。
+
+现在的取舍：
+
+- **设备没接口** → 离线性命，这是唯一阻挡入口的情况，因为界面上每条请求都必然失败；
+- **接口在、服务器探不通** → 仍然放行。用户会进到会话列表，由第一条真实请求给出带平台错误码的文案（`api.js` 的 `fail` 现在把 `code` 也拼进可见消息，例如「网络请求失败：code=1001」）；如果对照探针是通的，会话页会在这句前面再加「网络正常，但服务器不可达」（`index.serverUnreachable`），把「Wi-Fi 没网」和「这台服务器连不上」分开。这比一个没有信息的死页有用：它区分了 DNS / TLS / 连接，而且是用户能截屏反馈的东西。
+
+`tests/network.test.mjs` 钉住三件事：`none` / `''` / `getType` 失败都判离线且不发任何请求；判定本身零往返（`checkSignal()` 不发请求）；对照通了而目标不通时**仍然是 online**，同时 `server.ok === false` 且带 `code`，探针超时则 `timedOut: true`。测试用 `probeTargets(settings, { controlUrl })` 把对照探针指向本地服务器，不去真的访问 bilibili。
+
+路由决策抽成纯函数 `common/scripts/launch.js` 的 `routeAfterGate(online, hasAccount)`：离线一律 `/offline`（账号状态不参与），在线且无账号才 `/setup`，其余进会话列表。`tests/launch-gate.test.mjs` 直接跑这个函数，并静态断言入口页是 `pages/splash`、`pages/index` 在取列表之前检查 `state.launchAllowed`、离线页的重试回到 `/splash`、`launchAllowed` 不由 `probe` 决定，且 `this.probe()` 出现在 `router.replace` **之后**。
 
 状态标记（`state.js`）：
 
 - `launchAllowed`：本次进程是否通过过网络门，**只有它**决定主界面能不能开；
-- `online` / `networkChecked`：保留给「是否已经探过」的语义，离线页清空它们，让下一次经过入口页真的重新探测。
+- `online` / `networkChecked`：保留给「是否已经探过」的语义，离线页清空它们，让下一次经过入口页真的重新探测；
+- `serverProbe`：最近一次启动探针的证据，`null` 表示还没探过（无账号）或没探。
 
 两处防绕过：
 
 - `pages/index` 的 `onShow` 先看 `state.launchAllowed`，为假就 `replace('/splash')`。AstroBox 插件会 `thirdpartyapp::launch-qa` 到 `pages/index`（旧固件不接受非入口页时的回退），这条路径同样要经过网络门，所以插件侧不需要改。
-- 离线页不再自己探测，重试只做 `replace('/splash')`：判一次只需要一个结论，两次探测意味着死网络下要等两个 8 秒超时。
+- 离线页不再自己探测，重试只做 `replace('/splash')`：判一次只需要一个结论，两次探测意味着死网络下要等两个超时。
 
 插件启动到 `pages/setup`（手机推凭据）不经过网络门，这是有意的：那是配置页而不是主界面，它自己的校验和 20 秒超时会给出准确结论。
 
