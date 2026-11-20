@@ -4,14 +4,19 @@
   <div class="app-page">
     <image class="app-bg" src="/common/images/bg/pink.png"></image>
 
-    <!-- Normal state: header, message list, input bar -->
-    <div class="main" show="{{!editing}}">
+    <!-- Normal state: header, message list, input bar.
+         `if`, never `show`: on this Vela build a shown=false node still takes
+         its layout height, so the editor (150px), both input bars (2 x 106px)
+         and the 148px title bar went over the 480px screen together and
+         `flex: 1` on the scroll resolved to 0 — the message list was squeezed
+         into a horizontal sliver. -->
+    <div class="main" if="{{!editing}}">
       <div class="bar">
         <div class="back" @click="goBack">
           <text class="back-icon">‹</text>
         </div>
         <text class="bar-title">{{ title }}</text>
-        <text class="t-caption offline-mark" show="{{error}}">{{ $t('chat.offline') }}</text>
+        <text class="t-caption offline-mark" if="{{error}}">{{ $t('chat.offline') }}</text>
       </div>
 
       <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
@@ -22,16 +27,16 @@
             <text class="reaction-summary" if="{{!!$item.reactionSummary}}">{{ $item.reactionSummary }}</text>
           </div>
 
-          <div class="placeholder" show="{{!loading && !error && !olderCursor && messages.length === 0}}">
+          <div class="placeholder" if="{{!loading && !error && !olderCursor && messages.length === 0}}">
             <text class="placeholder-hint">{{ $t('chat.empty') }}</text>
           </div>
-          <div class="placeholder" show="{{loading && messages.length === 0}}">
+          <div class="placeholder" if="{{loading && messages.length === 0}}">
             <text class="placeholder-hint">{{ $t('index.loading') }}</text>
           </div>
-          <div class="placeholder" show="{{!loading && error}}">
+          <div class="placeholder" if="{{!loading && error}}">
             <text class="placeholder-error">{{ error }}</text>
           </div>
-          <div class="history-action" show="{{olderCursor > 0}}" @click="loadOlder">
+          <div class="history-action" if="{{olderCursor > 0}}" @click="loadOlder">
             <text class="history-label">{{ loading ? $t('index.loading') : $t('chat.loadolder') }}</text>
           </div>
         </div>
@@ -59,20 +64,20 @@
           <text class="reply-label">×</text>
         </div>
       </div>
-      <div class="inputbar" show="{{!browsingHistory && !replyId && !actionId}}" @click="startEdit">
+      <div class="inputbar" if="{{!browsingHistory && !replyId && !actionId}}" @click="startEdit">
         <text class="input-placeholder">{{ $t('chat.placeholder') }}</text>
       </div>
-      <div class="inputbar" show="{{browsingHistory && !replyId && !actionId}}" @click="loadInitial">
+      <div class="inputbar" if="{{browsingHistory && !replyId && !actionId}}" @click="loadInitial">
         <text class="history-label">{{ $t('chat.backlatest') }}</text>
       </div>
     </div>
 
     <!-- Typing state: the keyboard occupies 321px, so the list is replaced by
          a compact draft preview. This is the whole reason for the two states. -->
-    <div class="editor" show="{{editing}}">
+    <div class="editor" if="{{editing}}">
       <!-- Tap the draft preview or the cancel button to close the keyboard. -->
       <div class="editor-head">
-        <text class="editor-name" show="{{!replyId}}" @click="stopEdit">{{ title }}</text>
+        <text class="editor-name" if="{{!replyId}}" @click="stopEdit">{{ title }}</text>
         <div class="reply-bar reply-preview" if="{{replyId > 0 && editing}}">
           <text class="reply-summary" @click="stopEdit">{{ replySummary }}</text>
           <div class="reply-clear" @click="clearReply">

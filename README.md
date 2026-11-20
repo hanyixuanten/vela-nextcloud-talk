@@ -91,7 +91,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
