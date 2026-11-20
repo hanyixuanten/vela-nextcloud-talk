@@ -35,7 +35,7 @@ OCS 把真实数据包在 `ocs` 里：
 GET /ocs/v2.php/cloud/user
 ```
 
-`data` 里取 `id`、`displayname`。登录页点「连接」时调用，成功才写 storage。
+`data` 里取 `id`、`displayname`。登录页点「连接」时调用，但**不决定凭据是否落盘**：调用前已经写过一次 storage，这里只负责取 `displayname` 与判断成功与否。
 
 ### 会话列表
 

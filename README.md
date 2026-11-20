@@ -111,7 +111,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
-| 账号登录 / 校验 | ✅ | 走 `/ocs/v2.php/cloud/user` 验证，成功才落盘 |
+| 账号登录 / 校验 | ✅ | 先落盘再走 `/ocs/v2.php/cloud/user` 校验；校验失败也保留输入 |
 | 会话列表 | ✅ | 按最近活跃排序、未读数、最后一条消息预览 |
 | 历史消息 | ✅ | 每次拉 12 条；列表底部点「加载更早消息」，最多保留 24 条 |
 | 发送消息 | ✅ | POST `/chat/{token}`，发送后本地立即上屏 |
@@ -119,7 +119,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
 | 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
-| 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表校验后保存 |
+| 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表先保存再校验；校验期间不熄屏 |
 | 启动网络检测 | ✅ | 先看网络类型，再 fetch `/status.php`；不通则停在离线页，不进入业务 |
 | 图片 / 文件消息 | ❌ | 只显示文件名及文字，不下载图片 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
@@ -241,9 +241,9 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 ### 启动网络门与校验期亮屏
 
-启动时不直接进业务：先 `@system.network.getType`，已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。不通就停在 `pages/offline`，只给「重试」，一次进程只探测一次。细节见 [`docs/design.md`](docs/design.md) 第 9 节。
+启动时不直接进业务：先 `@system.network.getType`，已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。不通就停在 `pages/offline`，只给「重试」，一次进程只探测一次。
 
-从手机推来的凭据在手表上要经历「最长 20 秒的校验 → 写 storage → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
+从手机推来的凭据在手表上要经历「写 storage → 最长 20 秒的校验 → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。写盘排在校验之前，校验失败也保留输入（回执文字带「已保存；」前缀）；只有写盘本身失败才什么都不留。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
 
 ### 输入态为什么要两个页面状态
 

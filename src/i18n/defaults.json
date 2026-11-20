@@ -30,7 +30,8 @@
     "done": "完成",
     "errRequired": "请填写全部三项",
     "errScheme": "服务器地址必须使用 https://",
-    "saved": "已连接"
+    "saved": "已连接",
+    "savedUnverified": "已保存；{message}"
   },
   "index": {
     "title": "会话",
@@ -105,7 +106,8 @@
     "saved": "已保存",
     "done": "已配置：{name}",
     "timeout": "服务器没有响应：先确认手表已连上 Wi-Fi，再重试",
-    "failed": "配置失败"
+    "failed": "配置失败",
+    "savedUnverified": "已保存；{message}"
   },
   "offline": {
     "title": "没有网络",

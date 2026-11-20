@@ -30,7 +30,8 @@
     "done": "Done",
     "errRequired": "All three fields are required",
     "errScheme": "Server address must use https://",
-    "saved": "Connected"
+    "saved": "Connected",
+    "savedUnverified": "Saved; {message}"
   },
   "index": {
     "title": "Chats",
@@ -105,7 +106,8 @@
     "saved": "Saved",
     "done": "Configured: {name}",
     "timeout": "No response from the server: check the watch's Wi-Fi and try again",
-    "failed": "Setup failed"
+    "failed": "Setup failed",
+    "savedUnverified": "Saved; {message}"
   },
   "offline": {
     "title": "No network",

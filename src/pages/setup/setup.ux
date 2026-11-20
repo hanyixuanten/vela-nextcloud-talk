@@ -148,25 +148,57 @@ export default {
     this.statusText = this.$t('setup.verifying')
     this.statusClass = 'status-waiting'
 
-    const candidate = Object.assign({}, state.settings || {}, parsed.config)
-    api.getCurrentUser(candidate)
-      .then((profile) => {
-        // Leaving the setup page invalidates any outstanding validation.
-        if (this.link !== link) return null
-        candidate.displayName = profile.displayName
-        return store.save(candidate)
-      })
-      .then((saved) => {
-        this.busy = false
-        this.keepAwake(false)
-        if (!saved) return
+    const previous = state.settings || {}
+    const candidate = Object.assign({}, previous, parsed.config)
+    // The stored display name belongs to whichever account was configured
+    // before it; a different identity must not inherit it if validation fails.
+    if (previous.baseUrl !== candidate.baseUrl || previous.user !== candidate.user) {
+      candidate.displayName = ''
+    }
+
+    // Write first, validate second. The app password was typed once on the
+    // phone: a 20 s timeout on the watch network, a rejected password or the
+    // user leaving this page must not throw it away. Validation only supplies
+    // the display name, so its answer never decides whether input is kept.
+    store.save(candidate).then(
+      (saved) => {
         state.settings = saved
         state.ready = true
         api.configure(saved)
+        // Leaving the page ends the report, not the save that already happened.
         if (this.link !== link) return
-        this.statusText = this.$t('setup.done', { name: saved.displayName || saved.user })
+        this.verify(link, requestId, saved)
+      },
+      (err) => {
+        // Nothing reached storage, so claiming "saved" here would be a lie.
+        this.finish()
+        const message = (err && err.message) || this.$t('setup.failed')
+        if (this.link !== link) return
+        this.setError(message)
+        this.reply(link, { ok: false, requestId, message })
+      }
+    )
+  },
+
+  verify(link, requestId, saved) {
+    api.getCurrentUser(saved)
+      .then((profile) => {
+        // Leaving the setup page invalidates the answer, never the save above.
+        if (this.link !== link) return null
+        return store.save(Object.assign({}, saved, { displayName: profile.displayName }))
+          // The display name is cosmetic: a failed write must not turn a
+          // working account into a reported failure.
+          .catch(() => saved)
+      })
+      .then((named) => {
+        this.finish()
+        if (!named) return
+        state.settings = named
+        api.configure(named)
+        if (this.link !== link) return
+        this.statusText = this.$t('setup.done', { name: named.displayName || named.user })
         this.statusClass = 'status-ok'
-        this.reply(link, { ok: true, requestId, message: this.$t('setup.saved'), displayName: saved.displayName }, () => {
+        this.reply(link, { ok: true, requestId, message: this.$t('setup.saved'), displayName: named.displayName }, () => {
           this.exitTimer = setTimeout(() => {
             this.exitTimer = null
             if (this.link === link) router.replace({ uri: '/' })
@@ -174,17 +206,26 @@ export default {
         })
       })
       .catch((err) => {
-        this.busy = false
-        this.keepAwake(false)
+        this.finish()
         if (this.link !== link) return
         // A timeout here is almost never a wrong password: the watch never got
         // an answer. Say what to check instead of echoing "请求超时".
-        const message = (err && err.code === 'TIMEOUT')
+        const reason = (err && err.code === 'TIMEOUT')
           ? this.$t('setup.timeout')
           : ((err && err.message) || this.$t('setup.failed'))
+        // The credentials stay on disk, and the phone must hear that in the
+        // same sentence as the failure, otherwise it reads as "nothing saved".
+        const message = this.$t('setup.savedUnverified', { message: reason })
         this.setError(message)
         this.reply(link, { ok: false, requestId, message })
       })
+  },
+
+  // Every exit from the handoff releases the screen and the busy flag exactly
+  // once; the page stays usable for a retry after a failure.
+  finish() {
+    this.busy = false
+    this.keepAwake(false)
   },
 
   reply(link, payload, onSent) {

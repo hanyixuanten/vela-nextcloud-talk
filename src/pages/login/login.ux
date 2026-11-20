@@ -204,30 +204,49 @@ export default {
     this.submitting = true
     this.error = ''
 
-    const candidate = Object.assign({}, state.settings || store.DEFAULT_SETTINGS, {
+    const previous = state.settings || store.DEFAULT_SETTINGS
+    const candidate = Object.assign({}, previous, {
       baseUrl: baseUrl,
       user: user,
       appPassword: appPassword
     })
+    // A stored display name belongs to the account it was fetched for.
+    const previousBase = String(previous.baseUrl || '').replace(/\/+$/, '')
+    if (previousBase !== baseUrl || previous.user !== user) {
+      candidate.displayName = ''
+    }
 
-    api.configure(candidate)
-
-    api.getCurrentUser()
-      .then((profile) => {
-        candidate.displayName = profile.displayName
-        return store.save(candidate).then((saved) => {
-          state.settings = saved
-          state.ready = true
-          api.configure(saved)
-          prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
-          router.replace({ uri: '/' })
-        })
+    // Persist before validating: the app password was typed on a watch
+    // keyboard and a failed round trip must not discard it. Validation only
+    // adds the display name, and a rejection leaves the user on this page with
+    // what they typed already stored, ready to be corrected.
+    let persisted = false
+    store.save(candidate)
+      .then((saved) => {
+        persisted = true
+        state.settings = saved
+        state.ready = true
+        api.configure(saved)
+        return api.getCurrentUser(saved)
+          .then((profile) => store.save(Object.assign({}, saved, { displayName: profile.displayName }))
+            // The name is cosmetic; a failed write must not fail a good login.
+            .catch(() => saved))
+          .then((named) => {
+            state.settings = named
+            api.configure(named)
+            prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
+            router.replace({ uri: '/' })
+          })
       })
       .catch((err) => {
         this.submitting = false
-        this.error = err && err.message ? err.message : this.$t('login.errRequired')
-        // Leave the API client pointing at the last known good account.
+        const reason = err && err.message ? err.message : this.$t('login.errRequired')
+        // Keep the client on what is actually on disk, so a retry only has to
+        // correct the wrong field.
         api.configure(state.settings || {})
+        this.error = persisted
+          ? this.$t('login.savedUnverified', { message: reason })
+          : reason
       })
   }
 }
