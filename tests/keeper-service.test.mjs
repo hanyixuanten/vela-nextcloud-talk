@@ -96,7 +96,8 @@ test('settings page toggles the service, not just the flag', () => {
 })
 
 test('conversation list pre-renders the retained summary', () => {
-  assert.ok(index.includes('state.backgroundSummary'))
+  assert.ok(index.includes('backgroundSummary'))
+  assert.ok(index.includes('sharedOf(this, state)'), 'cross-page values come from the app instance')
   assert.ok(index.includes('applySummary('))
   assert.ok(index.includes('accountKey('), 'another account summary must be rejected')
 })

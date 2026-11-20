@@ -38,10 +38,20 @@ test('online with an account goes to the conversation list', () => {
   assert.equal(routeAfterGate(true, true), ROUTE.home)
 })
 
-test('the router entry is the gate, not the conversation list', () => {
+test('routes are page keys, exactly like the reference app', () => {
+  // HyperBilibili (which navigates fine on the same watch) declares no custom
+  // `path` and calls router.replace({ uri: "pages/app/features/main" }).
+  // Custom paths made `replace('/')` never land on pages/index — the gate
+  // looked like a loop instead of a navigation.
   assert.equal(manifest.router.entry, 'pages/splash')
-  assert.equal(manifest.router.pages['pages/splash'].path, ROUTE.splash)
-  assert.equal(manifest.router.pages['pages/index'].path, ROUTE.home)
+  Object.keys(manifest.router.pages).forEach((key) => {
+    assert.equal(manifest.router.pages[key].path, undefined, key + ' must not declare a path')
+  })
+  Object.keys(ROUTE).forEach((key) => {
+    assert.ok(!ROUTE[key].startsWith('/'), 'ROUTE.' + key + ' must be a page key')
+    assert.ok(manifest.router.pages[ROUTE[key]], 'ROUTE.' + key + ' must exist in manifest')
+  })
+  assert.equal(ROUTE.home, 'pages/index')
 })
 
 test('the gate probes the network and routes by its verdict', () => {
@@ -50,19 +60,49 @@ test('the gate probes the network and routes by its verdict', () => {
   assert.match(splash, /routeAfterGate\(signal\.online, store\.hasAccount/)
   // The verdict has to be published before the replace, otherwise the page
   // being entered bounces straight back here.
-  assert.match(splash, /state\.launchAllowed = signal\.online\s*\n\s*const target/)
+  // The verdict goes onto the app instance, not into this page's copy of
+  // `state` (a module level flag is per page bundle and made index bounce back
+  // to splash forever).
+  // No verdict is published at all: reading it from another page is exactly
+  // what looped. The gate routes and forgets.
+  assert.ok(!splash.includes('gateOnline'), 'the gate must not publish a verdict')
+  assert.ok(!splash.includes('launchAllowed'), 'not in module state either')
   // The probes are evidence, not a gate, and they must run *after* the route
   // decision (that was the "stuck on 没有网络" bug: a slow probe looked exactly
   // like a dead interface).
   assert.ok(!/launchAllowed = .*probe/.test(splash), 'the probe must not decide the launch')
-  const routed = splash.indexOf('router.replace({ uri: target })')
+  const routed = splash.indexOf('this.navigate(target)')
   const probed = splash.indexOf('this.probe()')
   assert.ok(routed > -1 && probed > routed, 'probe runs after the launch is routed')
+  // Navigation is deferred off the onShow tick and retried once: a replace
+  // issued too early can be dropped, which looks exactly like a hung gate.
+  assert.match(splash, /navigate\(target\) \{[\s\S]*setTimeout\(/)
+  assert.match(splash, /still on splash after replace, retrying/)
+  // The stage line is what makes a stuck launch readable on the watch itself.
+  assert.match(splash, /\{\{ stage \|\| \$t\('splash\.checking'\) \}\}/)
   // bilibili is the control, the configured server is the target; both land in
   // shared state so the first request's error can say which one failed.
   assert.match(splash, /network\.probeTargets\(/)
-  assert.match(splash, /state\.controlProbe = result\.control/)
-  assert.match(splash, /state\.serverProbe = result\.server/)
+  assert.match(splash, /shared\.controlProbe = result\.control/)
+  assert.match(splash, /shared\.serverProbe = result\.server/)
+})
+
+test('cross-page verdict lives on the app instance, not module state', () => {
+  const app = readFileSync(new URL('../src/app.ux', import.meta.url), 'utf8')
+  // Each page is its own webpack entry and gets its own copy of common
+  // modules, so a module level flag is invisible across pages. app.ux is the
+  // only object every page can reach.
+  assert.match(app, /shared: shared,/)
+  assert.match(app, /controlProbe: null/)
+  assert.match(app, /backgroundSummary: null/)
+  // No gate verdict on the shared object: nothing may read one.
+  assert.ok(!app.includes('gateOnline'), 'no cross-page gate verdict')
+  const helper = readFileSync(new URL('../src/common/scripts/shared.js', import.meta.url), 'utf8')
+  assert.match(helper, /export function sharedOf/, 'sharedOf resolves $app.$def.shared')
+  assert.ok(!helper.includes('blockedByGate'), 'no cross-page verdict helper')
+  for (const page of [splash, index]) {
+    assert.ok(!/launchAllowed|gateOnline|gateChecked/.test(page), 'no page may carry a gate verdict')
+  }
 })
 
 test('the gate builds no main UI of its own', () => {
@@ -71,12 +111,15 @@ test('the gate builds no main UI of its own', () => {
   }
 })
 
-test('the conversation list refuses to open without a passed gate', () => {
-  const guard = index.indexOf('state.launchAllowed')
-  const refresh = index.indexOf('this.refresh()')
-  assert.ok(guard > -1, 'index checks state.launchAllowed')
-  assert.ok(guard < refresh, 'the guard runs before the list is fetched')
-  assert.match(index, /router\.replace\(\{ uri: ROUTE\.splash \}\)/)
+test('the conversation list never bounces back to the gate', () => {
+  // The guard that used to live here read a flag written by another bundle
+  // (module state is per page), so it always saw "not allowed" and produced
+  // 检查网络… → 进入 / → 检查网络… forever. Entering without the gate is fine:
+  // pages/splash only diverts a definitive `none` to /offline before this page
+  // exists, and every other problem surfaces as a request error here.
+  assert.ok(!index.includes('blockedByGate'), 'no gate check in the list page')
+  assert.ok(!index.includes('ROUTE.splash'), 'the list must never navigate back to splash')
+  assert.match(index, /this\.refresh\(\)/, 'it fetches regardless')
   // The probe belongs to the gate; a second one here would be paid again on
   // every return from the chat page.
   assert.ok(!index.includes('checkNetwork'), 'index does not probe the network itself')

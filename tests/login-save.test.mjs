@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
+import { ROUTE } from './.build/launch.mjs'
 
 // The page script declares a helper before `export default`, so it is wrapped
 // in a function to keep the helper local and hand back the component object.
@@ -21,7 +22,7 @@ let toasts = 0
 const configured = []
 const state = { settings: null, ready: false }
 const page = runInNewContext('(function () {\n' + script.trim() + '\n})()', {
-  state, console,
+  state, console, ROUTE,
   api: {
     configure: (settings) => configured.push(settings),
     getCurrentUser: (settings) => validate(settings)

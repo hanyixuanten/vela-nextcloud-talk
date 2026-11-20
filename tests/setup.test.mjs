@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
 import protocol from './.build/protocol.mjs'
+import { ROUTE } from './.build/launch.mjs'
 
 const script = readFileSync(new URL('../src/pages/setup/setup.ux', import.meta.url), 'utf8')
   .split('<script>')[1].split('</script>')[0]
@@ -20,7 +21,7 @@ let validate
 const keepAwake = []
 const state = { settings: { user: 'previous' } }
 const page = runInNewContext('(' + script.trim() + ')', {
-  protocol, state, console,
+  protocol, state, console, ROUTE,
   interconnect: { instance: () => connect },
   api: { getCurrentUser: (settings) => validate(settings), configure() {} },
   store: {
@@ -81,7 +82,6 @@ await setImmediate()
 assert.equal(saves, 4, 'one write for the credentials, one for the display name')
 assert.equal(state.settings.user, 'alice')
 assert.equal(state.settings.displayName, 'Alice')
-assert.equal(state.launchAllowed, true, 'a validated account means the launch gate would pass, so the exit does not re-probe')
 assert.deepEqual(replies[1].data, { ok: true, message: 'setup.saved', display_name: 'Alice', request_id: 'good' })
 assert.equal(timers.size, 0, 'wait until Vela accepts the reply before scheduling navigation')
 replies[1].success()

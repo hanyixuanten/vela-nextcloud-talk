@@ -59,18 +59,35 @@ await test('a "none" interface is offline and sends nothing', async () => {
   assert.deepEqual(SENT, [])
 })
 
-await test('an unknown interface type counts as offline', async () => {
+await test('an empty type is "unknown", not "offline"', async () => {
+  // A firmware that answers "" (or fails, or never answers) is not evidence of
+  // a dead network; blocking on it is what bricked the launch.
   reset('')
-  assert.equal(await checkNetwork(), false)
+  const signal = await checkSignal()
+  assert.equal(signal.online, true)
+  assert.equal(signal.known, false)
   assert.deepEqual(SENT, [])
 })
 
-await test('a failed getType counts as offline', async () => {
+await test('a failed getType still lets the user in', async () => {
   reset('wifi')
   state.fail = true
-  assert.equal(await checkNetwork(), false)
+  const signal = await checkSignal()
   state.fail = false
+  assert.equal(signal.online, true)
+  assert.equal(signal.known, false)
   assert.deepEqual(SENT, [])
+})
+
+await test('a getType that never calls back is cut off by the timeout', async () => {
+  reset('wifi')
+  state.hang = true
+  const started = Date.now()
+  const signal = await checkSignal({ typeTimeoutMs: 60 })
+  state.hang = false
+  assert.equal(signal.online, true, 'an unanswered API must not hang the launch')
+  assert.equal(signal.known, false)
+  assert.ok(Date.now() - started < 2000, 'the gate has to give up quickly')
 })
 
 await test('the verdict itself makes no request, so it cannot be slow', async () => {
@@ -78,6 +95,7 @@ await test('the verdict itself makes no request, so it cannot be slow', async ()
   const signal = await checkSignal()
   assert.equal(signal.online, true)
   assert.equal(signal.type, 'wifi')
+  assert.equal(signal.known, true)
   assert.deepEqual(SENT, [], 'the gate must resolve without a round trip')
 })
 

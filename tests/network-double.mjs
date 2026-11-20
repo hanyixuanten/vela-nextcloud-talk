@@ -6,12 +6,15 @@
 
 export const state = {
   type: 'wifi',
-  fail: false
+  fail: false,
+  // Neither success nor fail: the firmware bug the gate now has to survive.
+  hang: false
 }
 
 export function reset(type) {
   state.type = type === undefined ? 'wifi' : type
   state.fail = false
+  state.hang = false
 }
 
 export default {
@@ -21,6 +24,7 @@ export default {
       if (opts.fail) opts.fail({ data: 'network api unavailable' }, 200)
       return
     }
+    if (state.hang) return
     if (opts.success) opts.success({ type: state.type })
     if (opts.complete) opts.complete()
   }
