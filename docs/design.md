@@ -119,6 +119,8 @@ pages/chat   onInit  → 读取配置
 
 `parseJson()` 对损坏数据回退到默认值而不是抛异常：storage 是用户数据，宁可重置也不能白屏。
 
+写入失败的错误信息必须自带原因。Vela 文档写 `fail(data, code)`，但实际固件并不统一：有的传单个 `{ data, code }` 对象，有的只传一个字符串，有的什么都不传。早期实现只读第二个参数，于是所有非标准形状都会变成 `storage write failed, code=undefined`——既没有错误码也没有原因，等于没有信息。`storageFailure()` 现在兼容四种形状，缺失错误码时写 `code=unknown`（绝不输出 `undefined`），并把平台文案放进 message、附上 `key=` 和待写入字符数（配额/单键长度限制是最常见的失败原因）。`storageCode` / `storageDetail` 单独挂在 Error 上，调用方不必解析字符串。
+
 ## 6. 安全模型
 
 | 项 | 现状 | 说明 |

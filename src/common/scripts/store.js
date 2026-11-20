@@ -26,25 +26,98 @@ export const DEFAULT_SETTINGS = {
   fontScale: 'normal'
 }
 
+// Vela documents fail as fail(data, code), but the tag / firmware builds do not
+// all honour that: some pass one result object ({ data, code }), some pass a
+// bare string, and some pass nothing at all. A handler that only read the
+// second argument therefore logged "code=undefined" and threw away the error
+// text, which is the only part that says *why* the write failed.
+//
+// Accept every shape, never print "undefined", and keep the platform payload
+// on the error so a caller can log or branch on it.
+function storageFailure(operation, args, context) {
+  let data = args[0]
+  let code = args[1]
+
+  if (code === undefined && data !== null && typeof data === 'object') {
+    code = data.code
+    data = data.data
+    if (data === undefined) data = args[0].message
+  }
+
+  const detail = typeof data === 'string' ? data : ''
+  const hasCode = code !== undefined && code !== null && code !== ''
+
+  let message = 'storage ' + operation + ' failed, code=' + (hasCode ? code : 'unknown')
+  if (detail) message += ': ' + detail
+  if (context) message += ' (' + context + ')'
+
+  const err = new Error(message)
+  // Kept separate from the message so callers do not have to parse the string.
+  if (hasCode) err.storageCode = code
+  if (detail) err.storageDetail = detail
+  return err
+}
+
+// A missing or disabled @system.storage throws on property access instead of
+// calling fail, so the guard has to be explicit rather than defensive.
+function requireStorage(method) {
+  if (!storage || typeof storage[method] !== 'function') {
+    const err = new Error('storage ' + method + ' unavailable: @system.storage is missing')
+    err.storageDetail = 'unavailable'
+    return err
+  }
+  return null
+}
+
 function readRaw(key) {
   return new Promise((resolve) => {
-    storage.get({
-      key: key,
-      default: '',
-      success: (data) => resolve(data || ''),
-      fail: () => resolve('')
-    })
+    const missing = requireStorage('get')
+    if (missing) {
+      console.log(missing.message)
+      resolve('')
+      return
+    }
+    try {
+      storage.get({
+        key: key,
+        default: '',
+        success: (data) => resolve(data || ''),
+        // A read failure is not fatal: defaults are a valid answer.
+        fail: (data, code) => {
+          const err = storageFailure('read', [data, code], 'key=' + key)
+          console.log(err.message)
+          resolve('')
+        }
+      })
+    } catch (err) {
+      console.log('storage read threw, key=' + key + ': ' + ((err && err.message) || err))
+      resolve('')
+    }
   })
 }
 
 function writeRaw(key, value) {
   return new Promise((resolve, reject) => {
-    storage.set({
-      key: key,
-      value: value,
-      success: () => resolve(),
-      fail: (data, code) => reject(new Error('storage write failed, code=' + code))
-    })
+    const missing = requireStorage('set')
+    if (missing) {
+      reject(missing)
+      return
+    }
+    // Byte length is the one number that explains a quota / per-key limit
+    // rejection, and the platform does not report it.
+    const context = 'key=' + key + ', ' + String(value).length + ' chars'
+    try {
+      storage.set({
+        key: key,
+        value: value,
+        success: () => resolve(),
+        fail: (data, code) => reject(storageFailure('write', [data, code], context))
+      })
+    } catch (err) {
+      const wrapped = storageFailure('write', [err && err.message], context)
+      if (err && err.stack) wrapped.stack = err.stack
+      reject(wrapped)
+    }
   })
 }
 
@@ -85,13 +158,20 @@ function save(settings) {
 
 function clearAll() {
   return new Promise((resolve, reject) => {
+    const missing = requireStorage('clear')
+    if (missing) {
+      reject(missing)
+      return
+    }
     try {
       storage.clear({
         success: () => resolve(),
-        fail: (data, code) => reject(new Error('storage clear failed, code=' + code))
+        fail: (data, code) => reject(storageFailure('clear', [data, code]))
       })
     } catch (err) {
-      reject(err)
+      const wrapped = storageFailure('clear', [err && err.message])
+      if (err && err.stack) wrapped.stack = err.stack
+      reject(wrapped)
     }
   })
 }
