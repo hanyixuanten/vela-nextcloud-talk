@@ -132,7 +132,7 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 ### 线上路由和协议
 
 - **手机 → 手表：** `interconnect.send-qaic-message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v1 JSON（`kind: "credentials"`、`base_url`、`user`、`app_password`），新版插件额外发送字符串 `request_id`。
-- **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 为 `ok`、可选 `message` 和 `display_name`，且须回显本次字符串 `request_id`。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件要求来源设备、包名和请求 ID 全部匹配，不接受无 request_id 的旧 ACK。
+- **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 为 `ok`、可选 `message` 和 `display_name`，且须回显本次字符串 `request_id`。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件以回显的 `request_id` 作为唯一必需的匹配项，来源设备/包名只在**存在且不一致**时否决（旧宿主会直接透传 JSON，没有信封，按旧逻辑这种合法回执会被丢掉，面板于是在 15 秒后报「手表没有回应」）。无 request_id 的旧 ACK 一律不接受，因为它分不清是哪一次发送。
 - **异步驱动：宿主调用 `block_on`，返回的 future `spawn`。** 回调是同步函数，`spawn` 出去的任务在里面不保证被 poll（那会让插件看起来**从未请求过任何权限**：没弹窗、没枚举、永远「没有设备」）；但也不能 `block_on` 去写要返回给宿主的未来——宿主拿到 reader 之前无法读取，会 trap `deadlock detected: event loop cannot make further progress`。顺序固定为：`block_on(宿主调用)` → `spawn(writer.write)` → 返回 reader，与 BandTOTP / otp-helper 一致。
 - **超时：** 点发送后立即独立启动 15 秒计时器，不依赖设备/互联宿主调用返回；`Timer` 事件包装为 `{timerId, kind: "timeout", payload}`，`payload` 含本次请求 ID，不会让上一次定时器中断新请求。若宿主调用自身永不返回（例如枚举设备挂起），计时器仍会结束等待；此外超过 15 秒 + 5 秒宽限的挂起请求会在下次重绘、输入或点「重新检测」时被自动清除，UI 不会永久停在「正在发送…」。
 

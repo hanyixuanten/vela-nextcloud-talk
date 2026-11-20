@@ -52,6 +52,27 @@ fn reads_current_astrobox_ack_envelope_and_checks_routing() {
 }
 
 #[test]
+fn matches_on_request_id_when_the_host_omits_routing_metadata() {
+    // Hosts differ: some wrap the ACK with `addr`/`pkgName`, some pass the
+    // payload through untouched. The echoed request id is what proves the ACK
+    // belongs to *this* send, so a missing envelope must not drop it.
+    let inner = json!({"ok":true,"message":"已保存","request_id":"123-1"});
+    let bare = json!({"payloadText":inner.to_string()});
+    let received = parse_ack(&bare.to_string()).unwrap();
+    assert!(received.matches("AA:BB:CC:DD:EE:FF", "123-1"));
+    assert!(!received.matches("AA:BB:CC:DD:EE:FF", "123-2"));
+
+    // A routing field that *is* present and disagrees still vetoes.
+    let from_elsewhere = json!({
+        "addr":"11:22:33:44:55:66", "pkgName":PKG_NAME,
+        "payloadText":inner.to_string()
+    });
+    assert!(!parse_ack(&from_elsewhere.to_string())
+        .unwrap()
+        .matches("AA:BB:CC:DD:EE:FF", "123-1"));
+}
+
+#[test]
 fn accepts_legacy_and_string_encoded_ack() {
     let legacy = parse_ack(r#"{"ok":false}"#).unwrap();
     assert!(!legacy.matches("AA:BB", "123-1"));

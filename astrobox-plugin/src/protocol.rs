@@ -154,10 +154,25 @@ pub struct ReceivedAck {
 impl ReceivedAck {
     pub fn matches(&self, addr: &str, request_id: &str) -> bool {
         let normalize = |value: &str| value.trim().replace('-', ":").to_ascii_uppercase();
-        let source_matches = self.addr.as_deref().is_some_and(|from| normalize(from) == normalize(addr));
-        let package_matches = self.pkg_name.as_deref().is_some_and(|pkg| pkg == PKG_NAME);
-        let request_matches = self.ack.request_id.as_deref().is_some_and(|id| id == request_id);
-        source_matches && package_matches && request_matches
+        // `request_id` is the only field that is *ours*: the watch echoes the id
+        // this plugin generated, so it cannot be forged by another app's ACK and
+        // cannot arrive late from an older send. Routing metadata is optional
+        // (older hosts deliver a bare payload), so it may veto a match but never
+        // be required: demanding `addr` meant a valid "已保存" arrived, was
+        // dropped, and the panel reported "手表没有回应" 15 s later.
+        let request_matches = self.ack.request_id.as_deref() == Some(request_id);
+        if !request_matches {
+            return false;
+        }
+        let source_matches = match self.addr.as_deref() {
+            Some(from) => normalize(from) == normalize(addr),
+            None => true,
+        };
+        let package_matches = match self.pkg_name.as_deref() {
+            Some(pkg) => pkg == PKG_NAME,
+            None => true,
+        };
+        source_matches && package_matches
     }
 }
 
