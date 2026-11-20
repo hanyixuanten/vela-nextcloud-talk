@@ -27,7 +27,7 @@
   npm run build:rect   # REDMI Watch 5
   ```
 
-  仓库自带的 `.npmrc` 指向 npmmirror，若在国外可自行删掉。
+  仓库自带的 `.npmrc` 指向官方 npm registry；网络慢时可按需改回国镜像。
 
 ### 2. 安装到手表
 
@@ -35,9 +35,11 @@
 
 | Artifact | 适用设备 |
 | --- | --- |
-| `rpk-xiaomi-watch-s3-s4-s4-sport` | Xiaomi Watch S3 / S4 / S4 Sport（466 × 466 圆屏） |
-| `rpk-redmi-watch-5` | REDMI Watch 5（432 × 514 矩形屏） |
+| `rpk-debug-xiaomi-watch-s3-s4-s4-sport` / `rpk-release-xiaomi-watch-s3-s4-s4-sport` | Xiaomi Watch S3 / S4 / S4 Sport（466 × 466 圆屏） |
+| `rpk-debug-redmi-watch-5` / `rpk-release-redmi-watch-5` | REDMI Watch 5（432 × 514 矩形屏） |
 | `abp` | 手机 AstroBox 插件，用于从手机配置凭据 |
+
+没有配置签名密钥时只会出现 `rpk-debug-*`；配置了 secrets 的构建同时只产出 `rpk-release-*`。
 
 两个 RPK 包名均为 `com.hanyixuanten.nctalk`，同一块表只安装对应的一个。
 
@@ -132,7 +134,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 ```
 vela-nextcloud-talk/
 ├── package.json                  # aiot-toolkit 构建脚本
-├── .npmrc                        # npmmirror registry（CI 可改为官方 npm registry）
+├── .npmrc                        # 官方 npm registry（CI 可改用镜像）
 ├── src/
 │   ├── manifest.json             # 包名、路由、features、designWidth
 │   ├── app.ux                    # 启动时读取设置并配置 API client
@@ -157,10 +159,13 @@ vela-nextcloud-talk/
 │       ├── setup/setup.ux        # 等手机推送凭据（interconnect）
 │       └── settings/settings.ux  # 设置
 ├── scripts/
+│   ├── build-watch.cjs           # 屏幕条件预处理 + aiot 打包
 │   ├── gen-icon.py               # 零依赖 PNG 生成
+│   ├── seed-watch-chat.mjs       # 向真机测试房间写入基线消息
 │   └── sync-input-method.sh      # 重新拉取并覆盖 InputMethod
 ├── astrobox-plugin/              # 手机侧配置凭据的 AstroBox 插件（Rust → wasm）
 │   ├── Cargo.toml
+│   ├── rust-toolchain.toml       # 固定 Rust 1.92（WASI 0.2.6 上限）
 │   ├── manifest.json             # entry / api_level / permissions
 │   ├── src/                      # lib / ui / protocol / state / logger
 │   ├── tests/protocol.rs         # 协议单测（能跑，不依赖 wasm）
@@ -170,7 +175,9 @@ vela-nextcloud-talk/
 │   ├── api.md                    # 接口清单与错误映射
 │   ├── design.md                 # 圆屏布局计算与状态机
 │   ├── interconnect.md           # 与插件的协议、时序、排错
-│   └── ci.md                     # CI 的 job 划分、secrets、产物与排错
+│   ├── ci.md                     # CI 的 job 划分、secrets、产物与排错
+│   ├── image-preview.md          # 附件显示调查
+│   └── watch-memory-baseline.md  # 手表基线内存
 ├── tests/
 │   ├── run.sh                    # 一键跑全部测试（需要 Node ≥ 18）
 │   ├── mock-server.mjs           # 假 Nextcloud Talk OCS 服务
@@ -178,14 +185,12 @@ vela-nextcloud-talk/
 │   ├── api.test.mjs              # api.js 集成测试
 │   ├── protocol.test.mjs         # 凭据协议单元测试
 │   ├── units.test.mjs            # base64 / format 单元测试
+│   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试
-│   └── seed-watch-chat.test.mjs  # seed/watch 聊天测试
-├── scripts/seed-watch-chat.mjs   # 向真机写入测试消息
-├── docs/
-│   ├── image-preview.md          # 附件显示调查
-│   └── watch-memory-baseline.md  # 手表基线内存
-├── LICENSE                      # 根仓库 MIT 许可
-├── SECURITY.md                  # 漏洞报告与安全边界
+│   ├── seed-watch-chat.test.mjs  # seed/watch 聊天测试
+│   └── build-watch.test.cjs      # 屏幕条件编译测试
+├── LICENSE                       # 根仓库 MIT 许可
+├── SECURITY.md                   # 漏洞报告与安全边界
 └── sign/                         # 证书放这里（.gitignore 已排除 pem）
 ```
 

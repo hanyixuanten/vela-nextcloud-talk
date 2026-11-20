@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `test` | `npm test`（纯 Node，不需要安装打包工具） | — |
 | `test-plugin` | Rust 插件协议回归测试 | — |
-| `build-rpk` | JS 测试通过后，按 `circle` / `rect` 矩阵分别编译并验证 RPK | `rpk-xiaomi-watch-s3-s4-s4-sport`、`rpk-redmi-watch-5` |
+| `build-rpk` | JS 测试通过后，按 `circle` / `rect` 矩阵分别编译并验证 RPK | `rpk-debug-*` 或 `rpk-release-*`（前缀由签名模式决定，后缀为 `xiaomi-watch-s3-s4-s4-sport` / `redmi-watch-5`） |
 | `build-plugin` | 协议测试通过后打包 `wasm32-wasip2` 插件并验证 ABP | `abp` |
 
 ## 签名

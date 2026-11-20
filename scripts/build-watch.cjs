@@ -58,8 +58,12 @@ try {
   copySources(path.join(root, 'src'), path.join(project, 'src'))
   fs.copyFileSync(path.join(root, 'package.json'), path.join(project, 'package.json'))
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(project, 'node_modules'), 'junction')
+  // Copy, never symlink: the toolkit copies the project into ../.temp_<name>
+  // and flattens a symlinked sign/ into an empty file, so release signing then
+  // fails with "there is a problem with the certification path" (debug builds
+  // silently fall back to the toolkit's default certificate).
   const signing = path.join(root, 'sign')
-  if (fs.existsSync(signing)) fs.symlinkSync(signing, path.join(project, 'sign'), 'junction')
+  if (fs.existsSync(signing)) fs.cpSync(signing, path.join(project, 'sign'), { recursive: true })
 
   const result = spawnSync(process.execPath, [require.resolve('aiot-toolkit/lib/bin.js'), mode, ...options], {
     cwd: project,
