@@ -1,0 +1,371 @@
+name: Release
+
+# Manual only, on purpose: cutting a release moves the version in the repo and
+# publishes a tag, so it must never happen as a side effect of a push.
+#
+# Type x.x.x (a leading "v" is ignored). The workflow then
+#   1. validates the version and refuses a tag/release that already exists,
+#   2. bumps package.json + src/manifest.json and pushes that commit to main,
+#   3. rebuilds both watch shapes with the release certificate and the ABP,
+#   4. publishes a GitHub Release whose assets are all `.release.` packages.
+# It never publishes a `.debug.` package: without signing secrets the run fails.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, x.x.x (leading "v" ignored)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# One release at a time: two would race on the version bump commit.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  HTTP_PROXY: ${{ vars.HTTP_PROXY }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # -------------------------------------------------- version bump + commit
+  prepare:
+    name: prepare v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Check dispatch source
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Releases are cut from main; this run was dispatched from $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${INPUT_VERSION#v}"
+          if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "Version must be x.x.x, got '$INPUT_VERSION'" >&2
+            exit 1
+          fi
+          # --exit-code makes ls-remote exit 2 when no ref matches.
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "Tag v$version already exists; releases are immutable" >&2
+            exit 1
+          fi
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Release v$version already exists" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # package.json / package-lock.json carry the semver; the RPK header and
+          # the installer read src/manifest.json, so both have to move together.
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node scripts/bump-manifest-version.cjs "$VERSION"
+          node -e '
+            const pkg = require("./package.json")
+            const manifest = require("./src/manifest.json")
+            if (pkg.version !== process.env.VERSION || manifest.versionName !== process.env.VERSION) {
+              console.error(`version drift: package.json ${pkg.version}, src/manifest.json ${manifest.versionName}`)
+              process.exit(1)
+            }
+            console.log(`version ${process.env.VERSION}, versionCode ${manifest.versionCode}`)
+          '
+
+      - name: Commit and push
+        id: commit
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- package.json package-lock.json src/manifest.json; then
+            # Re-running for a tree that is already at this version.
+            echo "Tree already at v$VERSION; nothing to commit"
+          else
+            git add package.json package-lock.json src/manifest.json
+            git commit -m "chore(release): $VERSION (watch)"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # ------------------------------------------------------------------ tests
+  test:
+    name: test (js)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test
+        run: npm test
+
+  test-plugin:
+    name: test (plugin protocol)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: astrobox-plugin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Ensure Rust
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          CHANNEL=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$CHANNEL" --profile minimal
+          cargo --version
+
+      - name: Test protocol
+        run: |
+          if [ -n "${HTTP_PROXY:-}" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          cargo test --locked --target x86_64-unknown-linux-gnu --test protocol
+
+  # ----------------------------------------------------------------- s/rpk
+  build-rpk:
+    name: build (rpk-${{ matrix.shape }})
+    # prepare is listed explicitly: the `needs` context only exposes direct
+    # dependencies, and this job reads needs.prepare.outputs.sha / version.
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shape: circle
+            suffix: xiaomi-watch-s3-s4-s4-sport
+          - shape: rect
+            suffix: redmi-watch-5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: |
+          if [ -n "${HTTP_PROXY:-}" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          npm ci --no-audit --no-fund
+
+      # Unlike ci.yml there is no debug fallback: an unsigned package would look
+      # like a release while failing (or downgrading the certificate) on device.
+      - name: Configure signing
+        env:
+          PRIVATE_PEM: ${{ secrets.SIGN_PRIVATE_PEM }}
+          CERT_PEM: ${{ secrets.SIGN_CERT_PEM }}
+        run: |
+          if [ -z "$PRIVATE_PEM" ] || [ -z "$CERT_PEM" ]; then
+            echo 'Releases need both SIGN_PRIVATE_PEM and SIGN_CERT_PEM; refusing to build a debug-signed package' >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p sign/release
+          printf '%s\n' "$PRIVATE_PEM" > sign/release/private.pem
+          printf '%s\n' "$CERT_PEM" > sign/release/certificate.pem
+          openssl x509 -in sign/release/certificate.pem -noout -subject -enddate
+
+      - name: Build and verify package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHAPE: ${{ matrix.shape }}
+        run: |
+          npm run "release:$SHAPE"
+          shopt -s nullglob
+          packages=(dist/*-"$SHAPE".rpk)
+          if [ "${#packages[@]}" -ne 1 ]; then
+            echo "Expected one $SHAPE RPK, got ${#packages[@]}" >&2
+            exit 1
+          fi
+          name=$(basename "${packages[0]}")
+          # The toolkit tags the package name with the signing mode:
+          # com.hanyixuanten.nctalk.release.<version>-<shape>.rpk. Anything else
+          # means a release build silently fell back to a debug certificate.
+          case "$name" in
+            *debug*) echo "Refusing debug package: $name" >&2; exit 1 ;;
+          esac
+          if [ "$name" != "com.hanyixuanten.nctalk.release.$VERSION-$SHAPE.rpk" ]; then
+            echo "Unexpected package name: $name" >&2
+            exit 1
+          fi
+          unzip -tq "${packages[0]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpk-${{ matrix.shape }}
+          path: dist/*-${{ matrix.shape }}.rpk
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------- abp
+  build-plugin:
+    name: build (abp)
+    needs: [prepare, test-plugin]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: astrobox-plugin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Ensure Rust
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          CHANNEL=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$CHANNEL" --profile minimal --target wasm32-wasip2
+          cargo --version
+
+      - name: Package
+        run: |
+          if [ -n "${HTTP_PROXY:-}" ]; then
+            export http_proxy="$HTTP_PROXY" https_proxy="$HTTP_PROXY"
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          python3 --version
+          python3 scripts/build_dist.py --release --package
+          ls -l dist/
+
+      - name: Check artifact
+        run: python3 scripts/check_artifact.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abp
+          path: astrobox-plugin/dist/*.abp
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- publish
+  publish:
+    name: publish v${{ needs.prepare.outputs.version }}
+    needs: [prepare, build-rpk, build-plugin]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Verify assets
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          shopt -s nullglob
+          cd artifacts
+          rpks=(*.rpk)
+          abps=(*.abp)
+          if [ "${#rpks[@]}" -ne 2 ] || [ "${#abps[@]}" -ne 1 ]; then
+            echo "Expected 2 RPK and 1 ABP, got ${#rpks[@]} RPK and ${#abps[@]} ABP" >&2
+            ls -l >&2
+            exit 1
+          fi
+          for file in "${rpks[@]}" "${abps[@]}"; do
+            case "$file" in
+              *debug*) echo "Refusing to publish a debug package: $file" >&2; exit 1 ;;
+            esac
+          done
+          for shape in circle rect; do
+            file="com.hanyixuanten.nctalk.release.$VERSION-$shape.rpk"
+            if [ ! -f "$file" ]; then
+              echo "Missing $file: the release build did not produce a .release. package for $shape" >&2
+              ls -l >&2
+              exit 1
+            fi
+          done
+          # unzip takes one archive: a second argument is read as a member name.
+          for file in "${rpks[@]}"; do
+            unzip -tq "$file" >/dev/null
+            echo "integrity ok: $file"
+          done
+
+      - name: Compose release notes
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          abp=$(cd artifacts && ls *.abp)
+          previous=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          {
+            echo '小米 Vela 手表端的 Nextcloud Talk 客户端，圆屏 / 矩形屏各一个包。'
+            echo
+            echo '| 设备 | 文件 |'
+            echo '| --- | --- |'
+            echo "| Xiaomi Watch S3 / S4 / S4 Sport（466 × 466 圆屏） | \`com.hanyixuanten.nctalk.release.$VERSION-circle.rpk\` |"
+            echo "| REDMI Watch 5（432 × 514 矩形屏） | \`com.hanyixuanten.nctalk.release.$VERSION-rect.rpk\` |"
+            echo "| 手机 AstroBox 插件（可选） | \`$abp\` |"
+            echo
+            echo '两个 RPK 的包名都是 `com.hanyixuanten.nctalk`，同一块表只装对应的一个。升级包必须与已安装的包同签名，换过证书要先卸载再装。安装步骤见仓库 README 的「安装到手表」。'
+            if [ -n "$previous" ]; then
+              echo
+              echo "**完整变更**：https://github.com/$GITHUB_REPOSITORY/compare/$previous...v$VERSION"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Publish release
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The tag does not exist yet (prepare checked), so let gh create it at
+          # the version bump commit rather than at whatever main points to now.
+          gh release create "v$VERSION" artifacts/* \
+            --target "$SHA" \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest
+          gh release view "v$VERSION" --json tagName,url,assets \
+            --jq '.url, (.assets[] | "\(.name) \(.size) bytes")'
