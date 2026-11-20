@@ -17,7 +17,15 @@ use astrobox_ng_wit::wit_future;
 
 use crate::state::{PendingSend, Status};
 
-const TIMEOUT_MS: u64 = 15_000;
+/// How long the panel waits for the watch's ACK.
+///
+/// This budget must outlast everything the watch does between "message
+/// received" and "ACK sent": its own OCS request has a 20 s watchdog
+/// (`REQUEST_TIMEOUT_MS` in src/common/scripts/api.js), then it writes
+/// @system.storage and only then replies. A shorter budget turns a working but
+/// slow validation into "手表没有回应" on the phone while the watch is still
+/// showing 正在校验账号…, which reads exactly like a failed handoff.
+const TIMEOUT_MS: u64 = 40_000;
 /// How long after the ACK timeout a pending send is treated as dead. The host
 /// timer can be lost (panel closed, runtime restarted), so the UI must not rely
 /// on it alone.
@@ -419,15 +427,11 @@ async fn start_send(id: String, payload: String) {
         }
     };
 
-    match check_installed(&addr).await {
-        Some(false) => {
-            fail_send(&id, "手表上没有安装 Talk（rpk），请先安装后再发送。");
-            return;
-        }
-        Some(true) => state::with(|state| state.app_installed = Some(true)),
-        None => {}
-    }
-
+    // The app list is *not* fetched before sending. `get_thirdparty_app_list`
+    // carries a 12 s host timeout, and spending it here ate most of the ACK
+    // budget before the watch had even received the credentials. It is only
+    // used below to explain a send that already failed, where the extra wait
+    // costs nothing that is still working.
     if register::register_interconnect_recv(&addr, protocol::PKG_NAME)
         .await
         .is_err()
@@ -458,6 +462,13 @@ async fn start_send(id: String, payload: String) {
         .is_err()
     {
         tracing::warn!("could not submit Talk interconnect message");
+        // Now that the send has already failed, the app list is worth its
+        // 12 s host timeout: it separates "rpk missing" from "transport down".
+        if check_installed(&addr).await == Some(false) {
+            state::with(|state| state.app_installed = Some(false));
+            fail_send(&id, "手表上没有安装 Talk（rpk），请先安装后再发送。");
+            return;
+        }
         fail_send(
             &id,
             if target.connected {
