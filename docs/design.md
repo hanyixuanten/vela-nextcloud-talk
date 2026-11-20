@@ -102,12 +102,12 @@ app.ux onCreate
 pages/splash（路由入口）onShow
    └─ store.load() → network.checkNetwork(settings)
         ├─ 离线 → replace('/offline')  ──重试──> 回到 pages/splash（重新探测）
-        └─ 在线 → state.launchAllowed = true
-                   ├─ 无账号 → replace('/setup')
+        └─ 在线 → ├─ 无账号 → replace('/setup')
                    └─ 有账号 → replace('/')   （pages/index 会话列表）
 
 pages/index onShow
-   └─ state.launchAllowed? 否 → replace('/splash')；是 → refresh()
+   └─ 无账号 → replace('/setup')；有账号 → refresh()
+        （**没有**「是否通过网络门」的检查：跨 bundle 读不到那个值，一读就弹回 splash）
 
 pages/login  ──submit──> api.getCurrentUser()
                           ├─ ok   → store.save → replace('/')
@@ -180,7 +180,14 @@ pages/chat   onInit  → 读取配置
 
 做法照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `pages/app/entry/splash`：**把网络检查放在路由入口页**。`src/manifest.json` 的 `router.entry` 是 `pages/splash`，点图标先落到这一页（图标 + 名称 + 「正在检查网络…」），页面 `onShow` 探测完再 `replace` 到会话列表或 `pages/setup`；失败则 `replace('/offline')`。主界面不是「先渲染再隐藏」，而是**根本没被创建**，所以不存在检查期间点到「设置」的窗口，也没有列表闪一下再跳走的情况。
 
-判断只一步（`common/scripts/network.js`）：`@system.network.getType` 返回空字符串或 `none` 即离线，**与 HyperBilibili 的 `NetworkCheck` 完全一致**。只有「手表确实没有可用网络接口」才停在 `pages/offline`。
+判定只看一件事（`common/scripts/network.js`）：`@system.network.getType` 的结果。**只有明确的 `none` 才算离线**——空字符串、`fail` 回调、或者干脆不回调，都记为「未知」并放行。
+
+这一条比 HyperBilibili 的 `NetworkCheck` 更宽松（它把空值也当离线），原因是真机上吃过一次教训：把判定简化成只看类型之后，有固件上 `getType` **既不 success 也不 fail**，页面就永久停在「正在检查网络…」，比之前停在离线页更没用。所以：
+
+- `TYPE_TIMEOUT_MS`（4 s）是 `getType` 的硬上限：不回调就记 `unknown` 继续走；
+- 「未知」不等于「没网」，放行进应用，由第一条请求给出带 `code` 的真实错误；
+- 启动页始终显示当前阶段（`stage`：「读取设置…」/「检查网络…」/「进入 /…」/「跳转重试…」），手表上没有日志控制台，卡住时必须能从表盘上读出来；
+- `router.replace` 推迟一个 tick 再发（与 `onShow` 同 tick 的跳转可能被路由丢掉，表现也像卡死），1.2 s 后若页面仍可见则重试一次并改文案。
 
 ### 两个探针是证据，不是判决
 
@@ -202,18 +209,27 @@ pages/chat   onInit  → 读取配置
 
 `tests/network.test.mjs` 钉住三件事：`none` / `''` / `getType` 失败都判离线且不发任何请求；判定本身零往返（`checkSignal()` 不发请求）；对照通了而目标不通时**仍然是 online**，同时 `server.ok === false` 且带 `code`，探针超时则 `timedOut: true`。测试用 `probeTargets(settings, { controlUrl })` 把对照探针指向本地服务器，不去真的访问 bilibili。
 
-路由决策抽成纯函数 `common/scripts/launch.js` 的 `routeAfterGate(online, hasAccount)`：离线一律 `/offline`（账号状态不参与），在线且无账号才 `/setup`，其余进会话列表。`tests/launch-gate.test.mjs` 直接跑这个函数，并静态断言入口页是 `pages/splash`、`pages/index` 在取列表之前检查 `state.launchAllowed`、离线页的重试回到 `/splash`、`launchAllowed` 不由 `probe` 决定，且 `this.probe()` 出现在 `router.replace` **之后**。
+路由决策抽成纯函数 `common/scripts/launch.js` 的 `routeAfterGate(online, hasAccount)`：离线一律 `/offline`（账号状态不参与），在线且无账号才 `/setup`，其余进会话列表。`tests/launch-gate.test.mjs` 直接跑这个函数，并静态断言入口页是 `pages/splash`、会话列表**不会**再跳回 `/splash`、离线页的重试回到 `/splash`、网络门的判定不由 `probe` 决定，且 `this.probe()` 出现在 `router.replace` **之后**。
 
-状态标记（`state.js`）：
+网络门**不发布「通过/未通过」的判定**。曾经有过 `state.launchAllowed` 加 `pages/index` 的守卫，那正是死循环的来源（见下一节）；现在门只负责「跳到哪一页」然后把结论忘掉，主界面不再回头质疑它。
 
-- `launchAllowed`：本次进程是否通过过网络门，**只有它**决定主界面能不能开；
-- `online` / `networkChecked`：保留给「是否已经探过」的语义，离线页清空它们，让下一次经过入口页真的重新探测；
-- `serverProbe`：最近一次启动探针的证据，`null` 表示还没探过（无账号）或没探。
+### 跨页状态：`common/scripts/*.js` 里的模块级对象是「每页一份」
 
-两处防绕过：
+0.2.10 真机上出现过 `检查网络… → 进入 / → 检查网络…` 的死循环。根因不在判定，而在状态共享：`aiot-toolkit` 把每个页面打成独立的 webpack entry，`src/common/scripts/state.js` 会被**内联进每个页面的 bundle**（用构建出的 RPK 验证过：`app.js`、`pages/splash/splash.js`、`pages/index/index.js`、`pages/chat/chat.js` 里都各有一份 `networkChecked` / `activeRoom` 的拷贝）。所以 splash 写 `state.launchAllowed = true`，`pages/index` 读到的仍是它自己的 `false` → 立刻 `replace('/splash')` → 又跑一遍门，无限循环。
 
-- `pages/index` 的 `onShow` 先看 `state.launchAllowed`，为假就 `replace('/splash')`。AstroBox 插件会 `thirdpartyapp::launch-qa` 到 `pages/index`（旧固件不接受非入口页时的回退），这条路径同样要经过网络门，所以插件侧不需要改。
-- 离线页不再自己探测，重试只做 `replace('/splash')`：判一次只需要一个结论，两次探测意味着死网络下要等两个超时。
+官方文档给的跨页通道是 app 实例：`app.ux` 导出的对象可以在任何页面通过 `this.$app.$def` 访问。因此：
+
+- `app.ux` 导出一个 `shared` 对象（`gateChecked` / `gateOnline` / `networkType` / `controlProbe` / `serverProbe` / `backgroundSummary`）；
+- `common/scripts/shared.js` 的 `sharedOf(vm, fallback)` 负责取 `this.$app.$def.shared`，取不到时退回页面本地 `state`（测试与不支持 `$def` 的固件仍能跑，不至于硬崩）；
+- 0.2.11 先把判定放上 `shared` 并保留守卫，真机仍然循环——说明 `$app.$def` 上的写入在页面之间也不保证可见（或守卫本身读到的仍是旧值）。0.2.12 的结论：**不要再试着跨页读判定**，把守卫删掉。门只在「`type === "none"`」时把用户送去 `/offline`，其余情况一律放行；插件直接拉起 `pages/index` 也照常工作，请求失败由页面自己报错。
+
+`shared` 现在只承载两件锦上添花的数据：`backgroundSummary`（keeper 预渲染）与 `controlProbe` / `serverProbe`（会话页「服务器不可达」提示）。它们读不到时最多退化成「没有预渲染 / 没有提示」，不影响能不能进应用。`tests/launch-gate.test.mjs` 静态断言：`app.ux` 必须导出 `shared`、`shared` 上不得有 `gateOnline`、任何页面都不得出现 `launchAllowed` / `gateOnline` / `gateChecked`。
+
+离线页只在 `type === "none"` 时出现，文案仍是「连上 Wi-Fi 再试」。
+
+离线页不再自己探测，重试只做 `replace('/splash')`：判一次只需要一个结论，两次探测意味着死网络下要等两个超时。
+
+AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件不接受非入口页时的回退）时**不再**被弹回网络门：那条守卫是死循环的根源，而门现在只挡 `none`，直接进列表只会看到每条请求自己的错误，比来回跳屏有用。
 
 插件启动到 `pages/setup`（手机推凭据）不经过网络门，这是有意的：那是配置页而不是主界面，它自己的校验和 20 秒超时会给出准确结论。
 

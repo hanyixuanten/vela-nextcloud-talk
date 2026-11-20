@@ -91,7 +91,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试；`tests/network.test.mjs` 与 `tests/launch-gate.test.mjs` 守住启动网络门（接口类型判定、`<baseUrl>/status.php` 探针只作证据不拦人、入口页是 `pages/splash`、会话列表在没通过门时不许打开）。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/index-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试；`tests/network.test.mjs` 与 `tests/launch-gate.test.mjs` 守住启动网络门（接口类型判定、两个探针只作证据不拦人、入口页是 `pages/splash`、会话列表不再跳回网络门）。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/index-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -121,7 +121,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
 | 设置 | ✅ | 键盘布局、轮询间隔、后台留存、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表先保存再校验；校验期间不熄屏 |
-| 启动网络检测 | ✅ | 只看 `@system.network` 类型（与 HyperBilibili 一致）；另跑 bilibili（对照）与 `<baseUrl>/status.php`（目标）两个探针，只记录、不拦人 |
+| 启动网络检测 | ✅ | 只看 `@system.network` 类型，且仅 `none` 判离线（空/失败/4 s 无回调都算「未知」并放行）；bilibili（对照）与 `<baseUrl>/status.php`（目标）两个探针只记录、不拦人 |
 | 图片 / 文件消息 | ❌ | 只显示文件名及文字，不下载图片 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
 | 通知推送 | ❌ | Vela 没有第三方 app 的推送通道；后台留存只在本地轮询后振动，不能唤醒屏幕或弹通知 |
@@ -253,7 +253,7 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 ### 启动网络门与校验期亮屏
 
-启动时不直接进主界面，而是照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `splash` 做法：**路由入口页就是网络门**（`router.entry = pages/splash`）。点图标先看到图标 + 「正在检查网络…」，用 `@system.network.getType` 判类型（与 HyperBilibili 的 `NetworkCheck` 一致），只有空值或 `none` 才停在 `pages/offline`，只给「重试」，重试回到入口页重探；通过则 `replace` 到会话列表或 `pages/setup`。路由决定之后才跑两个探针：`https://www.bilibili.com/`（对照，证明这块表能上外网）和 `<baseUrl>/status.php`（目标，证明能到你自己的服务器）。结果**只作为证据**写进 `state.controlProbe` / `state.serverProbe` 与日志，**不参与放行、也不阻塞启动页**——早先把探针当第二道门时，DNS/TLS 慢或证书链不被手表接受都会表现为「永远停在没有网络」，且页面上看不到任何错误码。对照通而目标不通时，会话页的错误会写成「网络正常，但服务器不可达：…」，把「Wi-Fi 没网」和「这台服务器连不上」分开。主界面（会话 / 设置 / 聊天）在这种情况下根本不会被创建，`pages/index` 还会检查 `state.launchAllowed`，插件直接拉起会话页时也会被打回网络门。
+启动时不直接进主界面，而是照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `splash` 做法：**路由入口页就是网络门**（`router.entry = pages/splash`）。点图标先看到图标 + 「正在检查网络…」，用 `@system.network.getType` 判类型（与 HyperBilibili 的 `NetworkCheck` 一致），只有空值或 `none` 才停在 `pages/offline`，只给「重试」，重试回到入口页重探；通过则 `replace` 到会话列表或 `pages/setup`。路由决定之后才跑两个探针：`https://www.bilibili.com/`（对照，证明这块表能上外网）和 `<baseUrl>/status.php`（目标，证明能到你自己的服务器）。结果**只作为证据**写进 `state.controlProbe` / `state.serverProbe` 与日志，**不参与放行、也不阻塞启动页**——早先把探针当第二道门时，DNS/TLS 慢或证书链不被手表接受都会表现为「永远停在没有网络」，且页面上看不到任何错误码。对照通而目标不通时，会话页的错误会写成「网络正常，但服务器不可达：…」，把「Wi-Fi 没网」和「这台服务器连不上」分开。主界面（会话 / 设置 / 聊天）在这种情况下根本不会被创建。会话页**不做**「是否通过门」的检查：那个跨页判定读不到（每个页面是独立 bundle），一读就会在 `检查网络…` 与 `进入 /` 之间死循环；门只挡 `none`，直接进列表最多看到请求自己的错误。
 
 从手机推来的凭据在手表上要经历「写 storage → 最长 20 秒的校验 → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。写盘排在校验之前，校验失败也保留输入（回执文字带「已保存；」前缀）；只有写盘本身失败才什么都不留。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
 
@@ -324,7 +324,8 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 ## 已知限制
 
-- **服务器不可达时仍可进入应用**：启动门只判网络接口类型，因此 `status.php` 探不通不会拦人；真正的失败会以「网络正常，但服务器不可达：网络请求失败：code=…」的文案出现在会话列表（对照探针通时），平台错误码同时打在日志里。
+- **跨页状态只能放 app 实例**：每个页面是独立 webpack entry，`common/scripts/state.js` 的模块级对象是「每页一份」，跨页判定/缓存必须经 `this.$app.$def.shared`（见 `src/common/scripts/shared.js` 与 design.md 第 9 节），否则会出现 splash ⇄ 会话页互相踢球的死循环。
+- **服务器不可达时仍可进入应用**：启动门只判网络接口类型（且仅 `none` 算离线），因此 `status.php` 探不通、`getType` 失败或超时都不会拦人；真正的失败会以「网络正常，但服务器不可达：网络请求失败：code=…」的文案出现在会话列表（对照探针通时），平台错误码同时打在日志里。启动页会显示当前阶段，卡住时能直接从表盘看出停在哪一步。
 - **短轮询**：使用 `lookIntoFuture=1` 拉取新消息，每次请求结束后再开始计时；按设置每 15s（可改 30s / 60s）轮询。浏览历史或离开页面时暂停轮询。
 - **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，因此做成设置里可关的开关。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
 - **HTTPS-only**：手动登录、候选账号校验与手机凭据协议均拒绝明文 HTTP；客户端依赖系统 TLS 校验，不做证书 pinning。
