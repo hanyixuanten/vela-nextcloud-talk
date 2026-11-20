@@ -1,20 +1,39 @@
-// Startup network gate.
+// Startup network gate and the probes that explain it.
 //
-// Lifted from the HyperBilibili template's `NetworkCheck` (src/jumpcheck.ts):
-// ask @system.network for the current type and treat "" / "none" as offline.
-// That check alone cannot tell "Wi-Fi associated but nothing routable" from
-// "fine", so when an account exists we also let fetch prove the path to the
-// configured server — any HTTP answer means the network works, only a
-// transport failure (DNS / TLS / connect) counts as offline.
+// The verdict is the interface type, exactly like HyperBilibili's
+// `NetworkCheck`: only "" / "none" / a failing getType means offline. The
+// earlier version also required `<baseUrl>/status.php` to answer within 8 s,
+// which turned a slow DNS / TLS handshake, a cold Wi-Fi association or a
+// certificate chain the watch does not trust into a permanent 「没有网络」 page
+// with no diagnostic at all.
 //
-// Both halves are optional-by-failure: a firmware that does not implement one
-// of them must not brick the app, so every error path resolves instead of
-// rejecting.
+// The probes still exist, but they are evidence, never gates, and they do not
+// delay the launch:
+//
+//   control  https://www.bilibili.com/   — does this watch reach the internet?
+//   server   <baseUrl>/status.php        — does it reach *your* Nextcloud?
+//
+// Comparing the two is what separates "the watch has no usable internet" from
+// "the watch is online but this host / TLS chain / port is not reachable". Both
+// results land in `state.controlProbe` / `state.serverProbe` and in the log;
+// pages/index also uses the control result to say "online, but the server is
+// unreachable" instead of a bare transport error.
+//
+// Every path resolves instead of rejecting: a firmware that does not implement
+// one of these APIs must not brick the app.
 
 import network from '@system.network'
 import fetch from '@system.fetch'
 
 export const PROBE_TIMEOUT_MS = 8000
+
+// A public HTTPS host with a mainstream certificate chain, used only as a
+// control probe. Same role bilibili plays for HyperBilibili.
+export const CONTROL_URL = 'https://www.bilibili.com/'
+
+function nowMs() {
+  return typeof Date !== 'undefined' && Date.now ? Date.now() : 0
+}
 
 function networkType() {
   return new Promise((resolve) => {
@@ -38,65 +57,142 @@ function networkType() {
   })
 }
 
-/** Resolves true if the server answers anything at all. */
-export function probeServer(baseUrl, timeoutMs) {
+/**
+ * GET a URL and keep the evidence.
+ * Resolves `{ ok, status, code, detail, timedOut, ms, url }` — never rejects.
+ * `ok` means "something answered"; any HTTP status counts.
+ */
+export function probeUrl(url, timeoutMs) {
   const limit = Number(timeoutMs) > 0 ? Number(timeoutMs) : PROBE_TIMEOUT_MS
   return new Promise((resolve) => {
-    const url = String(baseUrl || '').replace(/\/+$/, '') + '/status.php'
+    const target = String(url || '')
+    const started = nowMs()
     let settled = false
     let timer = null
-    const done = (value) => {
+    const done = (result) => {
       if (settled) return
       settled = true
       if (timer !== null) clearTimeout(timer)
-      resolve(value)
+      resolve(Object.assign({ url: target, ms: nowMs() - started }, result))
     }
     timer = setTimeout(() => {
-      console.log('network probe timeout: ' + url)
-      done(false)
+      console.log('probe timeout: ' + target)
+      done({ ok: false, status: 0, code: 'TIMEOUT', detail: '', timedOut: true })
     }, limit)
 
     try {
       fetch.fetch({
-        url: url,
+        url: target,
         method: 'GET',
         responseType: 'text',
-        // Whatever the status code, the request reached a server: the network
-        // is up. Auth and server errors are the app's problem, not the gate's.
-        success: () => done(true),
+        success: (response) => {
+          // Whatever the status code, the request reached a server: that is the
+          // only question a probe asks. Auth and server errors are not the
+          // network's problem.
+          done({
+            ok: true,
+            status: Number(response && response.code) || 0,
+            code: 0,
+            detail: '',
+            timedOut: false
+          })
+        },
         fail: (data, code) => {
           const detail = typeof data === 'string' ? data : (data && data.data) || ''
-          console.log('network probe failed: ' + url + ' code=' + code + (detail ? ' ' + detail : ''))
-          done(false)
+          console.log('probe failed: ' + target + ' code=' + code + (detail ? ' ' + detail : ''))
+          // `code` is the platform's transport error (DNS / TLS / connect); it
+          // is the only thing that tells the three apart.
+          done({
+            ok: false,
+            status: 0,
+            code: code === undefined || code === null ? '' : code,
+            detail: detail,
+            timedOut: false
+          })
         }
       })
     } catch (err) {
-      console.log('network probe threw: ' + ((err && err.message) || err))
-      done(false)
+      console.log('probe threw: ' + ((err && err.message) || err))
+      done({ ok: false, status: 0, code: 'THREW', detail: (err && err.message) || '', timedOut: false })
     }
+  })
+}
+
+/** Probe `<baseUrl>/status.php` (kept as a name because that is what it is). */
+export function probeServerDetailed(baseUrl, timeoutMs) {
+  return probeUrl(String(baseUrl || '').replace(/\/+$/, '') + '/status.php', timeoutMs)
+}
+
+/** Boolean form, kept for callers that only need "did it answer". */
+export function probeServer(baseUrl, timeoutMs) {
+  return probeServerDetailed(baseUrl, timeoutMs).then((result) => result.ok)
+}
+
+/** The gate verdict: an interface exists and is not "none". */
+export function interfaceOnline(type) {
+  return Boolean(type) && type !== 'none'
+}
+
+/**
+ * Fast verdict for one launch: interface type only, no network round trip.
+ * Resolves `{ online, type }`.
+ */
+export function checkSignal() {
+  return networkType().then((type) => {
+    const online = interfaceOnline(type)
+    if (!online) console.log('network offline: type=' + (type || 'unknown'))
+    return { online: online, type: type }
   })
 }
 
 /**
- * Resolves true when the watch looks online.
- * `settings` may be null/empty: without a server address only the interface
- * type is checked, because there is nothing meaningful to fetch yet.
+ * Advisory evidence, run *after* the route decision so it can never hold the
+ * launch screen. Resolves `{ control, server }`; `server` is null when no
+ * account is configured yet.
  */
-export function checkNetwork(settings, options) {
+export function probeTargets(settings, options) {
   const opts = options || {}
-  return networkType().then((type) => {
-    if (!type || type === 'none') {
-      console.log('network offline: type=' + (type || 'unknown'))
-      return false
-    }
-    const baseUrl = settings && settings.baseUrl
-    if (!baseUrl) return true
-    return probeServer(baseUrl, opts.timeoutMs)
+  const baseUrl = settings && settings.baseUrl
+  // `controlUrl` exists so tests can point the control probe at a local server
+  // instead of the public host.
+  const control = probeUrl(opts.controlUrl || CONTROL_URL, opts.timeoutMs).then((result) => {
+    console.log(
+      'control probe: ok=' + result.ok + ' status=' + result.status +
+      ' code=' + result.code + ' ms=' + result.ms + (result.detail ? ' ' + result.detail : '')
+    )
+    return result
   })
+  const server = baseUrl
+    ? probeServerDetailed(baseUrl, opts.timeoutMs).then((result) => {
+      console.log(
+        'server probe: ok=' + result.ok + ' status=' + result.status +
+        ' code=' + result.code + ' ms=' + result.ms + (result.detail ? ' ' + result.detail : '')
+      )
+      return result
+    })
+    : Promise.resolve(null)
+  return Promise.all([control, server]).then((results) => ({
+    control: results[0],
+    server: results[1]
+  }))
+}
+
+/**
+ * Boolean form used by the launch gate: interface type only, matching
+ * HyperBilibili's NetworkCheck. An unreachable host is NOT offline.
+ */
+export function checkNetwork() {
+  return checkSignal().then((signal) => signal.online)
 }
 
 export default {
   PROBE_TIMEOUT_MS,
+  CONTROL_URL,
+  interfaceOnline,
+  checkSignal,
   checkNetwork,
-  probeServer
+  probeUrl,
+  probeServer,
+  probeServerDetailed,
+  probeTargets
 }

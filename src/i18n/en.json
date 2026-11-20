@@ -50,7 +50,8 @@
     "empty": "No conversations yet",
     "emptyHint": "Create one on the phone or web client",
     "refresh": "Refresh",
-    "settings": "Settings"
+    "settings": "Settings",
+    "serverUnreachable": "Online, but the server is unreachable"
   },
   "chat": {
     "offline": "Offline",

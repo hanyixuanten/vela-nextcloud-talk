@@ -184,9 +184,12 @@ function request(options, credentials = account) {
       fail: (data, code) => {
         const detail = typeof data === 'string' ? data : (data && data.data) || ''
         // `code` is the platform's error code (DNS / TLS / connect); it is the
-        // one piece of evidence a hung handshake leaves behind.
+        // one piece of evidence a hung handshake leaves behind. When the
+        // platform sends no text, the code is the only thing worth showing, so
+        // put it in the message the watch actually renders.
         console.log('fetch fail: ' + method + ' ' + url + ' code=' + code + (detail ? ' ' + detail : ''))
-        const err = apiError(0, translated('index.fetchError', '网络请求失败') + (detail ? '：' + detail : ''))
+        const cause = detail || (code === undefined || code === null || code === '' ? '' : 'code=' + code)
+        const err = apiError(0, translated('index.fetchError', '网络请求失败') + (cause ? '：' + cause : ''))
         err.code = code
         finish(reject, err)
       }

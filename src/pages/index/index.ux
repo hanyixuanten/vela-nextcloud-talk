@@ -156,11 +156,26 @@ export default {
         state.rooms = this.rooms
       })
       .catch((err) => {
-        this.error = err && err.message ? err.message : '加载失败'
+        this.error = this.describeError(err)
       })
       .then(() => {
         this.loading = false
       })
+  },
+
+  /**
+   * A transport failure while the control probe (bilibili) succeeded is not a
+   * Wi-Fi problem: the watch is online and this particular host / TLS chain /
+   * port is not reachable. Say so instead of leaving a bare "network request
+   * failed" on screen.
+   */
+  describeError(err) {
+    const message = err && err.message ? err.message : '加载失败'
+    const control = state.controlProbe
+    if (control && control.ok && err && err.status === 0) {
+      return this.$t('index.serverUnreachable') + '：' + message
+    }
+    return message
   },
 
   toView(room) {

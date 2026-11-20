@@ -32,6 +32,12 @@ export default {
   // so a launch that failed the probe cannot reach the main UI at all.
   online: true,
   networkChecked: false,
-  launchAllowed: false
+  launchAllowed: false,
+
+  // Advisory probes from the launch gate, both `{ ok, status, code, detail,
+  // timedOut, ms, url }` or null. Never gate entry (design.md §9); comparing
+  // them tells "no usable internet" apart from "this host is unreachable".
+  controlProbe: null,
+  serverProbe: null
 
 }

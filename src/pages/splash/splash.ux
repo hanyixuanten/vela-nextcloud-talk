@@ -57,19 +57,45 @@ export default {
         state.settings = settings
         api.configure(settings)
         state.ready = store.hasAccount(settings)
-        return network.checkNetwork(settings)
+        return network.checkSignal()
       })
       .catch((err) => {
         console.log('launch gate failed: ' + ((err && err.message) || err))
-        return false
+        return { online: false, type: '' }
       })
-      .then((online) => {
+      .then((signal) => {
         state.networkChecked = true
-        state.online = online
-        state.launchAllowed = online
-        const target = routeAfterGate(online, store.hasAccount(state.settings))
-        console.log('launch gate: online=' + online + ' → ' + target)
+        state.online = signal.online
+        state.launchAllowed = signal.online
+        const target = routeAfterGate(signal.online, store.hasAccount(state.settings))
+        console.log(
+          'launch gate: type=' + (signal.type || 'unknown') + ' online=' + signal.online +
+          ' → ' + target
+        )
         router.replace({ uri: target })
+        // Only after the route is decided: a probe must never hold the launch
+        // screen (that is exactly how the old gate produced a dead end).
+        if (signal.online) this.probe()
+      })
+  },
+
+  /**
+   * Advisory evidence for the first request's error message and the log:
+   * bilibili answers + status.php fails means this host / TLS chain / port is
+   * unreachable, not that the watch is offline.
+   */
+  probe() {
+    network.probeTargets(state.settings)
+      .then((result) => {
+        state.controlProbe = result.control
+        state.serverProbe = result.server
+        console.log(
+          'network evidence: control=' + (result.control && result.control.ok) +
+          ' server=' + (result.server ? result.server.ok : 'n/a')
+        )
+      })
+      .catch((err) => {
+        console.log('network probes failed: ' + ((err && err.message) || err))
       })
   }
 }
