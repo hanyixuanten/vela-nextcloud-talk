@@ -35,32 +35,25 @@
     "entry": "pages/splash",
     "pages": {
       "pages/splash": {
-        "component": "splash",
-        "path": "/splash"
+        "component": "splash"
       },
       "pages/index": {
-        "component": "index",
-        "path": "/"
+        "component": "index"
       },
       "pages/login": {
-        "component": "login",
-        "path": "/login"
+        "component": "login"
       },
       "pages/chat": {
-        "component": "chat",
-        "path": "/chat"
+        "component": "chat"
       },
       "pages/settings": {
-        "component": "settings",
-        "path": "/settings"
+        "component": "settings"
       },
       "pages/setup": {
-        "component": "setup",
-        "path": "/setup"
+        "component": "setup"
       },
       "pages/offline": {
-        "component": "offline",
-        "path": "/offline"
+        "component": "offline"
       }
     }
   },

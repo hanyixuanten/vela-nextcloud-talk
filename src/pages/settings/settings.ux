@@ -73,6 +73,7 @@ import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import api from '../../common/scripts/api'
 import keeperClient from '../../common/scripts/keeperClient'
+import { ROUTE } from '../../common/scripts/launch'
 import manifest from '../../manifest.json'
 
 const FONTS = ['small', 'normal', 'large']
@@ -195,11 +196,11 @@ export default {
   },
 
   openAccount() {
-    router.push({ uri: '/login' })
+    router.push({ uri: ROUTE.login })
   },
 
   openSetup() {
-    router.push({ uri: '/setup' })
+    router.push({ uri: ROUTE.setup })
   },
 
   openAbout() {
@@ -223,7 +224,7 @@ export default {
       api.configure({})
       prompt.showToast({ message: this.$t('settings.cleared'), duration: 1500 })
       // Back to the "no account" state, which starts at the setup page.
-      router.replace({ uri: '/setup' })
+      router.replace({ uri: ROUTE.setup })
     }).catch((err) => {
       console.log('clear data failed: ' + ((err && err.message) || err))
       prompt.showToast({ message: this.$t('settings.clearFailed'), duration: 2000 })

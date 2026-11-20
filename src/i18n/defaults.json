@@ -114,7 +114,12 @@
     "savedUnverified": "已保存；{message}"
   },
   "splash": {
-    "checking": "正在检查网络…"
+    "checking": "正在检查网络…",
+    "stageSettings": "读取设置…",
+    "stageNetwork": "检查网络…",
+    "stageRoute": "进入 {target}",
+    "stageRetry": "跳转重试…",
+    "stageAgain": "重试进入（第 {n} 次）"
   },
   "offline": {
     "title": "没有网络",

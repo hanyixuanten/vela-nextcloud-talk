@@ -31,6 +31,7 @@ import interconnect from '@system.interconnect'
 import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
+import { ROUTE } from '../../common/scripts/launch'
 import protocol from '../../common/scripts/protocol'
 import brightness from '@system.brightness'
 
@@ -197,9 +198,6 @@ export default {
         // launch gate as passed: the plugin can open this page directly (no
         // splash), and without this the exit below would bounce through
         // pages/splash and pay for a second probe.
-        state.launchAllowed = true
-        state.online = true
-        state.networkChecked = true
         state.settings = named
         api.configure(named)
         if (this.link !== link) return
@@ -208,7 +206,7 @@ export default {
         this.reply(link, { ok: true, requestId, message: this.$t('setup.saved'), displayName: named.displayName }, () => {
           this.exitTimer = setTimeout(() => {
             this.exitTimer = null
-            if (this.link === link) router.replace({ uri: '/' })
+            if (this.link === link) router.replace({ uri: ROUTE.home })
           }, 1600)
         })
       })
@@ -257,14 +255,14 @@ export default {
     // Reached as the first screen there is no page to go back to, so fall
     // through to the manual form instead of doing nothing.
     if (!store.hasAccount(state.settings || {})) {
-      router.replace({ uri: '/login' })
+      router.replace({ uri: ROUTE.login })
       return
     }
     router.back()
   },
 
   openLogin() {
-    router.replace({ uri: '/login' })
+    router.replace({ uri: ROUTE.login })
   }
 }
 </script>

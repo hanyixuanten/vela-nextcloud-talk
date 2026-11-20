@@ -91,6 +91,7 @@ import prompt from '@system.prompt'
 import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
+import { ROUTE } from '../../common/scripts/launch'
 
 function trimLastChar(text) {
   const source = String(text || '')
@@ -180,7 +181,7 @@ export default {
   },
 
   openSetup() {
-    router.replace({ uri: '/setup' })
+    router.replace({ uri: ROUTE.setup })
   },
 
   submit() {
@@ -235,7 +236,7 @@ export default {
             state.settings = named
             api.configure(named)
             prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
-            router.replace({ uri: '/' })
+            router.replace({ uri: ROUTE.home })
           })
       })
       .catch((err) => {

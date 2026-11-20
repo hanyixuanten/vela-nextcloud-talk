@@ -21,23 +21,9 @@ export default {
   // Conversation currently open in pages/chat: { token, name, ... }
   activeRoom: null,
 
-  // Last conversation list the keeper service saw while the app was away
-  // (see common/scripts/keeper.js). pages/index renders it before the network
-  // answer arrives, so unread badges survive a cold start.
-  backgroundSummary: null,
-
-  // Startup network gate (see common/scripts/network.js and pages/splash).
-  // The splash page is the router entry: it probes once per launch and only
-  // then sets `launchAllowed`. Every main page (会话 / 设置 / 聊天) checks it,
-  // so a launch that failed the probe cannot reach the main UI at all.
-  online: true,
-  networkChecked: false,
-  launchAllowed: false,
-
-  // Advisory probes from the launch gate, both `{ ok, status, code, detail,
-  // timedOut, ms, url }` or null. Never gate entry (design.md §9); comparing
-  // them tells "no usable internet" apart from "this host is unreachable".
-  controlProbe: null,
-  serverProbe: null
+  // Values that must survive a page switch (the keeper summary, the launch
+  // gate's probe evidence) do NOT live here: this module is inlined into every
+  // page bundle, so each page would get its own copy. They live on the app
+  // instance instead — see common/scripts/shared.js.
 
 }

@@ -13,11 +13,18 @@
 // The decision itself is a pure function so tests can pin it without a watch
 // runtime; the splash page only does the plumbing.
 
+// Page keys, not custom paths — the same form HyperBilibili uses and the one
+// the watch's router accepts (`uri: "pages/app/features/main"`). Custom `path`
+// values were removed from manifest.json: with them the gate's
+// `replace('/')` never landed on pages/index.
 export const ROUTE = {
-  splash: '/splash',
-  home: '/',
-  setup: '/setup',
-  offline: '/offline'
+  splash: 'pages/splash',
+  home: 'pages/index',
+  setup: 'pages/setup',
+  offline: 'pages/offline',
+  login: 'pages/login',
+  chat: 'pages/chat',
+  settings: 'pages/settings'
 }
 
 /**

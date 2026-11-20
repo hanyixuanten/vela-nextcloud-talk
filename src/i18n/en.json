@@ -114,7 +114,12 @@
     "savedUnverified": "Saved; {message}"
   },
   "splash": {
-    "checking": "Checking network…"
+    "checking": "Checking network…",
+    "stageSettings": "Reading settings…",
+    "stageNetwork": "Checking network…",
+    "stageRoute": "Opening {target}",
+    "stageRetry": "Retrying navigation…",
+    "stageAgain": "Retrying entry (#{n})"
   },
   "offline": {
     "title": "No network",

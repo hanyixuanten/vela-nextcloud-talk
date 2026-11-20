@@ -27,6 +27,12 @@ import fetch from '@system.fetch'
 
 export const PROBE_TIMEOUT_MS = 8000
 
+// `@system.network.getType` is the only thing the launch depends on, and on
+// some firmwares it simply never calls back (neither success nor fail), which
+// left the app on 「正在检查网络…」 forever. 4 s is far below any user's
+// patience and far above a healthy call.
+export const TYPE_TIMEOUT_MS = 4000
+
 // A public HTTPS host with a mainstream certificate chain, used only as a
 // control probe. Same role bilibili plays for HyperBilibili.
 export const CONTROL_URL = 'https://www.bilibili.com/'
@@ -35,24 +41,40 @@ function nowMs() {
   return typeof Date !== 'undefined' && Date.now ? Date.now() : 0
 }
 
-function networkType() {
+function networkType(timeoutMs) {
+  const limit = Number(timeoutMs) > 0 ? Number(timeoutMs) : TYPE_TIMEOUT_MS
   return new Promise((resolve) => {
+    let settled = false
+    let timer = null
+    const done = (type) => {
+      if (settled) return
+      settled = true
+      if (timer !== null) clearTimeout(timer)
+      resolve(type)
+    }
+    // A silent API must not brick the launch: report "unknown" and let the
+    // pages' own requests speak.
+    timer = setTimeout(() => {
+      console.log('network getType timed out after ' + limit + 'ms')
+      done('')
+    }, limit)
+
     if (!network || typeof network.getType !== 'function') {
       console.log('network api unavailable')
-      resolve('')
+      done('')
       return
     }
     try {
       network.getType({
-        success: (data) => resolve((data && data.type) || ''),
+        success: (data) => done((data && data.type) || ''),
         fail: (data, code) => {
           console.log('network getType failed, code = ' + code)
-          resolve('')
+          done('')
         }
       })
     } catch (err) {
       console.log('network getType threw: ' + ((err && err.message) || err))
-      resolve('')
+      done('')
     }
   })
 }
@@ -128,20 +150,31 @@ export function probeServer(baseUrl, timeoutMs) {
   return probeServerDetailed(baseUrl, timeoutMs).then((result) => result.ok)
 }
 
-/** The gate verdict: an interface exists and is not "none". */
+/**
+ * The gate verdict.
+ *
+ * Only an explicit "none" is a definitive offline signal. An empty answer
+ * means the API failed, is unimplemented, or answered late — that is not
+ * evidence of a dead network, and treating it as offline is what left the app
+ * on 「正在检查网络…」/「没有网络」 with no way forward. When in doubt we let the
+ * user in and let the first request say what is wrong.
+ */
 export function interfaceOnline(type) {
-  return Boolean(type) && type !== 'none'
+  return type !== 'none'
 }
 
 /**
- * Fast verdict for one launch: interface type only, no network round trip.
- * Resolves `{ online, type }`.
+ * Fast verdict for one launch: interface type only, no network round trip
+ * beyond `getType` itself (which is bounded by `TYPE_TIMEOUT_MS`).
+ * Resolves `{ online, type, known }`.
  */
-export function checkSignal() {
-  return networkType().then((type) => {
+export function checkSignal(options) {
+  const opts = options || {}
+  return networkType(opts.typeTimeoutMs).then((type) => {
     const online = interfaceOnline(type)
-    if (!online) console.log('network offline: type=' + (type || 'unknown'))
-    return { online: online, type: type }
+    const known = Boolean(type)
+    console.log('network verdict: type=' + (type || 'unknown') + ' online=' + online)
+    return { online: online, type: type, known: known }
   })
 }
 
@@ -187,6 +220,7 @@ export function checkNetwork() {
 
 export default {
   PROBE_TIMEOUT_MS,
+  TYPE_TIMEOUT_MS,
   CONTROL_URL,
   interfaceOnline,
   checkSignal,

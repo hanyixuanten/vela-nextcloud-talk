@@ -65,6 +65,7 @@ import fmt from '../../common/scripts/format'
 import { ROUTE } from '../../common/scripts/launch'
 import keeperClient from '../../common/scripts/keeperClient'
 import { accountKey } from '../../common/scripts/keeper'
+import { sharedOf } from '../../common/scripts/shared'
 
 export default {
   data: {
@@ -98,13 +99,14 @@ export default {
   onShow() {
     const ready = this.readyPromise || Promise.resolve({})
     ready.then((settings) => {
-      if (!state.launchAllowed) {
-        // Entered without passing the launch gate — the AstroBox plugin can
-        // launch `pages/index` directly, and a routed-back main page would
-        // otherwise show 会话/设置 on a dead network. Bounce through the gate.
-        router.replace({ uri: ROUTE.splash })
-        return
-      }
+      // No "did the gate pass?" check here on purpose. The verdict lives in
+      // another bundle's memory (every page gets its own copy of
+      // common/scripts/state.js), so any attempt to read it bounced straight
+      // back to /splash and looped: 检查网络… → 进入 / → 检查网络… . The gate is
+      // advisory anyway — pages/splash sends a definitive `none` to /offline
+      // before this page is ever built — so an entry without it (the AstroBox
+      // plugin launches pages/index directly) simply fetches and reports its
+      // own errors.
       this.accountLabel = settings.displayName || settings.user || ''
       if (!store.hasAccount(settings)) {
         // First launch: land where the AstroBox plugin can actually reach us.
@@ -114,7 +116,8 @@ export default {
       }
       // Paint the retained list first: on a cold start with no network this is
       // the only thing that can show how much is unread (design.md §11).
-      this.applySummary(state.backgroundSummary, settings)
+      const shared = sharedOf(this, state)
+      this.applySummary(shared && shared.backgroundSummary, settings)
       this.refresh()
     })
   },
@@ -171,7 +174,8 @@ export default {
    */
   describeError(err) {
     const message = err && err.message ? err.message : '加载失败'
-    const control = state.controlProbe
+    const shared = sharedOf(this, state)
+    const control = shared && shared.controlProbe
     if (control && control.ok && err && err.status === 0) {
       return this.$t('index.serverUnreachable') + '：' + message
     }
@@ -196,13 +200,13 @@ export default {
     if (!room) return
     state.activeRoom = room
     router.push({
-      uri: '/chat',
+      uri: ROUTE.chat,
       params: { token: room.token, name: room.name }
     })
   },
 
   openSettings() {
-    router.push({ uri: '/settings' })
+    router.push({ uri: ROUTE.settings })
   }
 }
 </script>

@@ -5,7 +5,23 @@ import fmt from './common/scripts/format'
 import state from './common/scripts/state'
 import keeperClient from './common/scripts/keeperClient'
 
+// The only truly cross-page object in the app. Pages reach it through
+// `this.$app.$def.shared`; see common/scripts/shared.js for why module level
+// state cannot do this job (each page bundle gets its own copy).
+const shared = {
+  // Advisory probe evidence (bilibili control + configured server). Read by
+  // pages/index to turn a transport error into "the watch is online, this host
+  // is not".
+  controlProbe: null,
+  serverProbe: null,
+  // Last conversation list the keeper service saw while the app was away.
+  backgroundSummary: null
+}
+
 export default {
+  // Explicit key, not shorthand: pages reach it as $app.$def.shared.
+  shared: shared,
+
   onCreate() {
     // `onShow` fires after this; assume visible until it says otherwise so a
     // slow settings read cannot start the background poller in the foreground.
@@ -39,7 +55,9 @@ export default {
     }
     keeperClient.start({
       onSummary: (summary) => {
-        state.backgroundSummary = summary
+        // Pages/index reads this from `$app.$def.shared` (a module level
+        // variable here would never reach another bundle).
+        shared.backgroundSummary = summary
       }
     })
     // onShow may have fired before the async settings load finished, in which

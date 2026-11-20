@@ -7,9 +7,10 @@
      back here — that is why 设置 and 会话 are unreachable on a dead network:
      they are only ever entered from a page the gate has already opened.
 
-     Nothing here is tappable: while the probe runs (up to the 8 s timeout)
-     there is no button to press, so a slow network cannot be mistaken for a
-     working one. -->
+     The page always says which stage it is in (`stage`): a stuck launch has to
+     be readable from the watch itself, because there is no log console on a
+     wrist. Every wait here is bounded — `getType` by TYPE_TIMEOUT_MS and the
+     route by a retry — so 「正在检查网络…」 can never be the final state. -->
 <template>
   <div class="app-page">
     <image class="app-bg" src="/common/images/bg/pink.png"></image>
@@ -17,7 +18,7 @@
     <div class="brand">
       <image class="logo" src="/common/images/icon.png"></image>
       <text class="name t-title">{{ $t('app.name') }}</text>
-      <text class="status t-label">{{ $t('splash.checking') }}</text>
+      <text class="status t-label">{{ stage || $t('splash.checking') }}</text>
     </div>
   </div>
 </template>
@@ -28,11 +29,20 @@ import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import network from '../../common/scripts/network'
+import { sharedOf } from '../../common/scripts/shared'
 import { routeAfterGate } from '../../common/scripts/launch'
+
+// Module scope: this survives page re-creation inside the same app process, so
+// a gate that is entered again says so on screen instead of looking identical
+// to the first run. Without that, a navigation loop is invisible on a watch.
+let gateRuns = 0
 
 export default {
   data: {
-    checking: false
+    checking: false,
+    // Human readable stage, rendered under the app name. Kept short: a watch
+    // line holds ~14 CJK glyphs at this size.
+    stage: ''
   },
 
   onShow() {
@@ -48,8 +58,14 @@ export default {
   gate() {
     if (this.checking) return
     this.checking = true
-    // A launch is only allowed to reach the main pages after this run passes.
-    state.launchAllowed = false
+    gateRuns += 1
+    // A second entry means something sent us back here (or the replace did not
+    // take). Say it out loud on the watch: 「重试进入（第 2 次）」 is a very
+    // different bug from a hung first run.
+    this.stage = gateRuns > 1
+      ? this.$t('splash.stageAgain').replace('{n}', gateRuns)
+      : this.$t('splash.stageSettings')
+    if (gateRuns > 1) console.log('launch gate re-entered, run #' + gateRuns)
 
     store.load()
       .catch(() => ({}))
@@ -57,26 +73,48 @@ export default {
         state.settings = settings
         api.configure(settings)
         state.ready = store.hasAccount(settings)
+        this.stage = this.$t('splash.stageNetwork')
         return network.checkSignal()
       })
       .catch((err) => {
         console.log('launch gate failed: ' + ((err && err.message) || err))
-        return { online: false, type: '' }
+        return { online: false, type: 'none' }
       })
       .then((signal) => {
-        state.networkChecked = true
-        state.online = signal.online
-        state.launchAllowed = signal.online
+        // Nothing is published about the verdict on purpose: pages/index must
+        // not try to read it (that check is what looped), and the gate is
+        // advisory anyway.
         const target = routeAfterGate(signal.online, store.hasAccount(state.settings))
         console.log(
           'launch gate: type=' + (signal.type || 'unknown') + ' online=' + signal.online +
           ' → ' + target
         )
-        router.replace({ uri: target })
+        this.stage = this.$t('splash.stageRoute').replace('{target}', target) +
+          (gateRuns > 1 ? ' #' + gateRuns : '')
+        this.navigate(target)
         // Only after the route is decided: a probe must never hold the launch
         // screen (that is exactly how the old gate produced a dead end).
         if (signal.online) this.probe()
       })
+  },
+
+  /**
+   * A `router.replace` issued in the same tick as `onShow` can be dropped by
+   * the router, which leaves the gate looking hung. Give the router a tick,
+   * then check once whether we are still visible and try again.
+   */
+  navigate(target) {
+    setTimeout(() => {
+      router.replace({ uri: target })
+      setTimeout(() => {
+        // Only retry when the runtime explicitly says this page is still
+        // visible; an unimplemented `$visible` must not cause a second push.
+        if (this.$visible !== true) return
+        console.log('launch gate: still on splash after replace, retrying ' + target)
+        this.stage = this.$t('splash.stageRetry')
+        router.replace({ uri: target })
+      }, 1200)
+    }, 30)
   },
 
   /**
@@ -87,8 +125,11 @@ export default {
   probe() {
     network.probeTargets(state.settings)
       .then((result) => {
-        state.controlProbe = result.control
-        state.serverProbe = result.server
+        const shared = sharedOf(this, state)
+        if (shared) {
+          shared.controlProbe = result.control
+          shared.serverProbe = result.server
+        }
         console.log(
           'network evidence: control=' + (result.control && result.control.ok) +
           ' server=' + (result.server ? result.server.ok : 'n/a')

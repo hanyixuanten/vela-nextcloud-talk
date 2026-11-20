@@ -34,9 +34,8 @@ export default {
   onShow() {
     // Coming back here means the previous verdict was "offline": the next
     // pass through the gate must probe again instead of trusting the cache.
-    state.online = false
-    state.networkChecked = false
-    state.launchAllowed = false
+    // Nothing to invalidate: the gate publishes no verdict, retry simply runs
+    // the gate again (it owns the only probe and the only verdict).
   },
 
   retry() {
