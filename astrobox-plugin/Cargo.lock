@@ -10,9 +10,9 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "astrobox-ng-wit"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c7afd9b404713d93b70abcff96af47fa9df4b66df5336adc551c0d544862e4a"
+checksum = "9584bef07642c445d145b96c31aad0f4d45c5eb3d7fe276e370c26a7256bcb04"
 dependencies = [
  "wit-bindgen",
 ]
