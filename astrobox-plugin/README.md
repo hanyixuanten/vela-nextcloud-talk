@@ -22,7 +22,7 @@ AstroBox (插件 UI)  ──interconnect──>  手表 Talk (pages/setup)
 astrobox-plugin/
 ├── Cargo.toml              # cdylib，target 见 .cargo/config.toml
 ├── .cargo/config.toml      # build.target = wasm32-wasip2
-├── manifest.json           # 插件清单（版本 0.1.12、entry / wasi_version / api_level / permissions）
+├── manifest.json           # 插件清单（版本 0.1.13、entry / wasi_version / api_level / permissions）
 ├── icon.png
 ├── src/
 │   ├── lib.rs              # 生命周期、事件入口、发送流程
@@ -52,7 +52,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.12.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.13.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里同时装了发行版 rustc（没有 wasm std），`build_dist.py` 调用的 `cargo` 可能是错的那个，会报 `can't find crate for core`。用 rustup 的 cargo：

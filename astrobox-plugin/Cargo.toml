@@ -1,6 +1,6 @@
 [package]
 name = "nctalk-credential"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 description = "Push Nextcloud Talk credentials to the Vela watch app from AstroBox"
 
