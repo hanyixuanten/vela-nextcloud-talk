@@ -1,20 +1,23 @@
 <import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
 
 <template>
-  <div class="page">
+  <div class="app-page">
+    <image class="app-bg" src="/common/images/bg/pink.png"></image>
+
     <!-- Normal state: header, message list, input bar -->
     <div class="main" show="{{!editing}}">
-      <div class="header">
+      <div class="bar">
         <div class="back" @click="goBack">
-          <text class="back-text">‹</text>
+          <text class="back-icon">‹</text>
         </div>
-        <text class="title">{{ title }}{{ error ? ' · ' + $t('chat.offline') : '' }}</text>
+        <text class="bar-title">{{ title }}</text>
+        <text class="t-caption offline-mark" show="{{error}}">{{ $t('chat.offline') }}</text>
       </div>
 
       <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
         <div class="list">
           <div class="msg {{ $item.mine ? 'msg-mine' : '' }} {{ $item.id === actionId ? 'msg-selected' : '' }}" for="{{messages}}" @longpress="selectMessage($item.id)">
-            <text class="msg-meta">{{ $item.meta }}</text>
+            <text class="msg-meta {{ $item.mine ? 'msg-meta-mine' : '' }}">{{ $item.meta }}</text>
             <text class="msg-text {{ $item.mine ? 'msg-text-mine' : '' }}" style="font-size: {{ fontSize }}px;">{{ $item.text }}</text>
             <text class="reaction-summary" if="{{!!$item.reactionSummary}}">{{ $item.reactionSummary }}</text>
           </div>
@@ -79,11 +82,11 @@
         <text class="editor-text" @click="stopEdit">{{ draftView || $t('chat.placeholder') }}</text>
       </div>
       <div class="editor-actions">
-        <div class="ghost" @click="stopEdit">
-          <text class="ghost-text">{{ $t('common.cancel') }}</text>
+        <div class="pill editor-cancel" @click="stopEdit">
+          <text class="pill-small-text">{{ $t('common.cancel') }}</text>
         </div>
-        <div class="ghost ghost-primary" @click="send">
-          <text class="ghost-text ghost-primary-text">{{ sending ? $t('chat.sending') : $t('chat.send') }}</text>
+        <div class="pill pill-primary editor-send" @click="send">
+          <text class="pill-small-text">{{ sending ? $t('chat.sending') : $t('chat.send') }}</text>
         </div>
       </div>
     </div>
@@ -569,13 +572,7 @@ export default {
 </script>
 
 <style>
-.page {
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  background-color: #000000;
-}
+@import "../../common/styles/theme.css";
 
 .main {
   flex: 1;
@@ -584,34 +581,13 @@ export default {
   align-items: center;
 }
 
-.header {
-  width: 340px;
-  height: 56px;
-  margin-top: 60px;
-  flex-direction: row;
-  align-items: center;
+.bar {
+  margin-top: 10px;
+  margin-bottom: 6px;
 }
 
-.back {
-  width: 44px;
-  height: 44px;
-  border-radius: 22px;
-  background-color: #14181d;
-  justify-content: center;
-  align-items: center;
-}
-
-.back-text {
-  font-size: 26px;
-  color: #cbd5e1;
-}
-
-.title {
-  width: 284px;
-  margin-left: 12px;
-  font-size: 26px;
-  color: #ffffff;
-  text-overflow: ellipsis;
+.offline-mark {
+  margin-left: 8px;
 }
 
 .scroll {
@@ -620,106 +596,120 @@ export default {
 }
 
 .list {
-  width: 360px;
-  margin-left: 60px;
-  padding-bottom: 10px;
+  width: 100%;
+  padding-bottom: 8px;
   flex-direction: column;
+  align-items: center;
 }
 
+/* Bubbles, template colours: grey surface for others, the single pink accent
+ * for your own messages (dark text keeps it readable on pink). */
 .msg {
-  width: 332px;
-  margin-top: 8px;
-  padding-left: 14px;
-  padding-right: 14px;
-  padding-top: 8px;
-  padding-bottom: 10px;
-  border-radius: 16px;
-  background-color: #14181d;
+  width: 82%;
+  margin-top: 10px;
+  border-radius: 26px;
+  background-color: #262626;
   flex-direction: column;
 }
 
 .msg-mine {
-  background-color: #073a52;
-}
-
-.msg-meta {
-  font-size: 15px;
-  color: #6f7c8a;
-}
-
-.msg-text {
-  margin-top: 4px;
-  color: #e8eef5;
-}
-
-.msg-text-mine {
-  text-align: right;
+  background-color: #ff7da8;
 }
 
 .msg-selected {
-  background-color: #24526c;
+  background-color: #3b3b3b;
+}
+
+.msg-meta {
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 12px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #9c9c9c;
+}
+
+.msg-meta-mine {
+  color: #56232f;
+}
+
+.msg-text {
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 4px;
+  margin-bottom: 12px;
+  line-height: 32px;
+  color: #ffffff;
+}
+
+.msg-text-mine {
+  color: #1a1a1a;
+  text-align: right;
 }
 
 .reaction-summary {
-  margin-top: 4px;
-  color: #b8d9fa;
-  font-size: 16px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-bottom: 12px;
+  font-size: 17px;
+  color: #ffb3c8;
 }
 
 .reaction-label {
-  font-size: 24px;
+  font-size: 26px;
   color: #ffffff;
 }
 
 .placeholder {
-  width: 340px;
-  padding-top: 40px;
+  width: 78%;
+  padding-top: 48px;
   flex-direction: column;
   align-items: center;
 }
 
 .placeholder-hint {
-  font-size: 18px;
-  color: #5b6672;
+  font-size: 20px;
+  color: #9c9c9c;
   text-align: center;
 }
 
 .placeholder-error {
-  font-size: 20px;
-  color: #ff8a80;
+  font-size: 21px;
+  color: #ff8095;
   text-align: center;
 }
 
 .history-action {
-  align-self: center;
   width: 220px;
-  height: 48px;
-  margin-bottom: 10px;
+  height: 52px;
+  margin-top: 14px;
+  border-radius: 26px;
+  background-color: #262626;
   justify-content: center;
   align-items: center;
-  border-radius: 20px;
-  background-color: #262626;
 }
 
 .history-label {
-  color: #b8d9fa;
   font-size: 20px;
+  font-weight: 600;
+  color: #ff7da8;
 }
 
 .inputbar {
-  width: 248px;
-  height: 52px;
+  width: 72%;
+  height: 58px;
   margin-top: 8px;
-  margin-bottom: 16px;
-  border-radius: 26px;
-  background-color: #14181d;
+  margin-bottom: 18px;
+  border-radius: 29px;
+  background-color: #262626;
+  flex-direction: row;
   justify-content: center;
   align-items: center;
 }
 
 .input-placeholder {
-  font-size: 20px;
-  color: #6f7c8a;
+  font-size: 21px;
+  color: #9c9c9c;
 }
 
 .editor {
@@ -735,20 +725,26 @@ export default {
   flex-direction: column;
   justify-content: flex-end;
   align-items: center;
-  padding-bottom: 4px;
 }
 
 .editor-name {
-  font-size: 17px;
-  color: #6f7c8a;
+  width: 78%;
+  font-size: 18px;
+  color: #9c9c9c;
+  text-align: center;
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
 .editor-text {
-  width: 320px;
-  margin-top: 6px;
-  font-size: 22px;
-  color: #e8eef5;
+  width: 78%;
+  margin-top: 8px;
+  font-size: 26px;
+  font-weight: 500;
+  color: #ffffff;
   text-align: center;
+  lines: 2;
+  text-overflow: ellipsis;
 }
 
 .reply-bar {
@@ -764,130 +760,100 @@ export default {
 }
 
 .reply-clear {
-  width: 46px;
+  width: 48px;
   height: 100%;
   justify-content: center;
   align-items: center;
 }
 
 .reply-preview {
-  width: 204px;
-  height: 36px;
-  border-radius: 18px;
-  background-color: #14181d;
+  width: 200px;
+  height: 38px;
+  border-radius: 19px;
+  background-color: #1f1f1f;
 }
 
-.reply-label, .reply-summary {
-  font-size: 18px;
-  color: #b8d9fa;
+.reply-label {
+  font-size: 20px;
+  font-weight: 600;
+  color: #ff7da8;
 }
 
 .reply-summary {
-  width: 148px;
-  margin-left: 10px;
+  width: 146px;
+  margin-left: 12px;
+  font-size: 18px;
+  color: #d9d9d9;
   lines: 1;
   text-overflow: ellipsis;
 }
 
 .editor-actions {
-  width: 280px;
-  margin-top: 12px;
+  width: 78%;
+  margin-top: 14px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
 
-.ghost {
-  width: 132px;
-  height: 46px;
-  border-radius: 23px;
-  background-color: #1c2127;
-  justify-content: center;
-  align-items: center;
-}
-
-.ghost-primary {
-  background-color: #0082c9;
-}
-
-.ghost-text {
-  font-size: 21px;
-  color: #cbd5e1;
-}
-
-.ghost-primary-text {
-  color: #ffffff;
-}
-
-.title, .editor-name {
-  lines: 1;
-  text-overflow: ellipsis;
-}
-.editor-text {
-  lines: 2;
-  text-overflow: ellipsis;
+.editor-cancel, .editor-send {
+  width: 46%;
+  height: 58px;
 }
 
 /* if true: process.env.SHAPE === 'CIRCLE' */
+/* Same chord limits as the list page: the bar starts at y=70 (chord ~340, so
+ * the bar is 70% wide) and the input pill has to stay inside the ~277 px chord
+ * at y=436, which caps it at about half the screen. */
+.bar {
+  width: 70%;
+  margin-top: 70px;
+}
+.msg {
+  width: 82%;
+}
 .inputbar {
-  width: 244px;
-  margin-bottom: 38px;
-}
-.editor {
-  height: 150px;
-}
-.editor-name {
-  width: 204px;
-  text-align: center;
+  width: 50%;
+  margin-bottom: 40px;
 }
 .editor-text {
-  width: 272px;
+  width: 62%;
+}
+.editor-name {
+  width: 62%;
+}
+.editor-actions {
+  width: 62%;
 }
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
-.header, .list, .inputbar, .editor-actions {
-  width: 432px;
-}
-.header {
-  height: 76px;
-  margin-top: 0px;
-}
-.title {
-  width: 376px;
-}
-.list {
-  margin-left: 24px;
+.bar {
+  width: 86%;
 }
 .msg {
-  width: 390px;
-  align-self: flex-start;
+  width: 86%;
 }
 .msg-mine {
   align-self: flex-end;
 }
-.placeholder {
-  width: 432px;
-}
 .inputbar {
-  height: 60px;
+  width: 78%;
+  height: 62px;
+  border-radius: 31px;
   margin-bottom: 16px;
-  border-radius: 20px;
 }
 .editor {
   height: 246px;
 }
 .editor-name, .editor-text {
-  width: 432px;
-  text-align: center;
+  width: 86%;
 }
 .editor-text {
   lines: 3;
 }
-.ghost {
-  width: 208px;
-  height: 56px;
-  border-radius: 20px;
+.editor-actions {
+  width: 86%;
 }
 /* endif */
 </style>

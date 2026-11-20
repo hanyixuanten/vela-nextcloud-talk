@@ -1,0 +1,210 @@
+/* Shared design system, ported from the HyperBilibili watch template
+ * (https://github.com/Searchstars/Hyperbilibili).
+ *
+ * Why a shared file: every .ux style block is page scoped, and Vela has no CSS
+ * variables, so the same tokens would otherwise be copied five times and drift.
+ * `@import` is resolved and inlined at build time (verified: the rules land in
+ * the compiled page bundle), so this costs nothing at runtime.
+ *
+ * Page structure the template uses, and the reason for each choice:
+ *   black page + one coloured glow image  → depth without a heavy blur shader
+ *   #262626 rounded cards on top of it    → readable panels over the glow
+ *   one pink accent, everything else grey → a single "this is tappable" signal
+ *   weight 600 headings, 500 body         → the watch font has no real bold
+ */
+
+.app-page {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  background-color: #000000;
+  /* A page must never scroll: scrolling is what let the login actions slip
+   * under the keyboard. Lists scroll inside their own <scroll>. */
+  overflow: hidden;
+}
+
+/* Decorative only: sits under the content, so it must never eat a tap. */
+.app-bg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 0.85;
+}
+
+/* ---------- type ---------- */
+
+.t-display {
+  font-size: 44px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.t-title {
+  font-size: 32px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.t-body {
+  font-size: 26px;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.t-label {
+  font-size: 20px;
+  font-weight: 500;
+  color: #9c9c9c;
+}
+
+.t-caption {
+  font-size: 18px;
+  font-weight: 500;
+  color: #8a8a8a;
+}
+
+.t-accent {
+  color: #ff7da8;
+}
+
+.t-dim {
+  color: #9c9c9c;
+}
+
+.t-error {
+  color: #ff8095;
+}
+
+.t-ok {
+  color: #7bd88f;
+}
+
+/* ---------- surfaces ---------- */
+
+.card {
+  width: 82%;
+  border-radius: 30px;
+  background-color: #262626;
+}
+
+.card-soft {
+  border-radius: 24px;
+  background-color: #1f1f1f;
+}
+
+/* Hairline between rows inside one card, not around every row. */
+.divider {
+  width: 86%;
+  height: 1px;
+  background-color: #333333;
+}
+
+/* ---------- buttons ---------- */
+
+.pill {
+  height: 76px;
+  border-radius: 90px;
+  background-color: #262626;
+  justify-content: center;
+  align-items: center;
+}
+
+.pill-primary {
+  background-color: #ff7da8;
+}
+
+.pill-busy {
+  background-color: #6b4152;
+}
+
+.pill-text {
+  font-size: 30px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.pill-text-dark {
+  color: #1a1a1a;
+}
+
+.pill-small {
+  height: 56px;
+  border-radius: 28px;
+}
+
+.pill-small-text {
+  font-size: 22px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* ---------- common blocks ---------- */
+
+.bar {
+  width: 82%;
+  height: 72px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background-color: #262626;
+  justify-content: center;
+  align-items: center;
+}
+
+.back-icon {
+  font-size: 30px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.bar-title {
+  flex: 1;
+  margin-left: 12px;
+  font-size: 30px;
+  font-weight: 600;
+  color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  width: 40px;
+  height: 30px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 15px;
+  background-color: #ff7da8;
+  justify-content: center;
+  align-items: center;
+}
+
+.badge-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  justify-content: center;
+  align-items: center;
+}
+
+.avatar-text {
+  font-size: 26px;
+  font-weight: 600;
+  color: #ffffff;
+}

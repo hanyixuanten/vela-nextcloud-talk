@@ -2,7 +2,7 @@
 
 小米 Vela（Xiaomi Watch / 手环）上的 Nextcloud Talk 客户端，纯 Vela JS 快应用实现。
 
-骨架仓库：登录、会话列表、收发消息、设置四条主链路都已跑通，UI 以 480 为设计宽度，并针对圆屏和矩形屏分别打包，输入法接入 [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)（已内置到 `src/components/InputMethod/`，支持中文拼音 / 英文 / 日语罗马字）。
+骨架仓库：登录、会话列表、收发消息、设置四条主链路都已跑通，UI 以 480 为设计宽度、视觉与组件规范移植自 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的手表模板（黑底彩色辉光 + 圆角卡片 + 单主色胶囊按钮），并针对圆屏和矩形屏分别打包，输入法接入 [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)（已内置到 `src/components/InputMethod/`，支持中文拼音 / 英文 / 日语罗马字）。
 
 ```
 手表 ──HTTPS Basic Auth（应用密码）──> Nextcloud Talk OCS API
@@ -143,6 +143,8 @@ vela-nextcloud-talk/
 │   │   └── en.json
 │   ├── common/
 │   │   ├── images/icon.png       # 192×192，由 scripts/gen-icon.py 生成
+│   │   ├── images/bg/            # 页面辉光背景（pink/blue），由 scripts/gen-bg.py 生成
+│   │   ├── styles/theme.css      # 设计令牌，各页 @import 后编译期内联
 │   │   └── scripts/
 │   │       ├── api.js            # Nextcloud Talk OCS 客户端
 │   │       ├── base64.js         # Basic Auth 用的 base64（无 btoa 依赖）
@@ -151,6 +153,7 @@ vela-nextcloud-talk/
 │   │       ├── format.js         # 时间、Rich Object String、头像取色
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
 │   ├── components/
+│   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
 │   │   └── InputMethod/          # 三方输入法（vendored，勿手改）
 │   └── pages/
 │       ├── index/index.ux        # 会话列表
@@ -161,6 +164,7 @@ vela-nextcloud-talk/
 ├── scripts/
 │   ├── build-watch.cjs           # 屏幕条件预处理 + aiot 打包
 │   ├── gen-icon.py               # 零依赖 PNG 生成
+│   ├── gen-bg.py                 # 页面辉光背景 PNG（纯 Python 写 PNG）
 │   ├── seed-watch-chat.mjs       # 向真机测试房间写入基线消息
 │   └── sync-input-method.sh      # 重新拉取并覆盖 InputMethod
 ├── astrobox-plugin/              # 手机侧配置凭据的 AstroBox 插件（Rust → wasm）
@@ -222,7 +226,15 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 可用宽度 = 2 * sqrt(240² - (y - 240)²)
 ```
 
-所以 `y = 30` 时只有约 230px 宽，`y = 60` 时约 300px。这直接决定了头部不能贴顶：聊天页的标题栏从 `y = 60` 开始，返回键圆心到屏幕中心距离 211px（< 240）才保证完整可见。具体取值见 [`docs/design.md`](docs/design.md)。
+所以 `y = 30` 时只有约 230px 宽，`y = 70` 时约 340px，到底部 `y = 436` 又只剩约 277px。这直接决定了头部不能贴顶、底部不能撑满：聊天页标题栏从 `y = 70` 开始且宽 70%，输入条只有 50% 宽；会话卡片 82% 宽则要等到 `y ≥ 110`。具体取值见 [`docs/design.md`](docs/design.md)。
+
+### 界面与设计系统
+
+配色、圆角、字重与组件形态移植自 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili)：黑底 + 彩色辉光背景、`#262626` 圆角卡片、唯一主色 `#FF7DA8`、全圆胶囊按钮。
+
+- `src/common/styles/theme.css` 只放令牌类，各页 `<style>` 里 `@import` 后由打包器内联（已验证规则出现在 `pages/*/*.js`），运行时不额外加载。
+- 按钮统一走 `src/components/ui/AppPill.ux`；宽度用 prop 传入，因为 Vela 只应用组件自身的样式块，父级的 `class`/`style` 不会透传。
+- 页面背景是 `scripts/gen-bg.py` 生成的 256×256 辉光 PNG（纯 Python 写 PNG，零依赖），`object-fit: fill` 拉伸铺满。
 
 ### 输入态为什么要两个页面状态
 

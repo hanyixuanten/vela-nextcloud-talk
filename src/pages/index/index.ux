@@ -1,12 +1,16 @@
+<import name="app-pill" src="../../components/ui/AppPill.ux"></import>
+
 <template>
-  <div class="page">
-    <div class="header">
-      <text class="title">{{ $t('index.title') }}</text>
+  <div class="app-page">
+    <image class="app-bg" src="/common/images/bg/pink.png"></image>
+
+    <div class="head">
+      <text class="t-title">{{ $t('index.title') }}</text>
     </div>
 
     <scroll class="scroll" scroll-y="{{true}}">
       <div class="list">
-        <div class="row" for="{{rooms}}" @click="openRoom($idx)">
+        <div class="room" for="{{rooms}}" @click="openRoom($idx)">
           <div class="avatar" style="background-color: {{ $item.color }};">
             <text class="avatar-text">{{ $item.initial }}</text>
           </div>
@@ -22,31 +26,25 @@
           </div>
         </div>
 
-        <div class="placeholder" show="{{!loading && !error && rooms.length === 0}}">
-          <text class="placeholder-title">{{ $t('index.empty') }}</text>
-          <text class="placeholder-hint">{{ $t('index.emptyHint') }}</text>
+        <div class="empty" show="{{!loading && !error && rooms.length === 0}}">
+          <text class="t-body">{{ $t('index.empty') }}</text>
+          <text class="empty-hint">{{ $t('index.emptyHint') }}</text>
         </div>
 
-        <div class="placeholder" show="{{!loading && error}}">
-          <text class="placeholder-error">{{ error }}</text>
-          <div class="retry" @click="refresh">
-            <text class="retry-text">{{ $t('common.retry') }}</text>
-          </div>
+        <div class="empty" show="{{!loading && error}}">
+          <text class="t-error empty-message">{{ error }}</text>
+          <app-pill text="{{ $t('common.retry') }}" width="220px" primary="true" @click="refresh"></app-pill>
         </div>
 
-        <div class="placeholder" show="{{loading && rooms.length === 0}}">
-          <text class="placeholder-hint">{{ $t('index.loading') }}</text>
+        <div class="empty" show="{{loading && rooms.length === 0}}">
+          <text class="empty-hint">{{ $t('index.loading') }}</text>
         </div>
       </div>
     </scroll>
 
     <div class="footer">
-      <div class="foot-btn" @click="refresh">
-        <text class="foot-text">{{ $t('index.refresh') }}</text>
-      </div>
-      <div class="foot-btn" @click="openSettings">
-        <text class="foot-text">{{ $t('index.settings') }}</text>
-      </div>
+      <app-pill text="{{ $t('index.refresh') }}" width="46%" small="true" @click="refresh"></app-pill>
+      <app-pill text="{{ $t('index.settings') }}" width="46%" small="true" @click="openSettings"></app-pill>
     </div>
   </div>
 </template>
@@ -142,25 +140,16 @@ export default {
 </script>
 
 <style>
-.page {
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  background-color: #000000;
-}
+@import "../../common/styles/theme.css";
 
-.header {
-  width: 360px;
-  height: 58px;
+/* A card per conversation, like the template's rows: the surface colour is
+ * what separates items, so there are no row borders to fight the glow. */
+.head {
+  height: 108px;
+  padding-top: 16px;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-}
-
-.title {
-  font-size: 30px;
-  font-weight: bold;
-  color: #ffffff;
 }
 
 .scroll {
@@ -169,196 +158,120 @@ export default {
 }
 
 .list {
-  width: 360px;
-  margin-left: 60px;
+  width: 100%;
+  padding-top: 4px;
+  padding-bottom: 8px;
   flex-direction: column;
+  align-items: center;
 }
 
-.row {
-  width: 360px;
-  height: 68px;
+.room {
+  width: 82%;
+  height: 104px;
+  margin-top: 10px;
+  border-radius: 28px;
+  background-color: #262626;
   flex-direction: row;
   align-items: center;
 }
 
 .avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 24px;
-  justify-content: center;
-  align-items: center;
-}
-
-.avatar-text {
-  font-size: 24px;
-  color: #ffffff;
-  font-weight: bold;
+  margin-left: 16px;
 }
 
 .mid {
   flex: 1;
   margin-left: 14px;
+  margin-right: 8px;
   flex-direction: column;
   justify-content: center;
 }
 
 .room-name {
-  width: 194px;
-  font-size: 24px;
-  color: #e8eef5;
+  width: 100%;
+  font-size: 26px;
+  font-weight: 600;
+  color: #ffffff;
+  lines: 1;
   text-overflow: ellipsis;
 }
 
 .room-preview {
-  width: 194px;
-  font-size: 18px;
-  color: #6f7c8a;
-  margin-top: 2px;
+  width: 100%;
+  margin-top: 4px;
+  font-size: 19px;
+  font-weight: 500;
+  color: #9c9c9c;
+  lines: 1;
   text-overflow: ellipsis;
 }
 
 .right {
-  width: 86px;
+  width: 84px;
+  margin-right: 16px;
   flex-direction: column;
   align-items: flex-end;
 }
 
 .room-time {
-  font-size: 16px;
-  color: #5b6672;
-}
-
-.badge {
-  width: 34px;
-  height: 28px;
-  margin-top: 6px;
-  border-radius: 14px;
-  background-color: #0082c9;
-  justify-content: center;
-  align-items: center;
-}
-
-.badge-text {
   font-size: 17px;
-  color: #ffffff;
+  color: #8a8a8a;
 }
 
-.placeholder {
-  width: 340px;
-  padding-top: 60px;
+.empty {
+  width: 78%;
+  padding-top: 56px;
   flex-direction: column;
   align-items: center;
 }
 
-.placeholder-title {
-  font-size: 24px;
-  color: #a9b5c2;
-}
-
-.placeholder-hint {
-  margin-top: 10px;
-  font-size: 18px;
-  color: #5b6672;
+.empty-hint {
+  margin-top: 12px;
+  margin-bottom: 20px;
+  font-size: 20px;
+  color: #9c9c9c;
   text-align: center;
 }
 
-.placeholder-error {
-  font-size: 20px;
-  color: #ff8a80;
+.empty-message {
+  margin-bottom: 20px;
+  font-size: 22px;
   text-align: center;
-}
-
-.retry {
-  margin-top: 18px;
-  height: 48px;
-  padding-left: 28px;
-  padding-right: 28px;
-  border-radius: 24px;
-  background-color: #1c2127;
-  justify-content: center;
-  align-items: center;
-}
-
-.retry-text {
-  font-size: 20px;
-  color: #cbd5e1;
 }
 
 .footer {
-  width: 240px;
-  height: 62px;
+  width: 82%;
+  margin-bottom: 20px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
 
-.foot-btn {
-  height: 46px;
-  width: 108px;
-  border-radius: 23px;
-  background-color: #14181d;
-  justify-content: center;
-  align-items: center;
-}
-
-.foot-text {
-  font-size: 20px;
-  color: #a9b5c2;
-}
-
-.room-name, .room-preview {
-  lines: 1;
-}
-
 /* if true: process.env.SHAPE === 'CIRCLE' */
-/* The list and buttons must fit the chord at the top/bottom of their viewports. */
-.header {
-  width: 260px;
-  height: 84px;
-  padding-top: 22px;
+/* Chord maths, not taste: at depth y the usable width is 2*sqrt(240^2-(240-y)^2)
+ * in 480-design units. A 394-wide card therefore cannot start above y=110, and
+ * the footer has to be narrow because the chord at y=436 is only ~277. */
+.head {
+  height: 112px;
+  padding-top: 30px;
+}
+.room {
+  height: 98px;
 }
 .footer {
-  width: 248px;
-  height: 88px;
-  padding-bottom: 28px;
-}
-.foot-btn {
-  width: 114px;
-  height: 50px;
-}
-.placeholder {
-  width: 360px;
+  width: 52%;
+  margin-bottom: 44px;
 }
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
-.header {
-  width: 432px;
-  height: 76px;
-}
-.list, .row {
-  width: 432px;
-}
-.list {
-  margin-left: 24px;
-}
-.row {
-  height: 76px;
-  border-bottom: 1px solid #1c2127;
-}
-.room-name, .room-preview {
-  width: 266px;
-}
-.placeholder {
-  width: 432px;
+.head {
+  height: 92px;
+  padding-top: 8px;
 }
 .footer {
-  width: 432px;
-  height: 76px;
-}
-.foot-btn {
-  width: 208px;
-  height: 54px;
+  width: 86%;
+  margin-bottom: 14px;
 }
 /* endif */
 </style>

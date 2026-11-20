@@ -1,0 +1,49 @@
+<!-- Pill button, the HyperBilibili template's DefaultButton equivalent.
+     Width is a prop instead of a parent style: Vela applies a custom
+     component's own style block, not the caller's `style`/`class`, so sizing
+     has to come in through a prop. Text is passed already translated, because
+     a child component resolving `$t` on a key the parent owns gets fragile. -->
+<template>
+  <div class="pill {{ primary ? 'pill-primary' : '' }} {{ busy ? 'pill-busy' : '' }} {{ small ? 'pill-small' : '' }}"
+       style="width: {{ width }};" @click="tap">
+    <text class="{{ small ? 'pill-small-text' : 'pill-text' }} {{ primary ? 'pill-text-dark' : '' }}">{{ text }}</text>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    text: {
+      default: ''
+    },
+    width: {
+      default: '82%'
+    },
+    primary: {
+      type: Boolean,
+      default: false
+    },
+    small: {
+      type: Boolean,
+      default: false
+    },
+    busy: {
+      type: Boolean,
+      default: false
+    },
+    disabled: {
+      type: Boolean,
+      default: false
+    }
+  },
+
+  tap() {
+    if (this.disabled || this.busy) return
+    this.$emit('click')
+  }
+}
+</script>
+
+<style>
+@import "../../common/styles/theme.css";
+</style>

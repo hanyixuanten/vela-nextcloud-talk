@@ -1,56 +1,71 @@
+<import name="app-pill" src="../../components/ui/AppPill.ux"></import>
 <import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
 
 <template>
-  <div class="page">
-    <!-- Idle state: three tappable fields + connect button -->
-    <div class="top" show="{{!editing}}">
-      <text class="brand">{{ $t('app.name') }}</text>
-      <text class="tagline">{{ $t('login.subtitle') }}</text>
+  <div class="app-page">
+    <image class="app-bg" src="/common/images/bg/pink.png"></image>
+
+    <!-- The input method is position:absolute at the bottom, so it never takes
+         part in layout. Each state therefore reserves its space explicitly and
+         fills exactly 100% of the page, which is what keeps the page from
+         becoming scrollable. -->
+    <div class="layout" if="{{!editing}}">
+      <div class="top">
+        <text class="t-display brand">{{ $t('app.name') }}</text>
+        <text class="t-caption tagline">{{ $t('login.subtitle') }}</text>
+      </div>
+
+      <div class="form">
+        <div class="field" @click="startEdit(0)">
+          <text class="t-label field-label">{{ $t('login.server') }}</text>
+          <text class="field-value {{ server ? '' : 'field-empty' }}">{{ server || $t('login.serverHint') }}</text>
+        </div>
+        <div class="field" @click="startEdit(1)">
+          <text class="t-label field-label">{{ $t('login.user') }}</text>
+          <text class="field-value {{ user ? '' : 'field-empty' }}">{{ user || $t('login.userHint') }}</text>
+        </div>
+        <div class="field" @click="startEdit(2)">
+          <text class="t-label field-label">{{ $t('login.password') }}</text>
+          <text class="field-value {{ appPassword ? '' : 'field-empty' }}">{{ appPassword ? maskedPassword : $t('login.passwordHint') }}</text>
+        </div>
+
+        <div class="connect">
+          <app-pill text="{{ submitting ? $t('login.connecting') : $t('login.connect') }}"
+                    width="100%" primary="true" busy="{{submitting}}" @click="submit"></app-pill>
+        </div>
+
+        <text class="t-error error" show="{{error}}">{{ error }}</text>
+
+        <!-- The setup page is the only place that listens on interconnect, so a
+             user who lands here must still be able to reach it. -->
+        <text class="link" @click="openSetup">{{ $t('login.fromPhone') }}</text>
+      </div>
     </div>
 
-    <!-- Editing state: the keyboard eats 321px, only ~150px remain on top -->
+    <!-- Editing state: only the draft stays on screen. The actions sit right
+         above the keyboard thanks to `keyboard-gap`, which mirrors the height
+         of the absolutely positioned input method. -->
     <!-- No dismiss key on the keyboard: tapping the label/value area closes it. -->
-    <div class="edit-top" show="{{editing}}" @click="stopEdit">
-      <text class="edit-label" if="{{activeIndex === 0}}">{{ $t('login.server') }}</text>
-      <text class="edit-label" if="{{activeIndex === 1}}">{{ $t('login.user') }}</text>
-      <text class="edit-label" if="{{activeIndex === 2}}">{{ $t('login.password') }}</text>
-      <text class="edit-value" if="{{activeIndex === 0}}">{{ server || $t('login.serverHint') }}_</text>
-      <text class="edit-value" if="{{activeIndex === 1}}">{{ user || $t('login.userHint') }}_</text>
-      <text class="edit-value" if="{{activeIndex === 2}}">{{ maskedPassword }}_</text>
-    </div>
-
-    <div class="form" show="{{!editing}}">
-      <div class="field" @click="startEdit(0)">
-        <text class="field-label">{{ $t('login.server') }}</text>
-        <text class="field-value {{ server ? '' : 'field-empty' }}">{{ server || $t('login.serverHint') }}</text>
-      </div>
-      <div class="field" @click="startEdit(1)">
-        <text class="field-label">{{ $t('login.user') }}</text>
-        <text class="field-value {{ user ? '' : 'field-empty' }}">{{ user || $t('login.userHint') }}</text>
-      </div>
-      <div class="field" @click="startEdit(2)">
-        <text class="field-label">{{ $t('login.password') }}</text>
-        <text class="field-value {{ appPassword ? '' : 'field-empty' }}">{{ appPassword ? maskedPassword : $t('login.passwordHint') }}</text>
+    <div class="edit-panel" if="{{editing}}">
+      <div class="edit-top" @click="stopEdit">
+        <text class="t-label" if="{{activeIndex === 0}}">{{ $t('login.server') }}</text>
+        <text class="t-label" if="{{activeIndex === 1}}">{{ $t('login.user') }}</text>
+        <text class="t-label" if="{{activeIndex === 2}}">{{ $t('login.password') }}</text>
+        <text class="edit-value" if="{{activeIndex === 0}}">{{ server || $t('login.serverHint') }}_</text>
+        <text class="edit-value" if="{{activeIndex === 1}}">{{ user || $t('login.userHint') }}_</text>
+        <text class="edit-value" if="{{activeIndex === 2}}">{{ maskedPassword }}_</text>
       </div>
 
-      <div class="primary {{ submitting ? 'primary-busy' : '' }}" @click="submit">
-        <text class="primary-text">{{ submitting ? $t('login.connecting') : $t('login.connect') }}</text>
+      <div class="edit-actions">
+        <div class="ghost" @click="nextField">
+          <text class="pill-small-text">{{ $t('login.next') }}</text>
+        </div>
+        <div class="ghost" @click="stopEdit">
+          <text class="pill-small-text">{{ $t('login.done') }}</text>
+        </div>
       </div>
 
-      <text class="error" show="{{error}}">{{ error }}</text>
-
-      <!-- The setup page is the only place that listens on interconnect, so a
-           user who lands here must still be able to reach it. -->
-      <text class="link" @click="openSetup">{{ $t('login.fromPhone') }}</text>
-    </div>
-
-    <div class="edit-actions" show="{{editing}}">
-      <div class="ghost" @click="nextField">
-        <text class="ghost-text">{{ $t('login.next') }}</text>
-      </div>
-      <div class="ghost" @click="stopEdit">
-        <text class="ghost-text">{{ $t('login.done') }}</text>
-      </div>
+      <div class="keyboard-gap"></div>
     </div>
 
     <input-method
@@ -219,208 +234,171 @@ export default {
 </script>
 
 <style>
-.page {
-  flex-direction: column;
+@import "../../common/styles/theme.css";
+
+/* Both state containers fill the page and are laid out as columns; the flexible
+ * child absorbs whatever the fixed children leave, so the sum is always exactly
+ * 100% and the page can never scroll. */
+.layout, .edit-panel {
   width: 100%;
   height: 100%;
+  flex-direction: column;
   align-items: center;
-  background-color: #000000;
 }
 
 .top {
-  height: 104px;
+  height: 96px;
+  padding-top: 12px;
   flex-direction: column;
   justify-content: center;
   align-items: center;
 }
 
 .brand {
-  font-size: 40px;
-  font-weight: bold;
-  color: #ffffff;
+  font-size: 44px;
 }
 
 .tagline {
-  font-size: 22px;
-  color: #6f7c8a;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .form {
-  width: 360px;
+  flex: 1;
+  width: 78%;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
 }
 
+/* Card fields: label above value, like the template's setting rows. Margins
+ * instead of padding, because Vela's box model makes padded fixed-width boxes
+ * overflow in one of the two shapes. */
 .field {
-  width: 324px;
-  height: 62px;
-  margin-top: 10px;
-  padding-left: 18px;
-  padding-right: 18px;
-  border-radius: 16px;
-  background-color: #14181d;
+  width: 100%;
+  height: 60px;
+  margin-top: 8px;
+  border-radius: 24px;
+  background-color: #262626;
   flex-direction: column;
   justify-content: center;
 }
 
 .field-label {
-  font-size: 18px;
-  color: #6f7c8a;
+  margin-left: 20px;
+  font-size: 17px;
 }
 
 .field-value {
-  font-size: 22px;
-  color: #e8eef5;
-  margin-top: 2px;
+  width: 84%;
+  margin-left: 20px;
+  margin-top: 1px;
+  font-size: 21px;
+  font-weight: 500;
+  color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
 .field-empty {
-  color: #46505b;
+  color: #6a6a6a;
 }
 
-.primary {
-  width: 360px;
-  height: 60px;
-  margin-top: 18px;
-  border-radius: 30px;
-  background-color: #0082c9;
-  justify-content: center;
-  align-items: center;
+.connect {
+  width: 100%;
+  margin-top: 14px;
 }
 
-.primary-busy {
-  background-color: #0b5c8a;
-}
-
-.primary-text {
-  font-size: 24px;
-  color: #ffffff;
+/* Reserved two-line strip: an error must not be what pushes the link off. */
+.error {
+  width: 94%;
+  height: 44px;
+  margin-top: 6px;
+  font-size: 18px;
+  text-align: center;
+  lines: 2;
+  text-overflow: ellipsis;
 }
 
 .link {
-  width: 360px;
-  margin-top: 14px;
-  font-size: 16px;
-  color: #6f7c8a;
-  text-align: center;
-}
-
-.error {
-  width: 360px;
-  margin-top: 12px;
-  font-size: 18px;
-  color: #ff6b6b;
+  width: 92%;
+  height: 26px;
+  margin-top: 4px;
+  font-size: 19px;
+  font-weight: 500;
+  color: #ff7da8;
   text-align: center;
 }
 
 .edit-top {
-  width: 360px;
-  height: 92px;
+  flex: 1;
+  width: 78%;
   flex-direction: column;
-  justify-content: center;
-}
-
-.edit-label {
-  font-size: 18px;
-  color: #6f7c8a;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .edit-value {
-  font-size: 24px;
-  color: #e8eef5;
+  width: 100%;
   margin-top: 6px;
+  font-size: 26px;
+  font-weight: 600;
+  color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
 .edit-actions {
-  width: 360px;
-  height: 58px;
+  width: 78%;
+  height: 56px;
+  margin-top: 8px;
+  margin-bottom: 6px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
 
 .ghost {
-  height: 52px;
-  padding-left: 26px;
-  padding-right: 26px;
-  border-radius: 26px;
-  background-color: #1c2127;
+  width: 46%;
+  height: 56px;
+  border-radius: 28px;
+  background-color: #262626;
   justify-content: center;
   align-items: center;
 }
 
-.ghost-text {
-  font-size: 22px;
-  color: #cbd5e1;
-}
-
-.field-value, .edit-value {
-  lines: 1;
-  text-overflow: ellipsis;
-}
-.error {
-  lines: 2;
-  text-overflow: ellipsis;
+/* Mirrors @components/InputMethod: 480x321 on the round screen. */
+.keyboard-gap {
+  width: 100%;
+  height: 321px;
 }
 
 /* if true: process.env.SHAPE === 'CIRCLE' */
 .top {
-  height: 114px;
-  padding-top: 24px;
+  height: 96px;
+  padding-top: 26px;
 }
-.field {
-  width: 344px;
-  height: 52px;
-  margin-top: 8px;
-}
-.primary {
-  width: 276px;
-  height: 50px;
-  margin-top: 14px;
-}
-.link, .error {
-  width: 270px;
-  margin-top: 8px;
-}
-.edit-top {
-  width: 274px;
-  justify-content: flex-end;
+.form, .edit-top, .edit-actions {
+  width: 74%;
 }
 .edit-actions {
-  width: 288px;
+  margin-bottom: 2px;
 }
 /* endif */
 
 /* if true: process.env.SHAPE === 'RECT' */
+/* Rect keyboard is 255px tall plus a 28px candidate row. */
 .top {
-  height: 112px;
+  height: 92px;
+  padding-top: 8px;
 }
-.form, .field, .primary, .link, .error, .edit-top, .edit-actions {
-  width: 432px;
+.form, .edit-top, .edit-actions {
+  width: 86%;
 }
 .field {
-  height: 70px;
+  height: 72px;
 }
-.primary {
-  border-radius: 20px;
-}
-.link {
-  height: 50px;
-  font-size: 20px;
-}
-.edit-top {
-  height: 172px;
-  justify-content: flex-end;
-  padding-bottom: 14px;
-}
-.edit-actions {
-  height: 74px;
-}
-.ghost {
-  width: 208px;
-  height: 56px;
-  border-radius: 20px;
+.keyboard-gap {
+  height: 283px;
 }
 /* endif */
 </style>
