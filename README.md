@@ -120,6 +120,7 @@ cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protoc
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
 | 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表校验后保存 |
+| 启动网络检测 | ✅ | 先看网络类型，再 fetch `/status.php`；不通则停在离线页，不进入业务 |
 | 图片 / 文件消息 | ❌ | 只显示文件名及文字，不下载图片 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
 | 通知推送 | ❌ | Vela 暂无第三方 app 的推送通道 |
@@ -151,6 +152,7 @@ vela-nextcloud-talk/
 │   │       ├── store.js          # @system.storage 封装 + 设置默认值
 │   │       ├── state.js          # 跨页面共享的运行时缓存
 │   │       ├── format.js         # 时间、Rich Object String、头像取色
+│   │       ├── network.js        # 启动网络门（@system.network + /status.php 探针）
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
 │   ├── components/
 │   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
@@ -160,6 +162,7 @@ vela-nextcloud-talk/
 │       ├── chat/chat.ux          # 聊天（含输入态）
 │       ├── login/login.ux        # 账号录入
 │       ├── setup/setup.ux        # 等手机推送凭据（interconnect）
+│       ├── offline/offline.ux    # 网络不通时的唯一出口，只提供重试
 │       └── settings/settings.ux  # 设置
 ├── scripts/
 │   ├── build-watch.cjs           # 屏幕条件预处理 + aiot 打包
@@ -235,6 +238,10 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 - `src/common/styles/theme.css` 只放令牌类，各页 `<style>` 里 `@import` 后由打包器内联（已验证规则出现在 `pages/*/*.js`），运行时不额外加载。
 - 按钮统一走 `src/components/ui/AppPill.ux`；宽度用 prop 传入，因为 Vela 只应用组件自身的样式块，父级的 `class`/`style` 不会透传。
 - 页面背景是 `scripts/gen-bg.py` 生成的 256×256 辉光 PNG（纯 Python 写 PNG，零依赖），`object-fit: fill` 拉伸铺满。
+
+### 启动网络门
+
+启动时不直接进业务：先 `@system.network.getType`，已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。不通就停在 `pages/offline`，只给「重试」，一次进程只探测一次。细节见 [`docs/design.md`](docs/design.md) 第 9 节。
 
 ### 输入态为什么要两个页面状态
 

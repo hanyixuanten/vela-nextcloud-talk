@@ -105,5 +105,11 @@
     "saved": "Saved",
     "done": "Configured: {name}",
     "failed": "Setup failed"
+  },
+  "offline": {
+    "title": "No network",
+    "hint": "The watch is offline, so Talk cannot load anything. Connect to Wi-Fi and retry.",
+    "checking": "Checking…",
+    "retry": "Retry"
   }
 }

@@ -156,6 +156,17 @@ pages/chat   onInit  → 读取配置
 - **图片消息**：不提供缩略图或图片预览；详见[解码成本评估](image-preview.md)。
 - **多实例**：目前只支持一个 Nextcloud 账号。多账号需要把 `nctalk.settings` 改成账号数组 + 当前索引，`markers` 也要按账号分区。
 
+## 9. 启动网络门
+
+网络不通时应用不进入业务页面，停在 `pages/offline`，只提供「重试」。判断分两步（`common/scripts/network.js`）：
+
+1. `@system.network.getType` 返回空字符串或 `none` 即离线（与 HyperBilibili 的 `NetworkCheck` 一致）；
+2. 已配置账号时再 `fetch` 一次 `<baseUrl>/status.php`：**任何 HTTP 状态码都算在线**，只有传输层失败（DNS / TLS / 连接）或 8 秒超时才判离线。
+
+第二步存在的理由：Wi-Fi 已关联但网关不通时 `getType` 仍会报 `wifi`，只看类型会把用户放进一个每条请求都超时的界面。而把 401/404 当成离线同样不对——那说明网络是通的，问题在账号或地址。
+
+结果缓存在 `state.online` / `state.networkChecked`：每次进程只探测一次，从聊天页返回不会重复付代价；`pages/offline` 的重试会把两个标记清掉再探。
+
 ## 11. 界面系统
 
 视觉与组件规范移植自 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 watch 模板：

@@ -14,7 +14,8 @@
     { "name": "system.prompt" },
     { "name": "system.vibrator" },
     { "name": "system.device" },
-    { "name": "system.interconnect" }
+    { "name": "system.interconnect" },
+    { "name": "system.network" }
   ],
   "config": {
     "logLevel": "log",
@@ -42,6 +43,10 @@
       "pages/setup": {
         "component": "setup",
         "path": "/setup"
+      },
+      "pages/offline": {
+        "component": "offline",
+        "path": "/offline"
       }
     }
   },

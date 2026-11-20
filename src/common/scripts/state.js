@@ -21,4 +21,9 @@ export default {
   // Conversation currently open in pages/chat: { token, name, ... }
   activeRoom: null,
 
+  // Startup network gate (see common/scripts/network.js). Checked once per
+  // process: a relaunch probes again, but returning from chat must not.
+  online: true,
+  networkChecked: false
+
 }
