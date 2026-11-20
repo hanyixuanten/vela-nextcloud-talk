@@ -109,10 +109,12 @@
     "failed": "配置失败",
     "savedUnverified": "已保存；{message}"
   },
+  "splash": {
+    "checking": "正在检查网络…"
+  },
   "offline": {
     "title": "没有网络",
     "hint": "手表未连上网络，Talk 无法收发消息。连上 Wi-Fi 后再试。",
-    "checking": "正在检查网络…",
     "retry": "重试"
   }
 }

@@ -23,8 +23,12 @@
     "designWidth": 480
   },
   "router": {
-    "entry": "pages/index",
+    "entry": "pages/splash",
     "pages": {
+      "pages/splash": {
+        "component": "splash",
+        "path": "/splash"
+      },
       "pages/index": {
         "component": "index",
         "path": "/"

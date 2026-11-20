@@ -109,10 +109,12 @@
     "failed": "Setup failed",
     "savedUnverified": "Saved; {message}"
   },
+  "splash": {
+    "checking": "Checking network…"
+  },
   "offline": {
     "title": "No network",
     "hint": "The watch is offline, so Talk cannot load anything. Connect to Wi-Fi and retry.",
-    "checking": "Checking…",
     "retry": "Retry"
   }
 }

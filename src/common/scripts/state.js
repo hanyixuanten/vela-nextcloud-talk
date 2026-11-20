@@ -21,9 +21,12 @@ export default {
   // Conversation currently open in pages/chat: { token, name, ... }
   activeRoom: null,
 
-  // Startup network gate (see common/scripts/network.js). Checked once per
-  // process: a relaunch probes again, but returning from chat must not.
+  // Startup network gate (see common/scripts/network.js and pages/splash).
+  // The splash page is the router entry: it probes once per launch and only
+  // then sets `launchAllowed`. Every main page (会话 / 设置 / 聊天) checks it,
+  // so a launch that failed the probe cannot reach the main UI at all.
   online: true,
-  networkChecked: false
+  networkChecked: false,
+  launchAllowed: false
 
 }

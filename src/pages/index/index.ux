@@ -27,17 +27,17 @@
           </div>
         </div>
 
-        <div class="empty" show="{{!loading && !checking && !error && rooms.length === 0}}">
+        <div class="empty" show="{{!loading && !error && rooms.length === 0}}">
           <text class="t-body">{{ $t('index.empty') }}</text>
           <text class="empty-hint">{{ $t('index.emptyHint') }}</text>
         </div>
 
-        <div class="empty" show="{{!loading && !checking && error}}">
+        <div class="empty" show="{{!loading && error}}">
           <text class="t-error empty-message">{{ error }}</text>
           <app-pill text="{{ $t('common.retry') }}" width="220px" primary="true" @click="refresh"></app-pill>
         </div>
 
-        <div class="empty" show="{{(loading || checking) && rooms.length === 0}}">
+        <div class="empty" show="{{loading && rooms.length === 0}}">
           <text class="empty-hint">{{ $t('index.loading') }}</text>
         </div>
       </div>
@@ -56,13 +56,12 @@ import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import fmt from '../../common/scripts/format'
-import network from '../../common/scripts/network'
+import { ROUTE } from '../../common/scripts/launch'
 
 export default {
   data: {
     rooms: [],
     loading: false,
-    checking: false,
     error: '',
     accountLabel: ''
   },
@@ -77,47 +76,33 @@ export default {
   },
 
   // onShow also fires when returning from the chat page, so the list refreshes
-  // with the new unread counters without any extra plumbing.
+  // with the new unread counters without any extra plumbing. The network was
+  // already proven by pages/splash before this page was ever built.
   onShow() {
     const ready = this.readyPromise || Promise.resolve({})
     ready.then((settings) => {
+      if (!state.launchAllowed) {
+        // Entered without passing the launch gate — the AstroBox plugin can
+        // launch `pages/index` directly, and a routed-back main page would
+        // otherwise show 会话/设置 on a dead network. Bounce through the gate.
+        router.replace({ uri: ROUTE.splash })
+        return
+      }
       this.accountLabel = settings.displayName || settings.user || ''
-      // The network gate runs once per launch (state.networkChecked); the
-      // offline page owns the retry loop, so returning from chat does not pay
-      // for another probe.
-      const gate = state.networkChecked
-        ? Promise.resolve(state.online)
-        : this.checkNetwork(settings)
-      gate.then((online) => {
-        if (!online) {
-          router.replace({ uri: '/offline' })
-          return
-        }
-        if (!store.hasAccount(settings)) {
-          // First launch: land where the AstroBox plugin can actually reach us.
-          // /setup listens on interconnect; /login does not.
-          router.replace({ uri: '/setup' })
-          return
-        }
-        this.refresh()
-      })
-    })
-  },
-
-  checkNetwork(settings) {
-    this.checking = true
-    return network.checkNetwork(settings).then((online) => {
-      this.checking = false
-      state.networkChecked = true
-      state.online = online
-      return online
+      if (!store.hasAccount(settings)) {
+        // First launch: land where the AstroBox plugin can actually reach us.
+        // /setup listens on interconnect; /login does not.
+        router.replace({ uri: ROUTE.setup })
+        return
+      }
+      this.refresh()
     })
   },
 
   refresh() {
-    if (this.loading || this.checking) return
+    if (this.loading) return
     if (!api.isConfigured()) {
-      router.replace({ uri: '/setup' })
+      router.replace({ uri: ROUTE.setup })
       return
     }
 

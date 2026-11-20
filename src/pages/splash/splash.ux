@@ -1,0 +1,117 @@
+<!-- Launch gate, the HyperBilibili `pages/app/entry/splash` equivalent.
+
+     This page is the router entry, so tapping the watch icon lands here before
+     any main screen exists. It shows a logo, probes the network, and only then
+     replaces to the conversation list / setup. A failed probe goes to
+     `pages/offline`, which has exactly one action (retry) and comes straight
+     back here — that is why 设置 and 会话 are unreachable on a dead network:
+     they are only ever entered from a page the gate has already opened.
+
+     Nothing here is tappable: while the probe runs (up to the 8 s timeout)
+     there is no button to press, so a slow network cannot be mistaken for a
+     working one. -->
+<template>
+  <div class="app-page">
+    <image class="app-bg" src="/common/images/bg/pink.png"></image>
+
+    <div class="brand">
+      <image class="logo" src="/common/images/icon.png"></image>
+      <text class="name t-title">{{ $t('app.name') }}</text>
+      <text class="status t-label">{{ $t('splash.checking') }}</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import api from '../../common/scripts/api'
+import store from '../../common/scripts/store'
+import state from '../../common/scripts/state'
+import network from '../../common/scripts/network'
+import { routeAfterGate } from '../../common/scripts/launch'
+
+export default {
+  data: {
+    checking: false
+  },
+
+  onShow() {
+    this.gate()
+  },
+
+  onHide() {
+    // The page can be shown again (offline → retry → here); a flag left true
+    // by the previous run would then swallow the new probe.
+    this.checking = false
+  },
+
+  gate() {
+    if (this.checking) return
+    this.checking = true
+    // A launch is only allowed to reach the main pages after this run passes.
+    state.launchAllowed = false
+
+    store.load()
+      .catch(() => ({}))
+      .then((settings) => {
+        state.settings = settings
+        api.configure(settings)
+        state.ready = store.hasAccount(settings)
+        return network.checkNetwork(settings)
+      })
+      .catch((err) => {
+        console.log('launch gate failed: ' + ((err && err.message) || err))
+        return false
+      })
+      .then((online) => {
+        state.networkChecked = true
+        state.online = online
+        state.launchAllowed = online
+        const target = routeAfterGate(online, store.hasAccount(state.settings))
+        console.log('launch gate: online=' + online + ' → ' + target)
+        router.replace({ uri: target })
+      })
+  }
+}
+</script>
+
+<style>
+@import "../../common/styles/theme.css";
+
+.brand {
+  flex: 1;
+  width: 78%;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.logo {
+  width: 132px;
+  height: 132px;
+}
+
+.name {
+  margin-top: 20px;
+}
+
+.status {
+  margin-top: 8px;
+  font-size: 20px;
+  text-align: center;
+}
+
+/* if true: process.env.SHAPE === 'RECT' */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
+.brand {
+  width: 86%;
+}
+.logo {
+  width: 156px;
+  height: 156px;
+}
+/* endif */
+</style>

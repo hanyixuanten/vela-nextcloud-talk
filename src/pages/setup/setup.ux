@@ -193,6 +193,13 @@ export default {
       .then((named) => {
         this.finish()
         if (!named) return
+        // getCurrentUser answered, so the network demonstrably works. Mark the
+        // launch gate as passed: the plugin can open this page directly (no
+        // splash), and without this the exit below would bounce through
+        // pages/splash and pay for a second probe.
+        state.launchAllowed = true
+        state.online = true
+        state.networkChecked = true
         state.settings = named
         api.configure(named)
         if (this.link !== link) return

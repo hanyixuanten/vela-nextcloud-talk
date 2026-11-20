@@ -32,6 +32,7 @@ sed -e "s#from '@system.fetch'#from './fetch-double.mjs'#" \
 cp "$ROOT/src/common/scripts/base64.js" "$BUILD/base64.mjs"
 cp "$ROOT/src/common/scripts/format.js" "$BUILD/format.mjs"
 cp "$ROOT/src/common/scripts/protocol.js" "$BUILD/protocol.mjs"
+cp "$ROOT/src/common/scripts/launch.js" "$BUILD/launch.mjs"
 cp "$ROOT/tests/fetch-double.mjs" "$BUILD/fetch-double.mjs"
 cp "$ROOT/tests/storage-double.mjs" "$BUILD/storage-double.mjs"
 cp "$ROOT/tests/network-double.mjs" "$BUILD/network-double.mjs"
@@ -43,6 +44,7 @@ fail=0
 "$NODE" "$ROOT/tests/setup.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/login-save.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/network.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/launch-gate.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/login-layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/layout-sizing.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat-layout.test.mjs" || fail=1

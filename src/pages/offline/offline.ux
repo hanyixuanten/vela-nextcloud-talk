@@ -1,9 +1,9 @@
 <import name="app-pill" src="../../components/ui/AppPill.ux"></import>
 
-<!-- Startup gate: the app does not go any further while the watch has no
-     network. Same layout as the template's networkerror page — one headline,
-     one explanation, one primary action — because a watch screen fits nothing
-     more. -->
+<!-- The only screen a failed launch gate can reach: no conversation list, no
+     settings, no chat — just what went wrong and one way back. Same layout as
+     the template's networkerror page (one headline, one explanation, one
+     primary action) because a watch screen fits nothing more. -->
 <template>
   <div class="app-page">
     <image class="app-bg" src="/common/images/bg/blue.png"></image>
@@ -13,47 +13,34 @@
         <text class="mark-text">!</text>
       </div>
       <text class="t-title headline">{{ $t('offline.title') }}</text>
-      <text class="t-caption detail">{{ checking ? $t('offline.checking') : $t('offline.hint') }}</text>
+      <text class="t-caption detail">{{ $t('offline.hint') }}</text>
     </div>
 
     <div class="actions">
-      <app-pill text="{{ checking ? $t('offline.checking') : $t('offline.retry') }}"
-                width="70%" primary="true" busy="{{checking}}" @click="retry"></app-pill>
+      <app-pill text="{{ $t('offline.retry') }}" width="70%" primary="true" @click="retry"></app-pill>
     </div>
   </div>
 </template>
 
 <script>
 import router from '@system.router'
-import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
-import network from '../../common/scripts/network'
+import { ROUTE } from '../../common/scripts/launch'
 
 export default {
-  data: {
-    checking: false
-  },
-
+  // No probe of its own: retry hands control back to the launch gate, which
+  // owns the single verdict and the "checking" screen. Two probes here would
+  // mean waiting out the 8 s timeout twice on a dead network.
   onShow() {
     // Coming back here means the previous verdict was "offline": the next
-    // retry must actually probe again instead of trusting the cached one.
+    // pass through the gate must probe again instead of trusting the cache.
     state.online = false
     state.networkChecked = false
+    state.launchAllowed = false
   },
 
   retry() {
-    if (this.checking) return
-    this.checking = true
-    const settings = state.settings || {}
-    network.checkNetwork(settings).then((online) => {
-      this.checking = false
-      state.online = online
-      state.networkChecked = true
-      if (!online) return
-      // Back through the entry page so the normal launch path (account check →
-      // setup or conversation list) runs exactly once.
-      router.replace({ uri: '/' })
-    })
+    router.replace({ uri: ROUTE.splash })
   }
 }
 </script>

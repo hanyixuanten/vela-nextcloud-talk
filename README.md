@@ -48,7 +48,7 @@
 1. 手机装「小米运动健康」并与手表配对。
 2. 手机端进入 `我的 → 关于 → 连点「关于」进入 Debug → 第三方应用`，包名填 `com.hanyixuanten.nctalk`，选择上面的 rpk 安装。
 3. 或者用社区工具（[minstall](https://github.com/HyperionD/minstall) 等）走蓝牙安装。
-4. 手表上打开 Talk。**首次启动直接进「从手机配置」页**（它才是监听 interconnect 的那一页），要么等手机推，要么点「手动输入」自己填三项。
+4. 手表上打开 Talk。启动先过网络门（没网只会停在「重试」页，进不去会话和设置）；通过后**首次启动直接进「从手机配置」页**（它才是监听 interconnect 的那一页），要么等手机推，要么点「手动输入」自己填三项。
 
 本地调试构建用 `build:circle` 或 `build:rect`；正式签名分别用 `npm run release:circle`、`npm run release:rect`，需按 [`sign/README.md`](sign/README.md) 配置证书。没有 CI 签名密钥时会产出调试包，不一定能覆盖旧签名的安装。
 
@@ -91,7 +91,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试；`tests/network.test.mjs` 与 `tests/launch-gate.test.mjs` 守住启动网络门（接口类型 + `<baseUrl>/status.php` 探针、入口页是 `pages/splash`、会话列表在没通过门时不许打开）。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -153,11 +153,13 @@ vela-nextcloud-talk/
 │   │       ├── state.js          # 跨页面共享的运行时缓存
 │   │       ├── format.js         # 时间、Rich Object String、头像取色
 │   │       ├── network.js        # 启动网络门（@system.network + /status.php 探针）
+│   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
 │   ├── components/
 │   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
 │   │   └── InputMethod/          # 三方输入法（vendored，勿手改）
 │   └── pages/
+│       ├── splash/splash.ux      # 路由入口：先探网络，通过才进主界面
 │       ├── index/index.ux        # 会话列表
 │       ├── chat/chat.ux          # 聊天（含输入态）
 │       ├── login/login.ux        # 账号录入
@@ -192,6 +194,8 @@ vela-nextcloud-talk/
 │   ├── api.test.mjs              # api.js 集成测试
 │   ├── protocol.test.mjs         # 凭据协议单元测试
 │   ├── units.test.mjs            # base64 / format 单元测试
+│   ├── network.test.mjs          # 网络门：接口类型 + /status.php 探针
+│   ├── launch-gate.test.mjs      # 入口页路由决策与「先探网络再进主界面」
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试
 │   ├── seed-watch-chat.test.mjs  # seed/watch 聊天测试
@@ -241,7 +245,7 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 ### 启动网络门与校验期亮屏
 
-启动时不直接进业务：先 `@system.network.getType`，已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。不通就停在 `pages/offline`，只给「重试」，一次进程只探测一次。
+启动时不直接进主界面，而是照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `splash` 做法：**路由入口页就是网络门**（`router.entry = pages/splash`）。点图标先看到图标 + 「正在检查网络…」，同时 `@system.network.getType` 判类型、已配置账号时再 `fetch <baseUrl>/status.php`（任何 HTTP 状态码都算在线，只有传输失败/8 秒超时才判离线）。探测通过才 `replace` 到会话列表或 `pages/setup`；不通过就停在 `pages/offline`，只给「重试」，重试回到入口页重探。主界面（会话 / 设置 / 聊天）在这种情况下根本不会被创建，`pages/index` 还会检查 `state.launchAllowed`，插件直接拉起会话页时也会被打回网络门。
 
 从手机推来的凭据在手表上要经历「写 storage → 最长 20 秒的校验 → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。写盘排在校验之前，校验失败也保留输入（回执文字带「已保存；」前缀）；只有写盘本身失败才什么都不留。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
 
