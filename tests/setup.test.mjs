@@ -32,6 +32,7 @@ const page = runInNewContext('(' + script.trim() + ')', {
     }
   },
   router: { replace: () => { navigations++ } },
+  nav: { leave: () => { navigations++ } },
   brightness: { setKeepScreenOn: (options) => keepAwake.push(options.keepScreenOn) },
   setTimeout: (fn) => { timers.set(++nextTimer, fn); return nextTimer },
   clearTimeout: (id) => { timers.delete(id) }

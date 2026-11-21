@@ -66,6 +66,7 @@ import { ROUTE } from '../../common/scripts/launch'
 import keeperClient from '../../common/scripts/keeperClient'
 import { accountKey } from '../../common/scripts/keeper'
 import { sharedOf } from '../../common/scripts/shared'
+import nav from '../../common/scripts/nav'
 
 export default {
   data: {
@@ -90,13 +91,24 @@ export default {
   },
 
   onDestroy() {
+    // A destroyed page has left; without this the second check inside
+    // nav.navigate() would toast right after a replace that actually worked.
+    this.leftPage = true
     if (typeof this.unsubscribe === 'function') this.unsubscribe()
+  },
+
+  // Only used by nav.navigate(): "did the push actually take us off this page?"
+  onHide() {
+    this.leftPage = true
   },
 
   // onShow also fires when returning from the chat page, so the list refreshes
   // with the new unread counters without any extra plumbing. The network was
   // already proven by pages/splash before this page was ever built.
   onShow() {
+    // nav.navigate() reads this to decide whether a push landed; returning from
+    // the chat page must clear it, otherwise the retry is skipped next time.
+    this.leftPage = false
     const ready = this.readyPromise || Promise.resolve({})
     ready.then((settings) => {
       // No "did the gate pass?" check here on purpose. The verdict lives in
@@ -199,14 +211,22 @@ export default {
     const room = this.rooms[index]
     if (!room) return
     state.activeRoom = room
-    router.push({
-      uri: ROUTE.chat,
-      params: { token: room.token, name: room.name }
-    })
+    // Router params are the real channel (pages/chat declares `token`/`name` in
+    // `protected`). The app-level object is only a safety net for the case where
+    // params do not arrive; pages/chat clears it after reading, so a stale room
+    // can never leak into the next one.
+    const shared = sharedOf(this, state)
+    if (shared && shared !== state) shared.pendingRoom = { token: room.token, name: room.name }
+    nav.navigate(
+      this,
+      ROUTE.chat,
+      { token: room.token, name: room.name },
+      this.$t('common.openFailed')
+    )
   },
 
   openSettings() {
-    router.push({ uri: ROUTE.settings })
+    nav.navigate(this, ROUTE.settings, null, this.$t('common.openFailed'))
   }
 }
 </script>

@@ -32,6 +32,7 @@ import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import { ROUTE } from '../../common/scripts/launch'
+import nav from '../../common/scripts/nav'
 import protocol from '../../common/scripts/protocol'
 import brightness from '@system.brightness'
 
@@ -258,7 +259,7 @@ export default {
       router.replace({ uri: ROUTE.login })
       return
     }
-    router.back()
+    nav.leave(ROUTE.home)
   },
 
   openLogin() {

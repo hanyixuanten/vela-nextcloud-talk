@@ -23,6 +23,11 @@ const ids = (high, low) => Array.from({ length: high - low + 1 }, (_, i) => high
 const ctx = {
   fmt,
   state: {},
+  // No $app in this sandbox, so sharedOf() falls back to the page-local cache,
+  // exactly as it does on a firmware without $def.
+  sharedOf: (vm, fallback) => fallback,
+  nav: { leave() {} },
+  ROUTE: { home: 'pages/index', chat: 'pages/chat' },
   prompt: { showToast: ({ message }) => toasts.push(message) },
   store: { load: async () => ({ user: 'alice' }) },
   api: {

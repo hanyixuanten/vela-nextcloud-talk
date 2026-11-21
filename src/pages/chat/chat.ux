@@ -114,12 +114,14 @@
 </template>
 
 <script>
-import router from '@system.router'
 import prompt from '@system.prompt'
 import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import fmt from '../../common/scripts/format'
+import { sharedOf } from '../../common/scripts/shared'
+import { ROUTE } from '../../common/scripts/launch'
+import nav from '../../common/scripts/nav'
 
 const FONT_SIZES = { small: 20, normal: 23, large: 27 }
 const DRAFT_VIEW_LIMIT = 60
@@ -193,9 +195,14 @@ export default {
   },
 
   onInit() {
-    const room = state.activeRoom || {}
-    this.token = this.token || room.token || ''
-    this.title = this.name || room.name || 'Talk'
+    // Router params land on `protected`; the app-level object is the fallback for
+    // when they do not arrive (see pages/index.openRoom). It is cleared right
+    // away so a later entry without params cannot show a stale room.
+    const shared = sharedOf(this, state)
+    const pending = (shared && shared.pendingRoom) || state.activeRoom || {}
+    if (shared && shared.pendingRoom) shared.pendingRoom = null
+    this.token = this.token || pending.token || ''
+    this.title = this.name || pending.name || 'Talk'
     this.pollInterval = 15000
     this.timer = null
     this.myUser = ''
@@ -571,7 +578,9 @@ export default {
 
   goBack() {
     this.onHide()
-    router.back()
+    // This page may have been installed with replace() rather than push() (see
+    // common/scripts/nav.js), in which case back() has nowhere to go.
+    nav.leave(ROUTE.home)
   }
 }
 </script>

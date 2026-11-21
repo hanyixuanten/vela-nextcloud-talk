@@ -13,7 +13,8 @@
     "yesterday": "昨天",
     "cancel": "取消",
     "retry": "重试",
-    "back": "返回"
+    "back": "返回",
+    "openFailed": "打不开，请重试"
   },
   "login": {
     "subtitle": "Nextcloud Talk",

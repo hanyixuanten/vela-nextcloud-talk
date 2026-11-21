@@ -13,7 +13,8 @@
     "yesterday": "Yesterday",
     "cancel": "Cancel",
     "retry": "Retry",
-    "back": "Back"
+    "back": "Back",
+    "openFailed": "Could not open, try again"
   },
   "login": {
     "subtitle": "Nextcloud Talk",

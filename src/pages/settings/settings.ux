@@ -74,6 +74,7 @@ import state from '../../common/scripts/state'
 import api from '../../common/scripts/api'
 import keeperClient from '../../common/scripts/keeperClient'
 import { ROUTE } from '../../common/scripts/launch'
+import nav from '../../common/scripts/nav'
 import manifest from '../../manifest.json'
 
 const FONTS = ['small', 'normal', 'large']
@@ -112,6 +113,21 @@ export default {
       this.backgroundKeep = settings.backgroundKeep !== false
       this.refreshLabels(settings)
     })
+  },
+
+  onShow() {
+    // nav.navigate() reads this to decide whether a push landed.
+    this.leftPage = false
+  },
+
+  onHide() {
+    this.leftPage = true
+  },
+
+  onDestroy() {
+    // A replaced page is destroyed rather than hidden; nav.navigate() must count
+    // that as "we left", or a working fallback would still raise the toast.
+    this.leftPage = true
   },
 
   refreshLabels(settings) {
@@ -196,11 +212,11 @@ export default {
   },
 
   openAccount() {
-    router.push({ uri: ROUTE.login })
+    nav.navigate(this, ROUTE.login, null, this.$t('common.openFailed'))
   },
 
   openSetup() {
-    router.push({ uri: ROUTE.setup })
+    nav.navigate(this, ROUTE.setup, null, this.$t('common.openFailed'))
   },
 
   openAbout() {
@@ -232,7 +248,9 @@ export default {
   },
 
   goBack() {
-    router.back()
+    // Installed by index's replace fallback rather than a push → back() is a
+    // no-op, so fall through to the conversation list.
+    nav.leave(ROUTE.home)
   }
 }
 </script>
