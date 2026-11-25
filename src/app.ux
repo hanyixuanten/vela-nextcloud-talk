@@ -4,6 +4,11 @@ import api from './common/scripts/api'
 import fmt from './common/scripts/format'
 import state from './common/scripts/state'
 import keeperClient from './common/scripts/keeperClient'
+import { FOREGROUND_LEASE_MS } from './common/scripts/keeper'
+
+// The app renews the service's foreground lease from this heartbeat, so the
+// lease (90s) outlives two missed beats. Cheap: a postMessage, no network.
+const LEASE_HEARTBEAT_MS = FOREGROUND_LEASE_MS / 3
 
 // The only truly cross-page object in the app. Pages reach it through
 // `this.$app.$def.shared`; see common/scripts/shared.js for why module level
@@ -15,7 +20,10 @@ const shared = {
   controlProbe: null,
   serverProbe: null,
   // Last conversation list the keeper service saw while the app was away.
-  backgroundSummary: null
+  backgroundSummary: null,
+  // Message handed to pages/message when router params do not arrive (the
+  // navigate ladder has a params-less rung). Cleared by the page on read.
+  pendingDetail: null
 }
 
 export default {
@@ -29,6 +37,15 @@ export default {
     const translate = (key) => this.$t(key)
     api.setTranslator(translate)
     fmt.setTranslator(translate)
+
+    // Start background retention *before* the settings read. It used to be
+    // started from inside the `.then()` below, so a slow or failing storage read
+    // (or a first launch with no account yet) left the service unconnected for
+    // the whole session — the app kept working, background retention never did.
+    // The service reads the account itself on every tick anyway.
+    this.startKeeper()
+    this.startHeartbeat()
+
     // Settings are read once at startup so every page gets a configured API
     // client without repeating storage reads. Pages still call store.load()
     // when they need the freshest values (e.g. right after editing the account).
@@ -37,7 +54,6 @@ export default {
         state.settings = settings
         state.ready = store.hasAccount(settings)
         api.configure(settings)
-        this.startKeeper(settings)
         console.log('app created, configured=' + state.ready)
       })
       .catch((err) => {
@@ -47,12 +63,12 @@ export default {
 
   // The keeper micro service owns polling while the app is away; the pages own
   // it while the app is visible (they already fetch the same list and chat page
-  // has its own message poll). See docs/design.md §11.
-  startKeeper(settings) {
-    if (settings && settings.backgroundKeep === false) {
-      keeperClient.stop()
-      return
-    }
+  // has its own message poll). See docs/design.md §11–12.
+  //
+  // Retention is not a setting: there is no account-, preference- or
+  // toggle-shaped path that turns it off (design.md §12.6). Only the service
+  // answering "no such service" keeps it off, and that is retried.
+  startKeeper() {
     keeperClient.start({
       onSummary: (summary) => {
         // Pages/index reads this from `$app.$def.shared` (a module level
@@ -60,9 +76,20 @@ export default {
         shared.backgroundSummary = summary
       }
     })
-    // onShow may have fired before the async settings load finished, in which
-    // case the service would start polling while the app is actually visible.
+    // onShow may have fired before this call, in which case the service would
+    // poll while the app is actually visible.
     keeperClient.foreground(this.visible !== false)
+  },
+
+  // Every beat keeps the service paused while the app is on screen. If the app
+  // is killed without a word, the beats stop and the service resumes on its own
+  // when the lease expires — the failure mode 1.0.14 could not escape.
+  startHeartbeat() {
+    if (this.heartbeatTimer) return
+    this.heartbeatTimer = setInterval(() => {
+      if (this.visible === false) return
+      keeperClient.heartbeat()
+    }, LEASE_HEARTBEAT_MS)
   },
 
   onShow() {
@@ -76,6 +103,10 @@ export default {
   },
 
   onDestroy() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
     console.log('app destroyed')
   }
 }

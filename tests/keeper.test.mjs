@@ -16,8 +16,11 @@ import keeper, {
   parseSummary,
   accountKey,
   emptySummary,
+  isForeground,
+  leaseRemaining,
   MIN_BACKGROUND_INTERVAL_MS,
-  BUZZ_COOLDOWN_MS
+  BUZZ_COOLDOWN_MS,
+  FOREGROUND_LEASE_MS
 } from './.build/keeper.mjs'
 
 let passed = 0
@@ -51,8 +54,7 @@ function makeDeps(options) {
     baseUrl: 'https://cloud.example.com',
     user: 'alice',
     appPassword: 'app-password',
-    pollInterval: 15000,
-    backgroundKeep: true
+    pollInterval: 15000
   }
   const deps = {
     loadSettings: () => Promise.resolve(settings),
@@ -140,6 +142,19 @@ test('shouldPoll: only the background service polls', () => {
   assert.equal(shouldPoll({ enabled: true, ready: false, inflight: false, foreground: false }), false)
   assert.equal(shouldPoll({ enabled: true, ready: true, inflight: true, foreground: false }), false)
   assert.equal(shouldPoll(null), false)
+})
+
+test('the foreground lease is what pauses the service, not a boolean', () => {
+  // A plain flag was the 1.0.14 bug: a process killed without onHide left it
+  // true for good, so the service polled nothing until reboot.
+  assert.equal(isForeground(0, 1000), false, 'no lease is "not foreground"')
+  assert.equal(isForeground(2000, 1000), true)
+  assert.equal(isForeground(2000, 2000), false, 'the lease expires exactly at its end')
+  assert.equal(isForeground(undefined, 1000), false)
+  assert.equal(leaseRemaining(2000, 1000), 1000)
+  assert.equal(leaseRemaining(2000, 2500), 0)
+  assert.equal(leaseRemaining(0, 2500), 0)
+  assert.ok(FOREGROUND_LEASE_MS >= MIN_BACKGROUND_INTERVAL_MS, 'a lease spans at least one background period')
 })
 
 test('intervalFor clamps the background period to the floor', () => {
@@ -269,9 +284,11 @@ test('foreground pauses polling, background resumes it', async () => {
 
   await service.onMessage(0, { type: 'foreground' })
   assert.equal(service.state().foreground, true)
-  assert.equal(env.timers.length, 0, 'foreground clears the pending timer')
+  assert.equal(env.timers.length, 1, 'the lease schedules a wake-up instead of polling')
+  assert.equal(env.timers[0].ms, FOREGROUND_LEASE_MS + 1000, 'wake up when the lease runs out')
   await service.tick()
   assert.equal(env.record.polls, pollsAfterStart, 'no request while foreground')
+  assert.equal(env.timers.length, 1, 'the pending wake-up is not duplicated')
 
   await service.onMessage(0, { type: 'background' })
   await flush()
@@ -279,14 +296,51 @@ test('foreground pauses polling, background resumes it', async () => {
   assert.equal(env.timers.length, 1, 'background reschedules')
 })
 
-test('disabled setting performs no request and stops rescheduling', async () => {
+test('a foreground lease that is never renewed expires and polling resumes', async () => {
+  // The failure mode this replaces: the app said "I am visible" and then died.
+  const env = makeDeps()
+  const service = createKeeper(env.deps)
+  env.record.rooms = ROOMS
+  await service.start()
+  await runNext(env.timers)
+  const before = env.record.polls
+
+  await service.onMessage(0, { type: 'foreground' })
+  await service.tick()
+  assert.equal(env.record.polls, before, 'still paused')
+
+  // No further message from the app: only the clock moves.
+  env.clock.now += FOREGROUND_LEASE_MS + 1001
+  await runNext(env.timers)
+  assert.equal(env.record.polls, before + 1, 'the service polls again once the lease lapses')
+  assert.equal(service.state().foreground, false)
+})
+
+test('the last client disconnecting resumes polling without waiting for the lease', async () => {
+  const env = makeDeps()
+  const service = createKeeper(env.deps)
+  await service.start()
+  await runNext(env.timers)
+  const before = env.record.polls
+
+  service.onConnect(1)
+  await service.onMessage(0, { type: 'foreground' })
+  await service.onDisConnect(1)
+  await flush()
+  assert.equal(env.record.polls, before + 1, 'a closed app is not "on screen"')
+})
+
+test('retention cannot be switched off: a stale backgroundKeep=false is ignored', async () => {
+  // 1.0.14 stored the switch in settings; the flag is gone from store.js, and a
+  // leftover value in storage must not bring it back.
   const env = makeDeps({ settings: Object.assign({}, makeDeps().settings, { backgroundKeep: false }) })
   const service = createKeeper(env.deps)
   await service.start()
   await runNext(env.timers)
-  assert.equal(env.record.polls, 0)
-  assert.equal(env.record.saved.length, 0)
-  assert.equal(env.timers.length, 0)
+  assert.equal(env.record.polls, 1, 'the service keeps polling')
+  assert.equal(env.record.saved.length, 1)
+  assert.equal(env.timers.length, 1, 'and keeps rescheduling')
+  assert.equal(service.state().enabled, true)
 })
 
 test('no account performs no request', async () => {
@@ -349,7 +403,7 @@ test('start restores the persisted summary before the first poll', async () => {
   assert.equal(env.record.buzzes.length, 0)
 })
 
-test('shutdown stops the timer', async () => {
+test('shutdown stops the timer and leaves nothing to reschedule', async () => {
   const env = makeDeps()
   const service = createKeeper(env.deps)
   await service.start()
@@ -358,6 +412,18 @@ test('shutdown stops the timer', async () => {
   assert.equal(env.timers.length, 0)
   await runNext(env.timers)
   assert.equal(env.record.polls, 1, 'no poll after shutdown')
+  assert.equal(service.state().enabled, false)
+})
+
+test('a poll that answers after shutdown does not resurrect the timer', async () => {
+  const env = makeDeps()
+  const service = createKeeper(env.deps)
+  await service.start()
+  const pending = service.tick()
+  await service.onMessage(0, { type: 'shutdown' })
+  await pending
+  await flush()
+  assert.equal(env.timers.length, 0, 'the answer belongs to a dead generation')
 })
 
 test('exports stay in sync with the manifest service name', () => {

@@ -54,11 +54,35 @@ function writeSummary(summary) {
 }
 
 // serviceManager.postMessage is documented twice with different signatures:
-// postMessage(clientId, Object) in the table and postMessage({ clientId, params })
-// in the only example. Try the documented example first and fall back, so one
-// wrong reading of the docs cannot silently mute the service.
+// postMessage(clientId, Object) in the table (clientId optional, 0 = broadcast)
+// and postMessage({ clientId, params }) in the only example. The table form is
+// tried per client first — it is the one whose meaning is unambiguous — then
+// the example form, then a plain broadcast.
 function notifyClients(payload) {
   if (typeof serviceManager === 'undefined' || !serviceManager) return
+
+  let clients = []
+  try {
+    if (typeof serviceManager.getClientsInfo === 'function') {
+      clients = serviceManager.getClientsInfo() || []
+    }
+  } catch (err) {
+    console.log('keeper: getClientsInfo failed: ' + ((err && err.message) || err))
+  }
+
+  if (clients.length && typeof serviceManager.postMessage === 'function') {
+    clients.forEach((client) => {
+      const id = client && client.id
+      if (id === undefined || id === null) return
+      try {
+        serviceManager.postMessage(id, payload)
+      } catch (err) {
+        console.log('keeper: postMessage(clientId, payload) failed: ' + ((err && err.message) || err))
+      }
+    })
+    return
+  }
+
   try {
     serviceManager.postMessage({ clientId: 0, params: payload })
     return
@@ -68,7 +92,7 @@ function notifyClients(payload) {
   try {
     serviceManager.postMessage(0, payload)
   } catch (err) {
-    console.log('keeper: postMessage(clientId, payload) failed: ' + ((err && err.message) || err))
+    console.log('keeper: postMessage(0, payload) failed: ' + ((err && err.message) || err))
   }
 }
 

@@ -29,6 +29,35 @@ export const MIN_BACKGROUND_INTERVAL_MS = 30000
 // tick would vibrate forever.
 export const BUZZ_COOLDOWN_MS = 60000
 
+// How long a `foreground` message keeps the service quiet.
+//
+// 1.0.14 had a plain boolean here and it was the reason background retention
+// looked dead: the service paused when the app said it was visible, and the app
+// is not guaranteed to say anything on the way out — a swipe-kill on the watch,
+// a firmware that skips onHide, or a process the system reaps all leave the
+// service holding `foreground = true` with its timer cleared, polling nothing
+// until the next reboot. A lease cannot get stuck: the app renews it while it is
+// on screen (pages renew from a heartbeat in app.ux), and when the renewals stop
+// the service simply resumes.
+export const FOREGROUND_LEASE_MS = 90000
+
+/**
+ * Is the app on screen right now, as far as the service can tell?
+ * `until` is the expiry a `foreground` message wrote; 0 means "no lease".
+ */
+export function isForeground(until, now) {
+  const expiry = Number(until) || 0
+  if (expiry <= 0) return false
+  return expiry > (Number(now) || 0)
+}
+
+/** Milliseconds left on the lease, 0 when it has expired. */
+export function leaseRemaining(until, now) {
+  const expiry = Number(until) || 0
+  const remaining = expiry - (Number(now) || 0)
+  return remaining > 0 ? remaining : 0
+}
+
 export function emptySummary() {
   return { at: 0, total: 0, account: '', rooms: [] }
 }
@@ -110,7 +139,13 @@ export function summarizeRooms(rooms, formatPreview, at) {
   return summary
 }
 
-/** Who polls right now: the pages while foreground, the service while not. */
+/**
+ * Who polls right now: the pages while foreground, the service while not.
+ *
+ * `enabled` is no longer a user preference — background retention is always on
+ * (see docs/design.md §12.6). It now only says "this service is alive", so a
+ * stopped service still answers false.
+ */
 export function shouldPoll(state) {
   const s = state || {}
   if (!s.enabled || !s.ready || s.inflight) return false
@@ -148,21 +183,26 @@ export function createKeeper(deps) {
   let summary = emptySummary()
   let settings = null
   let timerId = null
+  let scheduledAt = 0
   let clients = 0
-  let foreground = false
+  // Expiry of the foreground lease, not a boolean: see FOREGROUND_LEASE_MS.
+  let foregroundUntil = 0
   let inflight = false
   let stopped = false
   // The first successful poll only establishes a baseline: everything already
   // unread when the service starts must not buzz.
   let primed = false
   let lastBuzzAt = 0
+  // Bumped by every resolve/terminate so a poll that answers after the service
+  // was stopped cannot schedule a new timer (Vela keeps the instance around).
+  let generation = 0
 
   function interval() {
     return intervalFor(settings && settings.pollInterval)
   }
 
-  function enabled() {
-    return !settings || settings.backgroundKeep !== false
+  function foreground() {
+    return isForeground(foregroundUntil, now())
   }
 
   function clearTimer() {
@@ -173,13 +213,21 @@ export function createKeeper(deps) {
   }
 
   function schedule(delay) {
-    if (stopped || foreground) return
-    if (!enabled()) return
+    if (stopped) return
+    const wait = delay === undefined ? interval() : delay
+    // A pending timer is only ever replaced by an earlier one. Without this a
+    // foreground heartbeat (renewing the lease every minute) would keep pushing
+    // the poll further away and the service would never tick at all.
+    const dueAt = now() + wait
+    if (timerId !== null && timerId !== undefined && dueAt >= scheduledAt) return
     clearTimer()
+    scheduledAt = dueAt
+    const at = generation
     timerId = d.setTimer(() => {
       timerId = null
-      tick()
-    }, delay === undefined ? interval() : delay)
+      scheduledAt = 0
+      if (at === generation) tick()
+    }, wait)
   }
 
   function publish() {
@@ -206,7 +254,7 @@ export function createKeeper(deps) {
     const cooled = now() - lastBuzzAt >= BUZZ_COOLDOWN_MS
     // Foreground means the user is looking at the app; the pages own the UI
     // and a buzz there is noise.
-    if (grew && cooled && !foreground && typeof d.vibrate === 'function') {
+    if (grew && cooled && !foreground() && typeof d.vibrate === 'function') {
       lastBuzzAt = now()
       d.vibrate('short')
     }
@@ -215,8 +263,16 @@ export function createKeeper(deps) {
   function tick() {
     if (stopped || inflight) return Promise.resolve()
     clearTimer()
+    // While the app is on screen it is the poller (its pages fetch the same
+    // list); come back when the lease runs out instead of polling now.
+    if (foreground()) {
+      schedule(leaseRemaining(foregroundUntil, now()) + 1000)
+      return Promise.resolve()
+    }
     inflight = true
+    const at = generation
     return Promise.resolve(d.loadSettings())
+
       .then((loaded) => {
         settings = loaded || {}
         if (!hasAccount(settings)) {
@@ -224,10 +280,12 @@ export function createKeeper(deps) {
           return null
         }
         if (!shouldPoll({
-          enabled: enabled(),
+          // Retention is not a user setting any more: a live service always may
+          // poll. Only `stopped` (terminate / shutdown) turns it off.
+          enabled: !stopped,
           ready: true,
           inflight: false,
-          foreground: foreground
+          foreground: foreground()
         })) {
           return null
         }
@@ -240,12 +298,17 @@ export function createKeeper(deps) {
       })
       .then(() => {
         inflight = false
+        // A poll that resolves after stop()/start() must not resurrect a timer
+        // from the previous generation.
+        if (at !== generation) return
         schedule()
       })
   }
 
   function start() {
     stopped = false
+    generation += 1
+    clearTimer()
     return Promise.resolve(d.loadSummary())
       .then((raw) => {
         summary = parseSummary(raw)
@@ -254,12 +317,15 @@ export function createKeeper(deps) {
         log('keeper: summary read failed: ' + ((err && err.message) || err))
       })
       .then(() => {
-        schedule(0)
+        if (!stopped) schedule(0)
       })
   }
 
   function stop() {
     stopped = true
+    generation += 1
+    inflight = false
+    foregroundUntil = 0
     clearTimer()
   }
 
@@ -272,15 +338,27 @@ export function createKeeper(deps) {
 
   function onDisConnect() {
     clients = clients > 0 ? clients - 1 : 0
+    // The app unsubscribing is the cleanest "the user left" signal there is.
+    // It is not trusted on its own (a killed process never disconnects), which
+    // is why the lease exists, but it lets the service resume immediately
+    // instead of waiting out the lease.
+    if (clients === 0 && foreground()) {
+      foregroundUntil = 0
+      return tick()
+    }
+    return Promise.resolve()
   }
 
   function onMessage(clientId, params) {
     const type = params && params.type
     if (type === 'foreground') {
-      foreground = true
+      // Renew the lease; the app repeats this from a heartbeat, and the service
+      // comes back on its own if the renewals stop.
+      foregroundUntil = now() + FOREGROUND_LEASE_MS
       clearTimer()
+      schedule(FOREGROUND_LEASE_MS + 1000)
     } else if (type === 'background') {
-      foreground = false
+      foregroundUntil = 0
       return tick()
     } else if (type === 'refresh') {
       return tick()
@@ -302,10 +380,12 @@ export function createKeeper(deps) {
     summary: () => summary,
     state: () => ({
       clients: clients,
-      foreground: foreground,
+      foreground: foreground(),
+      foregroundUntil: foregroundUntil,
       inflight: inflight,
       stopped: stopped,
-      enabled: enabled(),
+      // Always true while the service is alive: retention has no off switch.
+      enabled: !stopped,
       interval: interval()
     })
   }
@@ -316,6 +396,7 @@ export default {
   SUMMARY_KEY,
   MIN_BACKGROUND_INTERVAL_MS,
   BUZZ_COOLDOWN_MS,
+  FOREGROUND_LEASE_MS,
   emptySummary,
   parseSummary,
   accountKey,
@@ -323,5 +404,7 @@ export default {
   summarizeRooms,
   shouldPoll,
   intervalFor,
+  isForeground,
+  leaseRemaining,
   createKeeper
 }

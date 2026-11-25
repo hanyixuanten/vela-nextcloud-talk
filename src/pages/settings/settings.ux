@@ -43,11 +43,6 @@
           <text class="row-value">{{ pollLabel }}</text>
         </div>
 
-        <div class="row" @click="toggleBackground">
-          <text class="row-label">{{ $t('settings.background') }}</text>
-          <text class="row-value">{{ backgroundKeep ? $t('settings.on') : $t('settings.off') }}</text>
-        </div>
-
         <div class="row" @click="cycleFont">
           <text class="row-label">{{ $t('settings.font') }}</text>
           <text class="row-value">{{ fontLabel }}</text>
@@ -72,7 +67,6 @@ import prompt from '@system.prompt'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import api from '../../common/scripts/api'
-import keeperClient from '../../common/scripts/keeperClient'
 import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
 import manifest from '../../manifest.json'
@@ -97,7 +91,6 @@ export default {
     keyboardType: 'QWERTY',
     pollInterval: 15000,
     pollLabel: '',
-    backgroundKeep: true,
     fontScale: 'normal',
     fontLabel: '',
     clearArmed: false
@@ -110,7 +103,6 @@ export default {
       this.keyboardType = settings.keyboardType || 'QWERTY'
       this.pollInterval = settings.pollInterval || 15000
       this.fontScale = settings.fontScale || 'normal'
-      this.backgroundKeep = settings.backgroundKeep !== false
       this.refreshLabels(settings)
     })
   },
@@ -164,7 +156,6 @@ export default {
       this.keyboardType = settings.keyboardType || 'QWERTY'
       this.pollInterval = settings.pollInterval || 15000
       this.fontScale = settings.fontScale || 'normal'
-      this.backgroundKeep = settings.backgroundKeep !== false
       this.refreshLabels(settings)
     })
     console.log('settings save failed: ' + ((err && err.message) || err))
@@ -189,26 +180,6 @@ export default {
     this.fontScale = value
     this.fontLabel = this.$t(FONT_LABEL_KEYS[value])
     this.persist({ fontScale: value }).catch((err) => this.handlePersistFailure(err))
-  },
-
-  /**
-   * Background retention is a micro service switch, not just a stored flag:
-   * turning it on has to start the service (it may have been stopped), turning
-   * it off has to terminate it so no timer is left running.
-   */
-  toggleBackground() {
-    const value = !this.backgroundKeep
-    this.backgroundKeep = value
-    this.persist({ backgroundKeep: value })
-      .then(() => {
-        if (value) {
-          keeperClient.start({})
-          keeperClient.refresh()
-        } else {
-          keeperClient.stop()
-        }
-      })
-      .catch((err) => this.handlePersistFailure(err))
   },
 
   openAccount() {

@@ -1,25 +1,49 @@
 // Page/app side of the `keeper` micro service.
 //
-// `connect()` is called once from app.ux. `policy: "always"` is the whole point:
-// the service is not torn down when the app is closed, so it keeps polling the
-// conversation list and can buzz for new messages.
+// `connect()` is called from app.ux as early as possible. `policy: "always"` is
+// the whole point: the service is not torn down when the app is closed, so it
+// keeps polling the conversation list and can buzz for new messages.
+//
+// Two failures shaped this file (1.0.15):
+//
+// 1. `started` used to be set *before* the connect attempt, so one failed
+//    `connect` — error 1000/1001 while the service runtime was still coming up
+//    during app.onCreate — disabled background retention for the whole session:
+//    every later start() returned early. The flag is now only set once an
+//    instance exists, and a failed attempt is retried with backoff.
+// 2. A `foreground` message used to pause the service for good if the app never
+//    sent its counterpart (swipe-kill, skipped onHide). The service now holds a
+//    lease (keeper.js FOREGROUND_LEASE_MS) and app.ux renews it from a
+//    heartbeat, so silence means "resume", not "stay paused".
 //
 // Everything here is best effort. A firmware without micro service support
-// answers `connect` with an exception (error code 1000/1001); the app must keep
-// working as a plain foreground client instead of failing to start.
+// answers `connect` with an exception; the app must keep working as a plain
+// foreground client instead of failing to start.
 
 import serviceclient from '@system.serviceclient'
-import { SERVICE_NAME } from './keeper'
+import { SERVICE_NAME, FOREGROUND_LEASE_MS } from './keeper'
+
+// Reconnect backoff, in ms. The first rung is deliberately short: most failures
+// are "the service runtime is not up yet" during app.onCreate, not a missing
+// service.
+const RETRY_DELAYS = [1000, 5000, 15000, 45000, 60000]
 
 let instance = null
-let started = false
-let listener = null
+let starting = false
+let retryTimer = null
+let retryStep = 0
 // app.ux mirrors the summary into shared state, pages/index pre-renders it.
 // Both want the same push, so keep a tiny list instead of one callback.
 const listeners = []
 
 function report(params) {
-  console.log('keeper client error: code=' + (params && params.code) + ' ' + (params && params.data))
+  const code = params && params.code
+  console.log('keeper client error: code=' + code + ' ' + (params && params.data))
+  // 1000 connect failed / 1001 service missing / 1003 connection lost: all are
+  // worth another attempt. A dead service that nobody retries is exactly the
+  // bug this file was rewritten for.
+  drop()
+  scheduleRetry()
 }
 
 function emit(summary) {
@@ -42,28 +66,63 @@ function subscribe(fn) {
   }
 }
 
-/**
- * connect({ onSummary })
- * `onSummary(summary)` receives the retained conversation list whenever the
- * service finishes a poll.
- */
-function start(options) {
-  const opts = options || {}
-  if (typeof opts.onSummary === 'function') subscribe(opts.onSummary)
-  if (started) return instance
-  started = true
+function clearRetry() {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+}
+
+/** Forget a dead instance (its callbacks go quiet) so connect() can rebuild. */
+function drop() {
+  const dead = instance
+  instance = null
+  if (!dead) return
+  try {
+    dead.onmessage = null
+    dead.onerror = null
+    if (typeof dead.disconnect === 'function') dead.disconnect()
+  } catch (err) {
+    console.log('keeper client: disconnect failed: ' + ((err && err.message) || err))
+  }
+}
+
+function scheduleRetry() {
+  if (retryTimer !== null || instance) return
+  const delay = RETRY_DELAYS[Math.min(retryStep, RETRY_DELAYS.length - 1)]
+  retryStep += 1
+  console.log('keeper client: retrying connect in ' + delay + 'ms')
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    connect()
+  }, delay)
+}
+
+function connect() {
   if (!serviceclient || typeof serviceclient.connect !== 'function') {
+    // No serviceclient at all: do not spin. The pages poll on their own.
     console.log('keeper client: @system.serviceclient unavailable, background retention off')
     return null
   }
+  if (instance) return instance
+  if (starting) return null
+  starting = true
+  let next = null
   try {
-    instance = serviceclient.connect({ name: SERVICE_NAME, policy: 'always', params: {} })
+    next = serviceclient.connect({ name: SERVICE_NAME, policy: 'always', params: {} })
   } catch (err) {
     console.log('keeper client: connect failed: ' + ((err && err.message) || err))
-    instance = null
+    next = null
+  }
+  starting = false
+  if (!next) {
+    scheduleRetry()
     return null
   }
-  if (!instance) return null
+
+  instance = next
+  retryStep = 0
+  clearRetry()
   instance.onmessage = (params) => {
     // The docs describe the callback argument as "the message object the
     // service sent", but a host may wrap it in `{ params }`. Accept both.
@@ -76,44 +135,73 @@ function start(options) {
   return instance
 }
 
-function post(payload) {
-  if (!instance) return
+/**
+ * start({ onSummary })
+ * `onSummary(summary)` receives the retained conversation list whenever the
+ * service finishes a poll. Safe to call repeatedly: it only subscribes when
+ * already connected, and retries when the last attempt failed.
+ */
+function start(options) {
+  const opts = options || {}
+  if (typeof opts.onSummary === 'function') subscribe(opts.onSummary)
+  if (instance) return instance
+  return connect()
+}
+
+function post(payload, retryable) {
+  if (!instance) {
+    if (retryable !== false) connect()
+    return false
+  }
   try {
     instance.postMessage(payload)
+    return true
   } catch (err) {
     console.log('keeper client: postMessage failed: ' + ((err && err.message) || err))
+    return false
   }
 }
 
-/** Pages poll themselves in the foreground; the service pauses to save power. */
+/**
+ * "The app is on screen" (true) / "the app went away" (false).
+ * The service pauses on true for FOREGROUND_LEASE_MS; app.ux calls this again
+ * from a heartbeat so a visible app keeps it paused, while a killed app simply
+ * stops renewing it.
+ */
 function foreground(active) {
-  post({ type: active ? 'foreground' : 'background' })
+  return post({ type: active ? 'foreground' : 'background' })
 }
 
-/** Ask for an immediate poll (settings changed, account saved). */
+/** Renew the foreground pause without changing anything else. */
+function heartbeat() {
+  return post({ type: 'foreground' })
+}
+
+/** Ask for an immediate poll (account saved, settings changed). */
 function refresh() {
-  post({ type: 'refresh' })
+  return post({ type: 'refresh' })
 }
 
-/** Turn retention off: the service stops its timer and exits. */
+/**
+ * Stop connecting for this session. There is no user-facing switch any more:
+ * retention is always on (docs/design.md §12.6), so only a cleared account or
+ * a teardown uses this.
+ */
 function stop() {
-  post({ type: 'shutdown' })
-  if (instance && typeof instance.disconnect === 'function') {
-    try {
-      instance.disconnect()
-    } catch (err) {
-      console.log('keeper client: disconnect failed: ' + ((err && err.message) || err))
-    }
-  }
-  instance = null
-  started = false
+  clearRetry()
+  retryStep = 0
+  post({ type: 'shutdown' }, false)
+  drop()
 }
 
 export default {
   start,
+  connect,
   subscribe,
   foreground,
+  heartbeat,
   refresh,
   stop,
-  isConnected: () => Boolean(instance)
+  isConnected: () => Boolean(instance),
+  FOREGROUND_LEASE_MS
 }

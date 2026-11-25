@@ -22,10 +22,10 @@ export const DEFAULT_SETTINGS = {
   screenType: 'circle',
   // Milliseconds between background polls of the open conversation.
   pollInterval: 15000,
-  // Keep polling conversations while the app is in the background. Uses the
-  // `keeper` micro service; disabling it stops all background network traffic
-  // (docs/design.md §11).
-  backgroundKeep: true,
+  // NOTE: background retention (the `keeper` micro service) used to be a
+  // `backgroundKeep` flag here. It is not a preference any more — the service
+  // always runs (docs/design.md §12.6) — and `normalize()` drops the stale key
+  // so an old "off" in storage cannot resurrect the switch.
   // small | normal | large
   fontScale: 'normal'
 }
@@ -143,6 +143,9 @@ function normalize(settings) {
   merged.baseUrl = String(merged.baseUrl || '').trim().replace(/\/+$/, '')
   merged.user = String(merged.user || '').trim()
   merged.appPassword = String(merged.appPassword || '').trim()
+  // Retention is always on; a value written by 1.0.14 and earlier would only
+  // confuse the next reader of this object.
+  delete merged.backgroundKeep
   return merged
 }
 
