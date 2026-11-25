@@ -114,7 +114,8 @@ pages/login  ──submit──> api.getCurrentUser()
                           └─ fail → 留在本页，显示错误
 
 pages/index  ──tap 会话──> state.activeRoom + shared.pendingRoom → nav.navigate(pages/chat, {token, name})
-                          nav.navigate = replace only → 500ms 后由 getState/onHide 确认到达 → 都没有才 toast
+                          nav.navigate = 延后 30ms 的 replace → 1300ms 无 params 的 replace → 2400ms 的 push → 3600ms 仍未离开才 toast
+                          （「到没到」比对 router.getState() 快照，不只看页面自己的 onHide）
 
 pages/chat   onInit  → 取 token：router params → shared.pendingRoom → state.activeRoom
              onShow  → 首次拉最近一页；之后恢复轮询（历史模式除外）
@@ -293,18 +294,24 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 
 1.0.1 按「push 可能不落地」加了 push → 300ms → replace 的兜底，真机回报**会话仍然点不开，而且「刷新」也一起死了**。1.0.1 对点击路径的改动只有这个兜底和它依赖的 `leftPage`，所以问题就出在兜底本身：`push` 被丢弃时固件仍会触发当前页的 `onHide`（它响应的是「发起了跳转」，不是「跳转成功了」），`leftPage` 因此读到「已经离开」，重试被永久跳过——又一次静默无响应，还多了一个帮忙掩盖它的状态位。
 
-所以现在的规则是：**只有一种形式，就是 `replace`**，也就是所有已验证能落地的跳转用的那一种。没有 push，也就没有一个能说服自己不重试的状态机。
+1.0.2 改成只用 `replace`，真机回报**弹出了「打不开，请重试」**。这条 toast 把范围缩到很小：点击确实进了处理器，而**在触摸回调里同一拍发出的跳转被丢弃了**。`pages/splash` 早就记录过这个坑——「同一 tick 里的 `router.replace` 可能被丢弃」，它的做法是延后 30ms 再发、1200ms 后再补一次；那也是全应用唯一被真机证明能落地的跳转。
 
-| 步骤 | 做法 | 为什么 |
+于是 `nav.js` 改成一架阶梯，每一级都跳出触摸回调，且只改变一个变量：
+
+| 时间 | 做法 | 排除了什么 |
 | --- | --- | --- |
-| 1 | `replace(target)` | 唯一被真机证明能落地的形式；代价是返回栈退化为「回列表」 |
-| 2 | 500ms 后问三个来源：`router.getState()` 是否已在目标页、`onHide`/`onDestroy` 置的 `leftPage`/`destroyedPage`、`$visible === false` | 前两个都是页面自己的说法，只有 `getState()` 来自路由器本身，所以先问它 |
-| 3 | 三个来源都没有说「已经离开」→ `prompt.showToast('打不开，请重试')`；`replace` 抛异常则直接报 | 让下一次反馈可判定：有 toast = 导航跑了但被丢弃；没 toast = 点击根本没进处理器 |
+| +30ms | `replace(uri, params)` | 同拍发送（splash 的 30ms 延后） |
+| +1300ms | `replace(uri)` | 参数：不带 params 也打不开就不是它 |
+| +2400ms | `push(uri, params)` | 形式：延后之后另一种形式也不行，就不是形式的问题 |
+| +3600ms | 仍未离开 → `showToast('打不开，请重试')` | 留给下一次报告的判据 |
+
+「到没到」不再只信页面自己的生命周期：这块固件上跳转成功也不一定触发 `onHide`/`onDestroy`，1.0.2 的单次判定因此可能对已经打开的页面误报。现在先给路由器做一次快照，每级之后比对 `getState()` 的 `index`/`path`/`name`——这是唯一来自路由器、而不是来自「我们要离开的那一页」的证据；页面自己的 `leftPage`/`destroyedPage` 与 `$visible` 仍作为补充证据。
 
 配套的两处：
 
-- 房间信息走两条通道：router params（`pages/chat` 的 `protected`）+ `$app.$def.shared.pendingRoom`（跨页对象，见 §9）。`pages/chat.onInit` 读完立刻清空，避免上一间房串到下一间。
-- 被 replace 打开的页面在栈底，`router.back()` 无处可去，所以 chat / settings / setup 的返回统一走 `nav.leave(ROUTE.home)`：`router.getState().index > 0` 才 `back()`，否则 replace 回 `pages/index`。
+- 房间信息走两条通道：router params（`pages/chat` 的 `protected`）+ `$app.$def.shared.pendingRoom`（跨页对象，见 §9）。这也让「不带 params 的 replace」这一级有意义：chat 仍能从 `pendingRoom` 拿到房间。`pages/chat.onInit` 读完立刻清空，避免上一间房串到下一间。
+- 被 replace 打开的页面在栈底，`router.back()` 无处可去，所以 chat / settings / setup 的返回统一走 `nav.leave(ROUTE.home)`：`router.getState().index > 0` 才 `back()`，否则延后 30ms replace 回 `pages/index`（`leave` 的 replace 同样在触摸回调里，同样要延后）。
+
 
 ### 用户点了就必须有反应：状态位不能吞掉一次读取
 

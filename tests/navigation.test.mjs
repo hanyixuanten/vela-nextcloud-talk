@@ -42,16 +42,24 @@ test('no page navigates with a bare push any more', () => {
   }
 })
 
-test('nav.js uses the one form that lands, and never pushes', () => {
-  // 1.0.1 shipped push → wait → replace and the taps were still dead: a dropped
-  // push still runs the page's onHide, so the "we left" flag hid the retry.
-  // One form only, and it is the one every working transition already uses.
-  assert.ok(!/router\.push\s*\(/.test(nav), 'nav still tries push')
-  assert.ok(/router\.replace\(target\)/.test(nav), 'the transition must be a replace')
+test('nav.js keeps a ladder of forms, all deferred out of the tap', () => {
+  // 1.0.2 proved two things at once: the tap does reach the handler, and the
+  // replace issued from inside that touch callback is dropped. pages/splash has
+  // documented that same trap all along — it defers the replace by 30ms. The
+  // ladder starts there and then varies exactly one thing per rung.
+  assert.ok(/const LADDER = \[/.test(nav), 'the attempts have to be an explicit ladder')
+  const firstAttempt = nav.indexOf('router.replace(target)')
+  assert.ok(firstAttempt > 0, 'the first rung is the replace that splash proves')
+  const beforeFirst = nav.slice(nav.indexOf('function navigate'), firstAttempt)
+  assert.ok(/setTimeout/.test(beforeFirst), 'the first attempt must be deferred, not issued in the tap tick')
+  // Each rung rules one variable out: params, then the form itself.
+  assert.ok(/withParams: false/.test(nav), 'a params-less replace must be tried')
+  assert.ok(/form: 'push'/.test(nav), 'the other form gets its turn, deferred')
+  // The router is the only witness that comes from outside the page we leave.
   assert.ok(/getState/.test(nav), 'the router itself has to say whether we left')
-  // A transition that threw is proof it never happened; it must be reported
-  // even when the page's own flags claim otherwise.
-  assert.ok(/threw/.test(nav), 'a throwing replace has to be reported')
+  assert.ok(/now\.index !== before\.index/.test(nav), 'arrival is a route snapshot comparison')
+  // A dead ladder still has to say so.
+  assert.ok(/prompt\.showToast/.test(nav), 'a dead tap has to be visible')
 })
 
 test('nav.js says so on screen when both forms are dropped', () => {
