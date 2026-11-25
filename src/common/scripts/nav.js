@@ -55,6 +55,11 @@ const LADDER = [
 ]
 const GIVE_UP_AT = 3600
 
+// How long a leave() rung gets before the router is asked whether it landed.
+// Long enough for a chat -> list transition to paint on the watch, short enough
+// that a dropped back() does not feel like a dead button.
+const LEAVE_VERIFY_MS = 700
+
 export function navigate(vm, uri, params, failMessage, onFail) {
   // A second tap inside the ladder would stack two transitions.
   if (!vm || vm.navigating) return
@@ -144,29 +149,86 @@ function snapshot() {
 }
 
 /**
- * Leave a page that was installed with replace() rather than push(). It sits at
- * the bottom of the stack, where back() has nowhere to go; in that case go to
- * `home` instead of doing nothing. The replace is deferred for the same reason
- * every transition above is: issued inside the tap callback, it is dropped.
+ * Leave a page that may have been installed with replace() rather than push().
+ * It then sits at the bottom of the stack, where back() has nowhere to go; in
+ * that case go to `home` instead of doing nothing.
+ *
+ * Both rungs need the same treatment as navigate(): the transition is deferred
+ * out of the tap callback, and none of the two forms is trusted to land. 1.0.7
+ * shipped the naive version — `getState().index > 0 → router.back()` — and the
+ * chat page's 返回 button became a silent no-op: the router still reported a
+ * stack depth for a page that had been installed by a replace, back() was
+ * dropped, and nothing fell through to the replace that would have worked. So
+ * back() is now verified against a snapshot and the replace is the fallback,
+ * exactly like the forward ladder.
+ *
+ * `onFail` runs when even the fallback did not move us: the page is still on
+ * screen, and it is the page's job to restore whatever it paused on the way out.
  */
-export function leave(home) {
-  let info = null
-  try {
-    info = typeof router.getState === 'function' ? router.getState() : null
-  } catch (err) {
-    info = null
+export function leave(home, onFail) {
+  const before = snapshot()
+  const depth = before && typeof before.index === 'number' ? before.index : 0
+  let settled = false
+
+  const settle = (arrived) => {
+    if (settled) return
+    settled = true
+    if (arrived) return
+    console.log('leave: still on the page after back() and replace() -> ' + home)
+    if (typeof onFail === 'function') {
+      try {
+        onFail()
+      } catch (err) {
+        console.log('leave: onFail handler threw: ' + ((err && err.message) || err))
+      }
+    }
   }
-  if (info && info.index > 0) {
-    router.back()
+
+  const replaceHome = () => {
+    setTimeout(() => {
+      try {
+        router.replace({ uri: home })
+      } catch (err) {
+        console.log('leave: replace threw: ' + ((err && err.message) || err) + ' -> ' + home)
+      }
+    }, 30)
+  }
+
+  if (depth > 0 && typeof router.back === 'function') {
+    try {
+      router.back()
+    } catch (err) {
+      // A throwing back() is proof it never happened; the replace gets its turn.
+      console.log('leave: back threw: ' + ((err && err.message) || err))
+      replaceHome()
+    }
+    // A dropped back() looks exactly like a landed one from inside the page, so
+    // the router has to answer before the fallback is spent or skipped.
+    setTimeout(() => {
+      if (arrivedHome(home, before)) {
+        settle(true)
+        return
+      }
+      replaceHome()
+      setTimeout(() => settle(arrivedHome(home, before)), LEAVE_VERIFY_MS)
+    }, LEAVE_VERIFY_MS)
     return
   }
-  setTimeout(() => {
-    try {
-      router.replace({ uri: home })
-    } catch (err) {
-      console.log('leave: replace threw: ' + ((err && err.message) || err) + ' -> ' + home)
-    }
-  }, 30)
+
+  replaceHome()
+  setTimeout(() => settle(arrivedHome(home, before)), LEAVE_VERIFY_MS)
+}
+
+// Left the page? Either the router is on `home` now, or it is on a different
+// route than the one we took the snapshot on. No getState() means no evidence,
+// which is why the caller never treats a missing snapshot as an arrival.
+function arrivedHome(home, before) {
+  const now = snapshot()
+  if (!now) return false
+  const current = String(now.path || now.name || '')
+  if (home && current.indexOf(home) >= 0) return true
+  if (!before) return true
+  return now.index !== before.index || now.path !== before.path || now.name !== before.name
 }
 
 export default {

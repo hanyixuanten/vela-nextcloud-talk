@@ -23,7 +23,19 @@
         <div class="list">
           <div class="msg {{ $item.mine ? 'msg-mine' : '' }} {{ $item.id === actionId ? 'msg-selected' : '' }}" for="{{messages}}" @longpress="selectMessage($item.id)">
             <text class="msg-meta {{ $item.mine ? 'msg-meta-mine' : '' }}">{{ $item.meta }}</text>
-            <text class="msg-text {{ $item.mine ? 'msg-text-mine' : '' }}" style="font-size: {{ fontSize }}px;">{{ $item.text }}</text>
+            <!-- One text per visual line, six hand-indexed slots, each a direct
+                 child of the bubble with the same shape as the meta line above:
+                 a definite width plus `lines: 1` (see .msg-row-normal). Rows are
+                 pre-split in splitRows(); six is the ceiling, the rest ends in
+                 an ellipsis. Indexed by hand rather than a nested `for`: two
+                 `for`s share the `$idx` index key on this firmware and the inner
+                 one produced no children. -->
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[0] }}">{{ $item.rows[0] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[1] }}">{{ $item.rows[1] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[2] }}">{{ $item.rows[2] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[3] }}">{{ $item.rows[3] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[4] }}">{{ $item.rows[4] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[5] }}">{{ $item.rows[5] }}</text>
             <text class="reaction-summary" if="{{!!$item.reactionSummary}}">{{ $item.reactionSummary }}</text>
           </div>
 
@@ -124,7 +136,20 @@ import { sharedOf } from '../../common/scripts/shared'
 import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
 
-const FONT_SIZES = { small: 20, normal: 23, large: 27 }
+// Font scale drives both a class name (colour/type) and the metrics used to
+// split a message into single-line rows.
+const FONT_SCALES = ['small', 'normal', 'large']
+const FONT_METRICS = {
+  small: { size: 20 },
+  normal: { size: 23 },
+  large: { size: 27 }
+}
+// The bubble is 394 (413 on the rect screen) wide with 16px on each side.
+const ROW_WIDTH = 362
+// The template renders six fixed row slots (a nested `for` produced nothing on
+// this firmware), so this is also the most rows a message can show. Six rows is
+// about a screen of text; the rest ends in an ellipsis.
+const MAX_ROWS = 6
 const DRAFT_VIEW_LIMIT = 60
 const REPLY_VIEW_LIMIT = 48
 const PAGE_SIZE = 12
@@ -160,6 +185,65 @@ function clipDisplay(value, limit) {
   if (value.length <= limit) return value
   const last = value.charCodeAt(limit - 1)
   return value.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit) + '…'
+}
+
+/**
+ * Splits one message into single-line rows.
+ *
+ * History, because it explains the shape of this page: while the list scrolled
+ * with `flex: 1`, this firmware compressed the content into the viewport instead
+ * of letting it overflow, and every text in a bubble measured 0 tall except the
+ * 16px meta line (see docs/design.md §11). Rows were introduced during that
+ * hunt; they survived it because they are verified on device and they make the
+ * bubble height exact rather than inferred.
+ *
+ * A row is a fixed-width, `lines: 1` text, so the wrapping has to be estimated
+ * here: CJK counts 2 units, latin 1, and one row holds ROW_WIDTH / (size / 2)
+ * units. A row can therefore end a glyph narrow or wide. Six rows max, the last
+ * one ends in an ellipsis.
+ */
+function isWideChar(code) {
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2e80 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe30 && code <= 0xfe4f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6)
+  )
+}
+
+function splitRows(text, size, maxRows) {
+  const source = String(text == null ? '' : text)
+  // One unit is half a latin glyph: a latin char is 1, a CJK glyph 2.
+  const perRow = Math.max(6, Math.floor(ROW_WIDTH / (size / 2)))
+  const rows = []
+
+  source.split('\n').forEach((paragraph) => {
+    let row = ''
+    let used = 0
+    const chars = Array.from(paragraph)
+    for (let i = 0; i < chars.length; i += 1) {
+      const cost = isWideChar(chars[i].charCodeAt(0)) ? 2 : 1
+      if (row && used + cost > perRow) {
+        rows.push(row)
+        row = ''
+        used = 0
+      }
+      row += chars[i]
+      used += cost
+    }
+    rows.push(row)
+  })
+
+  if (rows.length > maxRows) {
+    const kept = rows.slice(0, maxRows)
+    // One glyph over the row budget is fine: the row clips at its width.
+    kept[maxRows - 1] = kept[maxRows - 1] + '…'
+    return kept
+  }
+  return rows
 }
 
 function trimLastChar(text) {
@@ -208,7 +292,8 @@ export default {
     browsingHistory: false,
     sending: false,
     error: '',
-    fontSize: FONT_SIZES.normal,
+    fontScale: 'normal',
+    fontSize: FONT_METRICS.normal.size,
     keyboardType: 'QWERTY'
   },
 
@@ -235,16 +320,33 @@ export default {
       state.settings = settings
       api.configure(settings)
       this.myUser = String(settings.user || '').toLowerCase()
-      this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
+      this.applyFontScale(settings.fontScale)
       this.keyboardType = settings.keyboardType || 'QWERTY'
       this.pollInterval = settings.pollInterval || 15000
     })
   },
 
+  // Font scale drives the row class and the metrics rows are split against, so
+  // it has to re-split the messages already on screen, not just the next page.
+  applyFontScale(scale) {
+    const name = FONT_SCALES.indexOf(scale) >= 0 ? scale : 'normal'
+    this.fontScale = name
+    this.fontSize = FONT_METRICS[name].size
+    if (this.messages && this.messages.length) {
+      this.messages = this.messages.map((row) =>
+        Object.assign({}, row, { rows: splitRows(row.text, this.fontSize, MAX_ROWS) }))
+    }
+  },
+
   onShow() {
     this.visible = true
     this.releaseStaleReceive()
-    this.refreshSettings().then(() => {
+    // First entry already has onInit()'s read in flight; awaiting a second
+    // storage read here only put a second round trip between the page appearing
+    // and the first message request. Coming back from Settings is the case that
+    // actually needs fresh preferences.
+    const ready = this.initialised ? this.refreshSettings() : this.settingsReady
+    ready.then(() => {
       if (!this.visible) return
       if (!this.token) {
         this.error = this.$t('chat.errtoken')
@@ -263,7 +365,7 @@ export default {
     this.settingsReady = this.settingsReady.then(() => store.load()).then((settings) => {
       state.settings = settings
       api.configure(settings)
-      this.fontSize = FONT_SIZES[settings.fontScale] || FONT_SIZES.normal
+      this.applyFontScale(settings.fontScale)
       this.keyboardType = settings.keyboardType || 'QWERTY'
       this.pollInterval = settings.pollInterval || 15000
     })
@@ -280,7 +382,22 @@ export default {
   },
 
   onDestroy() {
-    this.onHide()
+    // Same body as onHide(), inlined. Calling this.onHide() here threw
+    // "TypeError: not a function at onDestroy" on the device right before the
+    // firmware logged an out-of-memory warning: by the time a page is destroyed
+    // the VM no longer hands out its methods. Whatever still exists is state.
+    this.visible = false
+    this.receiveGeneration += 1
+    this.receiving = false
+    this.loading = false
+    this.actionId = 0
+    this.pickerOpen = false
+    this.pickerChoices = []
+    if (typeof this.stopPolling === 'function') this.stopPolling()
+    else if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
   },
 
   /**
@@ -447,10 +564,13 @@ export default {
     const author = clipDisplay(String(message.actorDisplayName || ''), 48)
     const reactable = !isSystem && message.deleted !== true && (!message.messageType || message.messageType === 'comment')
     const mask = reactable ? reactionMask(message) : 0
+    const text = clipDisplay(fmt.renderMessage(message), 512)
 
     return {
       id: Number(message.id),
-      text: clipDisplay(fmt.renderMessage(message), 512),
+      text: text,
+      // Pre-split: the template renders one <text lines="1"> per row.
+      rows: splitRows(text, this.fontSize, MAX_ROWS),
       meta: mine ? fmt.formatClock(message.timestamp) : author + ' · ' + fmt.formatClock(message.timestamp),
       mine: mine,
       replyable: !isSystem && message.isReplyable === true,
@@ -614,10 +734,22 @@ export default {
   },
 
   goBack() {
-    this.onHide()
+    // Pause, but do not declare the page hidden yet. onHide() sets `visible`
+    // false, and when the transition is then dropped the page stays on screen
+    // while refusing every later read — a dead page with a dead button. The
+    // pause is restored in the callback if nav.leave() cannot get us out.
+    this.stopPolling()
+    this.receiveGeneration += 1
+    this.receiving = false
+    this.loading = false
+    this.closeActions()
     // This page may have been installed with replace() rather than push() (see
-    // common/scripts/nav.js), in which case back() has nowhere to go.
-    nav.leave(ROUTE.home)
+    // common/scripts/nav.js), so back() alone is not enough.
+    nav.leave(ROUTE.home, () => {
+      this.visible = true
+      prompt.showToast({ message: this.$t('chat.backfailed'), duration: 2000 })
+      this.schedulePoll(this.pollInterval)
+    })
   }
 }
 </script>
@@ -641,9 +773,24 @@ export default {
   margin-left: 8px;
 }
 
+/* Fixed design height, never `flex: 1`.
+ *
+ * This is the one thing every page here got wrong and the HyperBilibili template
+ * (src/less/global.less) gets right: its `.scroll` is `width/height: 100%` of a
+ * page root with an explicit height, i.e. the scroll owns a *definite* pixel
+ * box and its content is free to be taller than that box. With `flex: 1` this
+ * firmware resolves the viewport height and then *shrinks the content to fit*
+ * instead of letting it overflow: the list never scrolls, every bubble is
+ * compressed on the main axis, and a compressed text measures 0 tall. That is
+ * the "长条" — not a text-layout bug at all.
+ *
+ * 480 - (10+72+6 bar + 8+58+18 input) = 308; the CIRCLE and RECT blocks override
+ * with their own chrome. */
 .scroll {
-  flex: 1;
-  width: 100%;
+  width: 480px;
+  height: 308px;
+  flex-direction: column;
+  align-items: center;
 }
 
 .list {
@@ -661,9 +808,15 @@ export default {
 .msg {
   width: 394px;
   margin-top: 10px;
+  /* Bottom spacing lives here: a row cannot know it is the last one, and the
+   * meta line only has a top margin. */
+  padding-bottom: 12px;
   border-radius: 26px;
   background-color: #262626;
   flex-direction: column;
+  /* Children carry their own pixel width (see below); this only makes the
+   * cross-axis rule explicit instead of relying on this build's default. */
+  align-items: flex-start;
 }
 
 .msg-mine {
@@ -674,39 +827,89 @@ export default {
   background-color: #3b3b3b;
 }
 
+/* The meta line: 16px, one line, ellipsis. The reference shape for everything
+ * else in a bubble — width in pixels, font size and line count in one block. */
 .msg-meta {
+  width: 362px;
   margin-left: 16px;
   margin-right: 16px;
   margin-top: 12px;
+  /* The first row follows directly, like a subtitle under a name. */
+  margin-bottom: 2px;
   font-size: 16px;
   font-weight: 500;
   color: #9c9c9c;
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
 .msg-meta-mine {
   color: #56232f;
 }
 
-.msg-text {
+/* The body is a column of single-line rows, pre-split in splitRows(). Each row is
+ * a direct child of the bubble and its style block is self-contained and the
+ * same shape as .msg-meta:
+ *
+ *   width + side margins + font-size + lines: 1, all in ONE block
+ *
+ * Self-contained on purpose: a text whose font size comes from a second class,
+ * or from an inline style, is one more thing that has to be trusted on a
+ * firmware that has already surprised us repeatedly. The font size is fixed per
+ * class (the Settings switch picks one of these three complete blocks) and the
+ * row height follows from the font itself. */
+.msg-row-small {
+  width: 362px;
   margin-left: 16px;
   margin-right: 16px;
-  margin-top: 4px;
-  margin-bottom: 12px;
-  line-height: 32px;
+  margin-top: 1px;
+  font-size: 20px;
+  font-weight: 500;
   color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
-.msg-text-mine {
+.msg-row-normal {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 1px;
+  font-size: 23px;
+  font-weight: 500;
+  color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.msg-row-large {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 1px;
+  font-size: 27px;
+  font-weight: 500;
+  color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.msg-row-mine {
   color: #1a1a1a;
   text-align: right;
 }
 
 .reaction-summary {
+  width: 362px;
   margin-left: 16px;
   margin-right: 16px;
   margin-bottom: 12px;
   font-size: 17px;
   color: #ffb3c8;
+  /* Three reactions at most (see REACTIONS), so one line is enough and keeps
+   * every text inside a bubble on the shape that is known to render. */
+  lines: 1;
+  text-overflow: ellipsis;
 }
 
 .reaction-label {
@@ -721,13 +924,17 @@ export default {
   align-items: center;
 }
 
+/* Same rule as the bubble texts: a width, or a server error stays on one line
+ * and runs off the 374px block it lives in. */
 .placeholder-hint {
+  width: 374px;
   font-size: 20px;
   color: #9c9c9c;
   text-align: center;
 }
 
 .placeholder-error {
+  width: 374px;
   font-size: 21px;
   color: #ff8095;
   text-align: center;
@@ -866,6 +1073,10 @@ export default {
 .msg {
   width: 394px;
 }
+/* 480 - (70+72+6 bar) - (8+58+40 input) = 226 */
+.scroll {
+  height: 226px;
+}
 .inputbar {
   width: 50%;
   margin-bottom: 40px;
@@ -889,12 +1100,33 @@ export default {
 .bar {
   width: 86%;
 }
+/* 640 - (10+72+6 bar) - (8+62+16 input) = 466 */
+.scroll {
+  height: 466px;
+}
 .msg {
   width: 413px;
 }
-.msg-mine {
-  align-self: flex-end;
+/* 413 - 16 - 16, see the base .msg-row-normal comment. */
+.msg-meta {
+  width: 381px;
 }
+.msg-row-small {
+  width: 381px;
+}
+.msg-row-normal {
+  width: 381px;
+}
+.msg-row-large {
+  width: 381px;
+}
+.reaction-summary {
+  width: 381px;
+}
+/* The RECT block used to put `align-self: flex-end` on .msg-mine. This
+ * firmware logs "Unknown style - alignSelf" and ignores it, so own bubbles have
+ * always been full width on both shapes; the rule is gone rather than left to
+ * print that line on every render. */
 .inputbar {
   width: 78%;
   height: 62px;

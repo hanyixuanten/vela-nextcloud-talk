@@ -70,7 +70,8 @@
     "send": "发送",
     "sending": "发送中",
     "empty": "还没有消息",
-    "errtoken": "会话参数缺失"
+    "errtoken": "会话参数缺失",
+    "backfailed": "返回失败，请重试"
   },
   "settings": {
     "title": "设置",

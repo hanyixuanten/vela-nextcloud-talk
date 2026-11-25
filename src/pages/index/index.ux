@@ -333,9 +333,16 @@ export default {
   text-align: center;
 }
 
+/* Fixed design height, never `flex: 1`: with a flex height this firmware keeps
+ * the content inside the viewport instead of letting it overflow, so the cards
+ * are compressed and the list cannot scroll (see pages/chat, and the
+ * HyperBilibili global.less this theme came from).
+ * 480 - (108 head + 56 pill + 20 bottom) = 296; the shape blocks override. */
 .scroll {
-  flex: 1;
-  width: 100%;
+  width: 480px;
+  height: 296px;
+  flex-direction: column;
+  align-items: center;
 }
 
 .list {
@@ -370,8 +377,14 @@ export default {
   justify-content: center;
 }
 
+/* Design pixels, not `width: 100%`: the chat page proved that a text without a
+ * definite width in this build can end up as a zero-height box (see
+ * docs/design.md §11). Inside a card the maths is fixed anyway:
+ *   394 (413 on rect) - 16 avatar margin - 56 avatar - 14 - 8 - 84 - 16 = 200 (219)
+ * and both lines are single-line with the font size in the same block, which is
+ * the only shape that has ever measured a height on the watch. */
 .room-name {
-  width: 100%;
+  width: 200px;
   font-size: 26px;
   font-weight: 600;
   color: #ffffff;
@@ -380,7 +393,7 @@ export default {
 }
 
 .room-preview {
-  width: 100%;
+  width: 200px;
   margin-top: 4px;
   font-size: 19px;
   font-weight: 500;
@@ -441,6 +454,10 @@ export default {
 .room {
   height: 98px;
 }
+/* 480 - 112 head - (56 pill + 44 bottom) = 268 */
+.scroll {
+  height: 268px;
+}
 .footer {
   width: 52%;
   margin-bottom: 44px;
@@ -458,6 +475,16 @@ export default {
 }
 .room {
   width: 413px;
+}
+.room-name {
+  width: 219px;
+}
+.room-preview {
+  width: 219px;
+}
+/* 640 - 92 head - (56 pill + 14 bottom) = 478 */
+.scroll {
+  height: 478px;
 }
 .footer {
   width: 86%;

@@ -76,9 +76,33 @@ test('tapping a conversation hands the room over on both channels', () => {
 
 test('pages reachable by a replace-fallback return to the list, not to nothing', () => {
   for (const [name, page] of [['chat', chat], ['settings', settings], ['setup', setup]]) {
-    assert.ok(/nav\.leave\(ROUTE\.home\)/.test(page), `pages/${name} must use nav.leave`)
+    assert.ok(/nav\.leave\(ROUTE\.home/.test(page), `pages/${name} must use nav.leave`)
     assert.ok(!/router\.back\(\)/.test(page), `pages/${name} still calls router.back() directly`)
   }
+})
+
+test('nav.leave verifies back() and falls back to the replace', () => {
+  // 1.0.7 shipped `getState().index > 0 → router.back()` and nothing else: the
+  // chat page's 返回 became a silent no-op because the router still reported a
+  // stack depth for a page that had been installed by a replace.
+  const leave = nav.slice(nav.indexOf('export function leave'))
+  assert.ok(/router\.back\(\)/.test(leave), 'back() is still the first choice')
+  assert.ok(/router\.replace\(\{ uri: home \}\)/.test(leave), 'the replace has to remain the fallback')
+  assert.ok(/arrivedHome\(/.test(leave), 'a dropped back() must be detected, not assumed')
+  assert.ok(
+    leave.indexOf('router.back()') < leave.indexOf('replaceHome()'),
+    'back() is attempted before the replace fallback is spent'
+  )
+  assert.ok(/onFail/.test(leave), 'a page that cannot leave has to be told')
+})
+
+test('the chat page does not declare itself hidden before it has left', () => {
+  // onHide() sets `visible` false; if the transition is then dropped the page is
+  // still on screen but refuses every read, so 返回 looked dead twice over.
+  const goBack = scriptOf(chat, 'goBack')
+  assert.equal(/this\.onHide\(\)/.test(goBack), false, 'goBack must not call onHide()')
+  assert.ok(/nav\.leave\(ROUTE\.home,/.test(goBack), 'goBack passes a failure callback')
+  assert.ok(/this\.visible = true/.test(goBack), 'goBack restores visibility when the leave fails')
 })
 
 test('the chat page reads the fallback exactly once', () => {

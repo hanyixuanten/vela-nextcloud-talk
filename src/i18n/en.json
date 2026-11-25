@@ -70,7 +70,8 @@
     "send": "Send",
     "sending": "Sending",
     "empty": "No messages yet",
-    "errtoken": "Missing conversation token"
+    "errtoken": "Missing conversation token",
+    "backfailed": "Couldn't go back, please try again"
   },
   "settings": {
     "title": "Settings",

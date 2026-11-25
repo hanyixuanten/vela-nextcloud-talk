@@ -22,6 +22,9 @@ const message = (id) => ({ id, message: '文字', timestamp: 100, isReplyable: t
 const ids = (high, low) => Array.from({ length: high - low + 1 }, (_, i) => high - i)
 const ctx = {
   fmt,
+  // The page logs its layout probe and its stale-read releases; on the watch
+  // those go to the device log, here they would only pollute the test output.
+  console: { log() {} },
   state: {},
   // No $app in this sandbox, so sharedOf() falls back to the page-local cache,
   // exactly as it does on a firmware without $def.
@@ -54,10 +57,12 @@ const scrollOffsets = []
 const page = Object.assign(ctx.page, ctx.page.private, {
   token: 'tokA',
   $t: (key) => key,
-  $element: (id) => {
-    assert.equal(id, 'chat-scroll')
-    return { scrollTo: ({ top }) => scrollOffsets.push(top) }
-  }
+  // The page only ever reaches for the scroll container (scrollTo when it jumps
+  // back to the latest message). Anything else is a bug in the page, not a stub
+  // to fill in, so it stays undefined.
+  $element: (id) => (id === 'chat-scroll'
+    ? { scrollTo: ({ top }) => scrollOffsets.push(top) }
+    : undefined)
 })
 const current = () => Array.from(page.messages, (row) => row.id)
 const respond = (list, lastGiven = 0, notModified = false) => requests.at(-1).resolve({
@@ -238,3 +243,33 @@ assert.equal(page.replyId, 114)
 assert.equal(page.editing, true)
 page.onHide()
 console.log('  ok   watch adds, removes and syncs bounded reactions without inserting event rows')
+
+// ------------------------------------------------ rows: the body is pre-split
+// The page renders one single-line text per visual row (six slots), so bubble
+// height follows the row count. The split is estimated, so these are the
+// properties that matter: never an empty array, no row wildly over budget,
+// newlines preserved, six rows max with an ellipsis.
+const CJK = '字'
+const latin = 'abcdefghij'
+// Rows come from the page's VM realm, so compare copies, not the arrays.
+const rowsOf = (text) => Array.from(page.toView({ id: 900, message: text, timestamp: 1 }).rows)
+
+const short = rowsOf('文字')
+assert.equal(short.length, 1, 'a short message is one row')
+assert.equal(short[0], '文字')
+
+const long = rowsOf(CJK.repeat(120))
+assert.ok(long.length > 1, 'a 120-glyph message wraps')
+assert.ok(long.length <= 6, 'no message shows more than 6 rows (six template slots)')
+for (const row of long) assert.ok(Array.from(row).length <= 16, `row too wide: ${row}`)
+
+const latinRows = rowsOf(latin.repeat(10))
+assert.ok(latinRows.length > 1, 'latin text wraps too')
+
+const newlines = rowsOf('第一行\n第二行')
+assert.deepEqual(newlines, ['第一行', '第二行'], 'an explicit newline starts a new row')
+
+const capped = rowsOf(CJK.repeat(400))
+assert.equal(capped.length, 6, 'a huge message is capped at 6 rows')
+assert.ok(capped[5].endsWith('…'), 'the capped row says it was cut')
+console.log('  ok   the message body is split into single-line rows')
