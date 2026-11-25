@@ -1,19 +1,10 @@
 // Navigation invariants.
 //
-// Reported from the watch (0.2.13): tapping a conversation card and tapping 设置
-// both did nothing — no transition, no error — while 刷新 on the same footer row
-// worked. Those two handlers were the app's only `router.push` call sites;
-// every transition that demonstrably lands (splash → index / setup / offline)
-// uses `router.replace`. So `push` is treated as "may silently do nothing":
-//
-//   common/scripts/nav.js   a deferred ladder of forms → ask the router whether
-//                           we got there → a toast if we did not, because a
-//                           silent no-op and a frozen screen look identical on
-//                           a watch.
-//
-// These checks pin the shape of that fix. The 0.2.13 sources fail them: they
-// called router.push from pages/index and pages/settings with no verification
-// and no fallback.
+// `router.push` may silently do nothing on this firmware, and a landed transition
+// does not always fire `onHide`. `common/scripts/nav.js` therefore walks a
+// deferred ladder of forms, asks the router whether it arrived via
+// `router.getState()`, and only then shows a toast. A silent no-op and a frozen
+// screen look identical on a watch, so every attempt has to be observable.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 

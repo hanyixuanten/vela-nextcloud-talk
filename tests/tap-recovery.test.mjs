@@ -1,22 +1,10 @@
 // A tap must never be swallowed by a state flag.
 //
-// Reported from the watch on 1.0.1: 无法进入会话 and 刷新按钮不起作用 together.
-// The navigation half is pinned in navigation.test.mjs. This file pins the other
-// half — the two places where one unfinished request was able to turn a button
-// into a permanent no-op:
-//
-//   pages/index  refresh() returned early while `loading` was true. A request
-//                that never settled (fetch with no callback and no error) kept
-//                that flag set for good, so every later tap on 刷新 did
-//                nothing, with no spinner and no error.
-//   pages/chat   receive() returned early while `receiving` was true. The same
-//                unfinished request left the page on 正在加载… and refused
-//                every later read, so the conversation never opened.
-//
-// The rule both pages now follow: a user-initiated read supersedes the request
-// in flight (a generation token invalidates its answer), and a flag older than
-// the api layer's own timeout is released before it is consulted. The 1.0.1
-// sources fail every check below.
+// A request that never settles (no callback, no error) used to leave `loading` /
+// `receiving` true forever, turning 刷新 and 会话 into permanent no-ops. The rule
+// both pages follow: a user-initiated read supersedes the one in flight (a
+// generation token invalidates its answer), and a flag older than the api layer's
+// timeout is released before it is consulted.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 

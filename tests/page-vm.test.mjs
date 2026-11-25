@@ -1,16 +1,9 @@
 // A page VM may not carry `data` together with `protected` / `public` / `private`.
 //
-// From the watch log on 1.0.4, once per attempted transition:
-//
-//   Error: 页面VM对象中的属性data不可与"public,protected,private"同时存在，
-//          请使用private替换data名称
-//     at __scriptModule__ (.../pages/chat/chat.js:8659)
-//
-// That was pages/chat: `protected` (the room token/name from the router) next to
-// `data`. The page VM was never created, so the router issued the transition,
-// the target page failed to build and the caller stayed on the list — the exact
-// shape of "点会话没反应". Four rounds went into the navigation helper before
-// this line was read; the check below is what would have caught it in a second.
+// The firmware refuses to build such a page, so the router issues the transition,
+// the target page fails to construct and the caller stays where it was — the exact
+// shape of "点会话没反应". Static check only: every page, not just the one that
+// reported it.
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'

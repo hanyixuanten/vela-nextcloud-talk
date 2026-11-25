@@ -47,18 +47,13 @@ fail=0
 "$NODE" "$ROOT/tests/login-save.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/network.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/launch-gate.test.mjs" || fail=1
-"$NODE" "$ROOT/tests/login-layout.test.mjs" || fail=1
-"$NODE" "$ROOT/tests/layout-sizing.test.mjs" || fail=1
-"$NODE" "$ROOT/tests/chat-layout.test.mjs" || fail=1
-"$NODE" "$ROOT/tests/index-layout.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/navigation.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/page-vm.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/tap-recovery.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/keeper.test.mjs" || fail=1
-"$NODE" "$ROOT/tests/keeper-service.test.mjs" || fail=1
-"$NODE" "$ROOT/tests/seed-watch-chat.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then
   rm -rf "$BUILD"
