@@ -56,6 +56,9 @@ let instance = null
 let starting = false
 let retryTimer = null
 let retryStep = 0
+// Last onerror we saw, kept for the settings-page probe: on a watch there is
+// no inspector, so "background retention is dead" has to be readable on screen.
+let lastError = null
 // app.ux mirrors the summary into shared state, pages/index pre-renders it.
 // Both want the same push, so keep a tiny list instead of one callback.
 const listeners = []
@@ -90,6 +93,7 @@ function serviceClientFeature() {
 function report(params) {
   const code = params && params.code
   console.log('keeper client error: code=' + code + ' ' + (params && params.data))
+  lastError = { code: code, data: String((params && params.data) || ''), at: Date.now() }
   // 1000 connect failed / 1001 service missing / 1003 connection lost: all are
   // worth another attempt. A dead service that nobody retries is exactly the
   // bug this file was rewritten for.
@@ -166,6 +170,7 @@ function connect() {
     next = client.connect({ name: SERVICE_NAME, policy: 'always', params: {} })
   } catch (err) {
     console.log('keeper client: connect failed: ' + ((err && err.message) || err))
+    lastError = { code: 0, data: String((err && err.message) || err), at: Date.now() }
     next = null
   }
   starting = false
@@ -258,5 +263,13 @@ export default {
   refresh,
   stop,
   isConnected: () => Boolean(instance),
+  /** On-screen probe for the settings page: why is retention (not) working? */
+  diagnostics: () => ({
+    connected: Boolean(instance),
+    featureMissing: featureMissing,
+    retrying: retryTimer !== null,
+    retryStep: retryStep,
+    lastError: lastError
+  }),
   FOREGROUND_LEASE_MS
 }

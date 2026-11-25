@@ -99,7 +99,12 @@
     "seconds": "秒",
     "cleared": "已清除",
     "clearFailed": "清除失败，请重试",
-    "clearAgain": "再次点击确认清除"
+    "clearAgain": "再次点击确认清除",
+    "keeper": "后台留存",
+    "keeperConnected": "服务已连接",
+    "keeperNoService": "本机无微服务",
+    "keeperRetry": "连接重试中",
+    "keeperDown": "服务未连接"
   },
   "setup": {
     "title": "从手机配置",

@@ -43,6 +43,11 @@
           <text class="row-value">{{ pollLabel }}</text>
         </div>
 
+        <div class="row" @click="refreshKeeper">
+          <text class="row-label">{{ $t('settings.keeper') }}</text>
+          <text class="row-value">{{ keeperLabel }}</text>
+        </div>
+
         <div class="row" @click="cycleFont">
           <text class="row-label">{{ $t('settings.font') }}</text>
           <text class="row-value">{{ fontLabel }}</text>
@@ -70,6 +75,7 @@ import api from '../../common/scripts/api'
 import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
 import manifest from '../../manifest.json'
+import keeperClient from '../../common/scripts/keeperClient'
 
 const FONTS = ['small', 'normal', 'large']
 const FONT_LABEL_KEYS = {
@@ -93,7 +99,8 @@ export default {
     pollLabel: '',
     fontScale: 'normal',
     fontLabel: '',
-    clearArmed: false
+    clearArmed: false,
+    keeperLabel: ''
   },
 
   onInit() {
@@ -110,6 +117,7 @@ export default {
   onShow() {
     // nav.navigate() reads this to decide whether a push landed.
     this.leftPage = false
+    this.refreshKeeper()
   },
 
   onHide() {
@@ -180,6 +188,33 @@ export default {
     this.fontScale = value
     this.fontLabel = this.$t(FONT_LABEL_KEYS[value])
     this.persist({ fontScale: value }).catch((err) => this.handlePersistFailure(err))
+  },
+
+  // On-screen probe for background retention (docs/design.md §12): the watch has
+  // no inspector, so the failure mode has to be readable here. Tapping re-reads.
+  refreshKeeper() {
+    const d = keeperClient.diagnostics()
+    const app = this.$app && this.$app.$def
+    const summary = app && app.shared && app.shared.backgroundSummary
+    let label
+    if (d.featureMissing) {
+      label = this.$t('settings.keeperNoService')
+    } else if (d.connected) {
+      label = this.$t('settings.keeperConnected')
+    } else if (d.retrying) {
+      label = this.$t('settings.keeperRetry')
+    } else {
+      label = this.$t('settings.keeperDown')
+    }
+    if (summary && summary.at > 0 && !d.featureMissing) {
+      const at = new Date(summary.at)
+      const pad = (n) => (n < 10 ? '0' + n : '' + n)
+      label += ' ' + pad(at.getHours()) + ':' + pad(at.getMinutes())
+    }
+    if (d.lastError && !d.featureMissing && !d.connected) {
+      label += ' E' + d.lastError.code
+    }
+    this.keeperLabel = label
   },
 
   openAccount() {

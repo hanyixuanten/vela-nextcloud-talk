@@ -32,6 +32,7 @@ function test(name, fn) {
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const manifest = JSON.parse(read('../src/manifest.json'))
 const app = read('../src/app.ux')
+const keeperClient = read('../src/common/scripts/keeperClient.js')
 
 console.log('bgSync.js pure helpers')
 
@@ -138,6 +139,16 @@ test('a stalled background ticker stops renewing the service lease', () => {
   const heartbeat = app.slice(app.indexOf('startHeartbeat()'), app.indexOf('onShow()'))
   assert.match(heartbeat, /lastBgAttemptAt/)
   assert.match(heartbeat, /BG_SYNC_MS \* 3/)
+})
+
+test('the settings page can say why retention is (not) working', () => {
+  // A watch has no inspector: the keeper client has to expose its failure mode
+  // (no feature / retrying / connected) and the settings page has to render it.
+  assert.match(keeperClient, /diagnostics: \(\) => \(\{/)
+  assert.match(keeperClient, /lastError/)
+  const settings = read('../src/pages/settings/settings.ux')
+  assert.match(settings, /keeperClient\.diagnostics\(\)/, 'the probe row reads the client state')
+  assert.match(settings, /refreshKeeper/, 'the row refreshes on show and on tap')
 })
 
 let failedCount = 0
