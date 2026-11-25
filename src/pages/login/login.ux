@@ -31,7 +31,7 @@
 
         <div class="connect">
           <app-pill text="{{ submitting ? $t('login.connecting') : $t('login.connect') }}"
-                    width="100%" primary="true" busy="{{submitting}}" @click="submit"></app-pill>
+                    width="100%" primary="{{true}}" busy="{{submitting}}" @click="submit"></app-pill>
         </div>
 
         <text class="t-error error" show="{{error}}">{{ error }}</text>

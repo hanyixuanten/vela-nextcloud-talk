@@ -17,7 +17,7 @@
     </div>
 
     <div class="actions">
-      <app-pill text="{{ $t('offline.retry') }}" width="70%" primary="true" @click="retry"></app-pill>
+      <app-pill text="{{ $t('offline.retry') }}" width="70%" primary="{{true}}" @click="retry"></app-pill>
     </div>
   </div>
 </template>

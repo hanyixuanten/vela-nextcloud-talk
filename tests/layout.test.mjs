@@ -160,6 +160,17 @@ test('scroll content and the cards inside it are design pixels', () => {
   assert.equal(size(sSettings.base, sSettings.rect, ['.scroll', 'height']), 640 - size(theme, ['.bar', 'height']))
 })
 
+test('boolean component props are bound, never passed as strings', () => {
+  // `small="true"` hands the prop the *string* "true", and the framework logs a
+  // type-validation failure for every render: "app-pill props中的：small
+  // type类型验证失败，期望类型为Boolean". The declaration stays strict Boolean on
+  // purpose - the binding form is what has to be right.
+  for (const [name, page] of Object.entries(pages)) {
+    const offenders = [...templateOf(page).matchAll(/\b(small|primary|busy|disabled)="true"/g)]
+    assert.deepEqual(offenders.map((m) => m[0]), [], `${name}: boolean props must use {{true}}`)
+  }
+})
+
 test('the chat list gets an explicit pixel height, never flex: 1', () => {
   // The scrolling bug in one line: `<scroll style="flex: 1">` this firmware
   // resolves the viewport and then shrinks the content into it, so the list can

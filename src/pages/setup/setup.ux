@@ -19,8 +19,8 @@
     <text class="hint" show="{{!serverLabel}}">{{ $t('setup.hint') }}</text>
 
     <div class="actions">
-      <app-pill text="{{ $t('common.back') }}" width="46%" small="true" @click="goBack"></app-pill>
-      <app-pill text="{{ $t('setup.manual') }}" width="46%" small="true" @click="openLogin"></app-pill>
+      <app-pill text="{{ $t('common.back') }}" width="46%" small="{{true}}" @click="goBack"></app-pill>
+      <app-pill text="{{ $t('setup.manual') }}" width="46%" small="{{true}}" @click="openLogin"></app-pill>
     </div>
   </div>
 </template>

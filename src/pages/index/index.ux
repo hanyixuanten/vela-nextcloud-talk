@@ -45,7 +45,7 @@
 
         <div class="empty" if="{{!loading && error}}">
           <text class="t-error empty-message">{{ error }}</text>
-          <app-pill text="{{ $t('common.retry') }}" width="220px" primary="true" @click="refresh"></app-pill>
+          <app-pill text="{{ $t('common.retry') }}" width="220px" primary="{{true}}" @click="refresh"></app-pill>
         </div>
 
         <div class="empty" if="{{loading && rooms.length === 0}}">
@@ -55,8 +55,8 @@
     </scroll>
 
     <div class="footer">
-      <app-pill text="{{ $t('index.refresh') }}" width="46%" small="true" @click="refresh"></app-pill>
-      <app-pill text="{{ $t('index.settings') }}" width="46%" small="true" @click="openSettings"></app-pill>
+      <app-pill text="{{ $t('index.refresh') }}" width="46%" small="{{true}}" @click="refresh"></app-pill>
+      <app-pill text="{{ $t('index.settings') }}" width="46%" small="{{true}}" @click="openSettings"></app-pill>
     </div>
   </div>
 </template>

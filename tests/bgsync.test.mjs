@@ -88,6 +88,22 @@ test('the ticker must stay inside the platform 20s background window', () => {
   assert.equal(ROOMS_FILE.endsWith('.txt'), true, 'older file APIs reject .json resources')
 })
 
+test('the serviceclient feature is required lazily, never imported', () => {
+  // 1.0.16 learned this the hard way: a module-scope
+  // `import serviceclient from '@system.serviceclient'` compiles to a module-level
+  // $app_require$ call, and on a firmware without the feature that call *throws*
+  // while app.ux is still initialising - taking the translators, the lease
+  // heartbeat and the in-app background ticker down with it. The feature has to
+  // be resolved inside a try/catch at call time, once.
+  const client = read('../src/common/scripts/keeperClient.js')
+  assert.doesNotMatch(client, /^import [^\n]*@system\.serviceclient/m, 'no module-scope import')
+  assert.match(client, /require\('@system\.serviceclient'\)/, 'resolved at call time')
+  assert.match(client, /try \{[\s\S]*?require\('@system\.serviceclient'\)[\s\S]*?\} catch/, 'the require is caught')
+  // And it must not be retried forever: a firmware that says "not found" now
+  // will still say so at the next tick.
+  assert.match(client, /featureMissing/, 'a missing feature is remembered')
+})
+
 console.log('\nmanifest / app wiring')
 
 test('the manifest declares the background interface it uses', () => {
