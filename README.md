@@ -18,7 +18,7 @@
 
 两种方式任选：
 
-- **AIoT-IDE**（官方）：先用下面的构建命令或 GitHub Actions 生成对应屏幕的 RPK，再用 IDE 模拟器或真机调试。不要直接用 IDE 打包按钮构建原始源码：它既不执行本项目的屏幕条件预处理，也不做本项目的压缩，聊天页会到 **1.06 MB**——而 Vela 不会加载超过 **1 MB** 的单个页面文件，装上去的表现就是「点会话没反应 / 打不开，请重试」。命令行与 CI 产出的包聊天页是 700 KB。
+- **AIoT-IDE**（官方）：先用下面的构建命令或 GitHub Actions 生成对应屏幕的 RPK，再用 IDE 模拟器或真机调试。不要直接用 IDE 打包按钮构建原始源码，因为它不会执行本项目的屏幕条件预处理。
 - **命令行**：需要 Node ≥ 18（本项目在 v22.22.2 + aiot-toolkit 2.0.5 上验证过），然后
 
   ```bash
@@ -49,8 +49,6 @@
 2. 手机端进入 `我的 → 关于 → 连点「关于」进入 Debug → 第三方应用`，包名填 `com.hanyixuanten.nctalk`，选择上面的 rpk 安装。
 3. 或者用社区工具（[minstall](https://github.com/HyperionD/minstall) 等）走蓝牙安装。
 4. 手表上打开 Talk。启动先过网络门（手表没有可用网络接口时只会停在「重试」页，进不去会话和设置）：通过后**首次启动直接进「从手机配置」页**（它才是监听 interconnect 的那一页），要么等手机推，要么点「手动输入」自己填三项。
-
-包内单个 JS 文件不得超过 1 MB（Vela 的硬限制，超了真机直接不加载该页面）。`scripts/build-watch.cjs` 在打包后会解析 RPK 里的每个条目，超过 1 MB 就**直接构建失败**并报出文件名与体积，所以不要绕过它去装 IDE 产物。
 
 本地调试构建用 `build:circle` 或 `build:rect`；正式签名分别用 `npm run release:circle`、`npm run release:rect`，需按 [`sign/README.md`](sign/README.md) 配置证书。没有 CI 签名密钥时会产出调试包，不一定能覆盖旧签名的安装。
 
@@ -101,14 +99,6 @@ JS 回归测试包括基础工具、凭据协议、配置页接收与确认流�
 cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protocol
 ```
 
-真机或虚拟机联调前，可以先用本机凭据验一遍服务器：把 `.env.example` 复制成 `.env.local`（已进 `.gitignore`，权限 600），填 `NCTALK_BASE_URL` / `NCTALK_USER` / `NCTALK_APP_PASSWORD` 后跑
-
-```bash
-npm run check:live      # 或 node scripts/check-credentials.mjs [--file other.env]
-```
-
-它依次探 `status.php`、验 `/ocs/v2.php/cloud/user`、列 Talk 会话，只打印结论不打印密码；三项都 200 就说明手表登录页填的那套东西能用。注意它是**只读**检查，不会往任何会话里发消息。
-
 ### 6. CI
 
 [GitHub Actions 工作流](.github/workflows/ci.yml)运行 JS 与 Rust 测试，之后用矩阵分别打包圆屏、矩形屏 RPK，并构建 ABP。配置 `SIGN_PRIVATE_PEM` 和 `SIGN_CERT_PEM` 两个 Secret 会生成正式签名 RPK；都不配置时生成调试 RPK。
@@ -158,7 +148,6 @@ npm run check:live      # 或 node scripts/check-credentials.mjs [--file other.e
 vela-nextcloud-talk/
 ├── package.json                  # aiot-toolkit 构建脚本
 ├── .npmrc                        # 官方 npm registry（CI 可改用镜像）
-├── .env.example                  # 联调凭据模板（真实 .env.local 不进库）
 ├── src/
 │   ├── manifest.json             # 包名、路由、features、designWidth
 │   ├── app.ux                    # 启动时读取设置并配置 API client
@@ -196,7 +185,6 @@ vela-nextcloud-talk/
 │       └── settings/settings.ux  # 设置
 ├── scripts/
 │   ├── build-watch.cjs           # 屏幕条件预处理 + aiot 打包
-│   ├── check-credentials.mjs     # 本机真机联调凭据自检（只读）
 │   ├── gen-icon.py               # 零依赖 PNG 生成
 │   ├── gen-bg.py                 # 页面辉光背景 PNG（纯 Python 写 PNG）
 │   ├── seed-watch-chat.mjs       # 向真机测试房间写入基线消息
