@@ -114,7 +114,8 @@ pages/login  ──submit──> api.getCurrentUser()
                           └─ fail → 留在本页，显示错误
 
 pages/index  ──tap 会话──> state.activeRoom + shared.pendingRoom → nav.navigate(pages/chat, {token, name})
-                          nav.navigate = 延后 30ms 的 replace → 1300ms 无 params 的 replace → 2400ms 的 push → 3600ms 仍未离开才 toast
+                          nav.navigate = 30ms replace(params) → 1300ms replace → 2400ms push
+                                         → 3900ms pages/probe（诊断页）→ 4700ms 仍未离开才 toast
                           （「到没到」比对 router.getState() 快照，不只看页面自己的 onHide）
 
 pages/chat   onInit  → 取 token：router params → shared.pendingRoom → state.activeRoom
@@ -288,22 +289,25 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 
 界面尺寸与显隐不变式由四个测试守护：`tests/layout-sizing.test.mjs` 断言页面根没有相对定位、`.app-bg` 用像素值且 `object-fit` 合法、三个滚动页的 `.list` 与卡片在每种屏幕下都是像素宽度；`tests/chat-layout.test.mjs` 断言聊天页两态用 `if`、模板不出现 `show`，并算出固定块之上留给消息列表的高度（圆屏 226、矩形 466）；`tests/index-layout.test.mjs` 对会话列表做同样的检查（不出现 `show`、`.list` 480px、卡片 394 / 413，圆屏 268 / 矩形 478 可用高度）。百分比只在父节点有确定宽度时才用（例如 `.app-page` 的直接子节点）。
 
-### 跳转只保留能落地的形式
+### 跳转：形式与时序都排除后，让手表说出是谁的问题
 
 1.0.0 的真机报告：点会话卡片、点「设置」**都没有任何反应**（不是报错、不是闪一下，就是停在原地），而同一行里的「刷新」正常。这三个处理器里只有「刷新」不跳转——两条死掉的路正是全应用仅有的两处 `router.push`；所有确实能落地的跳转（splash → index / setup / offline）用的都是 `router.replace`。结论：**这块固件上 `push` 可能静默不生效**，而手表没有控制台，静默失败和界面卡死从外面看是一样的。
 
 1.0.1 按「push 可能不落地」加了 push → 300ms → replace 的兜底，真机回报**会话仍然点不开，而且「刷新」也一起死了**。1.0.1 对点击路径的改动只有这个兜底和它依赖的 `leftPage`，所以问题就出在兜底本身：`push` 被丢弃时固件仍会触发当前页的 `onHide`（它响应的是「发起了跳转」，不是「跳转成功了」），`leftPage` 因此读到「已经离开」，重试被永久跳过——又一次静默无响应，还多了一个帮忙掩盖它的状态位。
 
-1.0.2 改成只用 `replace`，真机回报**弹出了「打不开，请重试」**。这条 toast 把范围缩到很小：点击确实进了处理器，而**在触摸回调里同一拍发出的跳转被丢弃了**。`pages/splash` 早就记录过这个坑——「同一 tick 里的 `router.replace` 可能被丢弃」，它的做法是延后 30ms 再发、1200ms 后再补一次；那也是全应用唯一被真机证明能落地的跳转。
-
-于是 `nav.js` 改成一架阶梯，每一级都跳出触摸回调，且只改变一个变量：
+1.0.3 把三种形式都延后重试（+30ms `replace(params)`、+1300ms 无 params 的 `replace`、+2400ms 的 `push`），真机回报**约 4 秒才弹 toast**——即每一级都没落地。形式与时序因此都被排除，问题只剩「调用方/上下文」或「目标页本身」。这已经不是能靠猜收敛的区间了，所以 1.0.4 让手表自己回答：全部失败后再试跳一个**只有一个纯文本、除了 router 不依赖任何东西**的诊断页 `pages/probe`。
 
 | 时间 | 做法 | 排除了什么 |
 | --- | --- | --- |
 | +30ms | `replace(uri, params)` | 同拍发送（splash 的 30ms 延后） |
 | +1300ms | `replace(uri)` | 参数：不带 params 也打不开就不是它 |
 | +2400ms | `push(uri, params)` | 形式：延后之后另一种形式也不行，就不是形式的问题 |
-| +3600ms | 仍未离开 → `showToast('打不开，请重试')` | 留给下一次报告的判据 |
+| +3900ms | `replace('pages/probe')` | **责任方**：这个页面能打开 → 路由与调用方都正常，问题在目标页；打不开 → 从这个页面发起的跳转被整体拒绝 |
+| +4700ms | 仍未离开 → toast + 把路由器前后快照写进列表页头部 | 下一次报告是事实而不是症状 |
+
+诊断页自己写着「路由可用 / 目标页打不开」，并带一个「返回会话列表」（同样是延后 30ms 的 replace），所以它不是死胡同。它的包只有 9KB、只 import `@system.router`——如果连它都打不开，那一定不是页面内容的问题。
+
+另外，会话列表头部现在有一行状态（`正在加载…` / `已更新 N 个会话` / `✕ 失败原因` / `✕ 栈1:pages/index→1:pages/index`）。原因是「刷新」以前**没有任何可见反馈**：列表里已有卡片时没有转圈，而失败文案渲染在滚动区最后一张卡片下面，看不到。
 
 「到没到」不再只信页面自己的生命周期：这块固件上跳转成功也不一定触发 `onHide`/`onDestroy`，1.0.2 的单次判定因此可能对已经打开的页面误报。现在先给路由器做一次快照，每级之后比对 `getState()` 的 `index`/`path`/`name`——这是唯一来自路由器、而不是来自「我们要离开的那一页」的证据；页面自己的 `leftPage`/`destroyedPage` 与 `$visible` 仍作为补充证据。
 

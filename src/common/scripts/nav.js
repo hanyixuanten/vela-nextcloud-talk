@@ -19,6 +19,11 @@
 //           `router.replace` issued in the same tick can be dropped, defers by
 //           30ms and retries at 1200ms. That is the only place in the app where
 //           a transition is *proven* to work.
+//   1.0.3 — deferred replace, params-less replace and a deferred push, spread
+//           over 2.4s: still nothing, and the toast arrived at ~4s, i.e. after
+//           every rung. So form and timing are ruled out; the fault is the
+//           calling context or the target page. That is not something to keep
+//           guessing at — see pages/probe.
 //
 // Hence this ladder. Every attempt is deferred out of the touch callback, each
 // one varies exactly one thing, and the page is given time to appear before the
@@ -27,7 +32,16 @@
 //   +30ms    replace(uri, params)     the working form, deferred (splash's fix)
 //   +1300ms  replace(uri)             same form, no params — rules params out
 //   +2400ms  push(uri, params)        the other form, now deferred — rules form out
-//   +3600ms  still here → toast       proof for the next report, not a shrug
+//   +3900ms  replace('pages/probe')   a page that cannot fail on its own: if it
+//                                     opens, the router and the caller are fine
+//                                     and the target page is the problem; if it
+//                                     does not, transitions from this page are
+//                                     refused outright. It says so on screen, so
+//                                     one install answers what three rounds of
+//                                     guessing could not.
+//   +4700ms  still here → toast       plus the router's own before/after state
+//                                     on the page that asked, so the next
+//                                     report is a fact rather than a symptom.
 //
 // "Did we get there?" no longer relies on the page's own lifecycle: a landed
 // transition on this firmware does not always run onHide/onDestroy, and 1.0.2's
@@ -46,9 +60,15 @@ const LADDER = [
   { at: 1300, form: 'replace', withParams: false },
   { at: 2400, form: 'push', withParams: true }
 ]
-const GIVE_UP_AT = 3600
+// When every form has been refused for the real target, try a page that cannot
+// fail on its own. 1.0.3's toast proved the transition was issued and dropped
+// but could not say *who* is at fault: the calling page/context, or the target
+// page. pages/probe answers that on the device, and it says so on screen.
+const PROBE_AT = 3900
+const PROBE_URI = 'pages/probe'
+const GIVE_UP_AT = 4700
 
-export function navigate(vm, uri, params, failMessage) {
+export function navigate(vm, uri, params, failMessage, onFail) {
   // A second tap inside the ladder would stack two transitions.
   if (!vm || vm.navigating) return
   vm.navigating = true
@@ -56,6 +76,7 @@ export function navigate(vm, uri, params, failMessage) {
 
   const before = snapshot()
   const timers = []
+  const thrown = []
   let settled = false
 
   const settle = (arrived) => {
@@ -67,6 +88,15 @@ export function navigate(vm, uri, params, failMessage) {
     // Honest, and the only channel a wrist has: this toast is what told us the
     // 1.0.2 transition was issued and dropped.
     prompt.showToast({ message: failMessage || '打不开，请重试', duration: 2500 })
+    // And the detail goes to whoever can render it: "打不开" alone narrowed the
+    // guess, it did not settle it.
+    if (typeof onFail === 'function') {
+      try {
+        onFail({ uri: uri, thrown: thrown, before: before, after: snapshot() })
+      } catch (err) {
+        console.log('navigate: onFail handler threw: ' + ((err && err.message) || err))
+      }
+    }
   }
 
   LADDER.forEach((step) => {
@@ -82,15 +112,36 @@ export function navigate(vm, uri, params, failMessage) {
         else router.replace(target)
       } catch (err) {
         // A throwing form is proof that rung never happened; the next one still
-        // gets its turn, and the toast stays the last word.
-        console.log('navigate: ' + step.form + ' threw at +' + step.at + 'ms: ' +
-          ((err && err.message) || err) + ' -> ' + uri)
+        // gets its turn, and the toast stays the last word. Keep the message:
+        // on a watch it is the only thing that can be shown to the user.
+        const message = (err && err.message) || String(err)
+        thrown.push('+' + step.at + 'ms ' + step.form + ': ' + message)
+        console.log('navigate: ' + step.form + ' threw at +' + step.at + 'ms: ' + message + ' -> ' + uri)
       }
     }, step.at))
   })
 
   timers.push(setTimeout(() => {
-    if (moved(vm, uri, before)) settle(true)
+    if (settled) return
+    if (moved(vm, uri, before)) {
+      settle(true)
+      return
+    }
+    // Everything was refused for the real target: ask the router to open a page
+    // that carries nothing but two lines of text.
+    console.log('navigate: every form dropped for ' + uri + ', probing the router')
+    try {
+      router.replace({ uri: PROBE_URI })
+    } catch (err) {
+      thrown.push('+' + PROBE_AT + 'ms probe: ' + ((err && err.message) || String(err)))
+    }
+  }, PROBE_AT))
+
+  timers.push(setTimeout(() => {
+    // The probe landing means the router works from here and the target page is
+    // what failed; the probe page itself says that, so there is no toast to add
+    // and nothing to explain.
+    if (moved(vm, 'pages/probe', before)) settle(true)
     else settle(false)
   }, GIVE_UP_AT))
 }

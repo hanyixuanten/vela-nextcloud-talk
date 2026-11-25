@@ -6,7 +6,12 @@
 
     <div class="head">
       <text class="t-title">{{ $t('index.title') }}</text>
-      <text class="t-caption" if="{{accountLabel}}">{{ accountLabel }}</text>
+      <!-- One line, always about the last thing the page did. 刷新 used to have
+           no visible feedback at all: with rooms already on screen there is no
+           spinner, and a failure only rendered inside the (scrollable) list,
+           below the last card — reported from the watch as "刷新没反应". -->
+      <text class="t-caption head-status" if="{{statusLine}}">{{ statusLine }}</text>
+      <text class="t-caption" if="{{!statusLine && accountLabel}}">{{ accountLabel }}</text>
     </div>
 
     <scroll class="scroll" scroll-y="{{true}}">
@@ -73,7 +78,11 @@ export default {
     rooms: [],
     loading: false,
     error: '',
-    accountLabel: ''
+    accountLabel: '',
+    // One short line in the header: 正在加载… / 加载失败：… / 跳转失败：…
+    // The watch has no console, so anything that goes wrong has to be readable
+    // on the screen that caused it.
+    statusLine: ''
   },
 
   onInit() {
@@ -181,6 +190,9 @@ export default {
     const now = Date.now()
     if (this.loading && now - this.fetchStartedAt < 1500) return
     if (!api.isConfigured()) {
+      // Never silent: a dropped transition here looks exactly like a dead
+      // button, which is what the watch reported.
+      this.statusLine = this.$t('index.noAccount')
       router.replace({ uri: ROUTE.setup })
       return
     }
@@ -189,6 +201,7 @@ export default {
     this.fetchStartedAt = now
     this.loading = true
     this.error = ''
+    this.statusLine = this.$t('index.loading')
 
     const current = () => token === this.fetchToken
     api.listConversations()
@@ -196,10 +209,12 @@ export default {
         if (!current()) return
         this.rooms = rooms.map((room) => this.toView(room))
         state.rooms = this.rooms
+        this.statusLine = this.$t('index.updated').replace('{n}', this.rooms.length)
       })
       .catch((err) => {
         if (!current()) return
         this.error = this.describeError(err)
+        this.statusLine = this.clip('✕ ' + this.error, 30)
       })
       // Both arguments: a throw inside toView() must clear the spinner too,
       // otherwise the list is stuck showing 正在加载… for good.
@@ -208,6 +223,11 @@ export default {
       }, () => {
         if (current()) this.loading = false
       })
+  },
+
+  clip(text, limit) {
+    const value = String(text || '')
+    return value.length > limit ? value.slice(0, limit) + '…' : value
   },
 
   /**
@@ -253,12 +273,38 @@ export default {
       this,
       ROUTE.chat,
       { token: room.token, name: room.name },
-      this.$t('common.openFailed')
+      this.$t('common.openFailed'),
+      (detail) => {
+        this.statusLine = this.clip('✕ ' + this.describeNavFailure(detail), 30)
+      }
     )
   },
 
   openSettings() {
-    nav.navigate(this, ROUTE.settings, null, this.$t('common.openFailed'))
+    nav.navigate(this, ROUTE.settings, null, this.$t('common.openFailed'), (detail) => {
+      this.statusLine = this.clip('✕ ' + this.describeNavFailure(detail), 30)
+    })
+  },
+
+  /**
+   * Why the ladder gave up, in one line small enough for a watch: the exception
+   * a transition threw, or the router's own before/after snapshots. Both are
+   * facts a wrist can read out loud — 1.0.3 only said "打不开", which narrowed
+   * the guess but not enough to act on.
+   */
+  describeNavFailure(detail) {
+    const d = detail || {}
+    if (d.thrown && d.thrown.length) return this.clip(String(d.thrown[0]), 24)
+    const before = d.before
+    const after = d.after
+    if (!before && !after) return '路由器无状态'
+    return '栈' + this.describeRoute(before) + '→' + this.describeRoute(after)
+  },
+
+  describeRoute(info) {
+    if (!info) return '无'
+    const path = info.path || info.name || '?'
+    return String(info.index) + ':' + path
   }
 }
 </script>
@@ -274,6 +320,17 @@ export default {
   flex-direction: column;
   justify-content: center;
   align-items: center;
+}
+
+/* The status line is one clamped row: a long server message must not push the
+ * list down or wrap into the cards. */
+.head-status {
+  width: 74%;
+  margin-top: 2px;
+  font-size: 17px;
+  lines: 1;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .scroll {

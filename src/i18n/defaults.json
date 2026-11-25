@@ -52,7 +52,9 @@
     "emptyHint": "在手机或网页端创建一个会话吧",
     "refresh": "刷新",
     "settings": "设置",
-    "serverUnreachable": "网络正常，但服务器不可达"
+    "serverUnreachable": "网络正常，但服务器不可达",
+    "updated": "已更新 {n} 个会话",
+    "noAccount": "未配置账号"
   },
   "chat": {
     "offline": "离线",

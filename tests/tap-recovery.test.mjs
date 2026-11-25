@@ -72,4 +72,19 @@ test('a failed conversation read is tappable, not a dead end', () => {
   assert.ok(/if="\{\{!loading && error\}\}" @click="loadInitial"/.test(chat), 'the error placeholder has to retry on tap')
 })
 
+test('every button reports what it just did', () => {
+  // With rooms already on screen there is no spinner, and a failure used to be
+  // rendered inside the scroll, below the last card — invisible. 刷新 looked
+  // dead. The header line is the one place that is always on screen.
+  const refresh = methodOf(index, 'refresh')
+  assert.ok(/this\.statusLine = this\.\$t\('index\.loading'\)/.test(refresh), 'the refresh must show it started')
+  assert.ok(/index\.updated/.test(refresh), 'and that it finished')
+  assert.ok(/✕ /.test(refresh), 'and that it failed')
+  // A dropped transition is the same class of silence: the toast is not enough,
+  // the line stays.
+  const openRoom = methodOf(index, 'openRoom')
+  assert.ok(/describeNavFailure/.test(openRoom), 'a failed navigation has to leave the router’s own answer on screen')
+  assert.ok(/statusLine/.test(openRoom), 'and it goes in the same line')
+})
+
 console.log('tap recovery checks passed')

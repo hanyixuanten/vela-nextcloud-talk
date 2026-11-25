@@ -52,7 +52,9 @@
     "emptyHint": "Create one on the phone or web client",
     "refresh": "Refresh",
     "settings": "Settings",
-    "serverUnreachable": "Online, but the server is unreachable"
+    "serverUnreachable": "Online, but the server is unreachable",
+    "updated": "Updated {n} chats",
+    "noAccount": "No account configured"
   },
   "chat": {
     "offline": "Offline",

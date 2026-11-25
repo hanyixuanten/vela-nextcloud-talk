@@ -96,4 +96,21 @@ test('the chat page reads the fallback exactly once', () => {
   assert.ok(/shared\.pendingRoom = null/.test(onInit), 'a stale room must not survive the entry')
 })
 
+test('a dead ladder asks the router to open a dependency-free probe page', () => {
+  // 1.0.3's toast proved the transition was issued and dropped but could not
+  // say whether the calling context or the target page is at fault. A page that
+  // carries nothing but text settles it on the device.
+  assert.ok(/PROBE_URI = 'pages\/probe'/.test(nav), 'the fallback probe has to exist')
+  const manifest = JSON.parse(read('../src/manifest.json'))
+  assert.ok(manifest.router.pages['pages/probe'], 'the probe page must be routable')
+  const probe = read('../src/pages/probe/probe.ux')
+  assert.ok(!/<import name=/.test(probe), 'the probe must not import a component')
+  const script = probe.split('<script>')[1].split('</script>')[0]
+  const imports = script.match(/^import .*$/gm) || []
+  assert.deepEqual(imports, ["import router from '@system.router'"], 'the probe may depend on the router only')
+  // It is reached from a tap handler, so its own transition has to be deferred
+  // for the same reason every other one is.
+  assert.ok(/setTimeout\(/.test(script), 'the probe must defer its own replace')
+})
+
 console.log('navigation checks passed')
