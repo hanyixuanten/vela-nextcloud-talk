@@ -99,12 +99,7 @@
     "seconds": "s",
     "cleared": "Cleared",
     "clearFailed": "Could not clear data. Please try again.",
-    "clearAgain": "Tap again to confirm clearing",
-    "keeper": "Background",
-    "keeperConnected": "Service connected",
-    "keeperNoService": "No micro service",
-    "keeperRetry": "Retrying connect",
-    "keeperDown": "Service down"
+    "clearAgain": "Tap again to confirm clearing"
   },
   "setup": {
     "title": "Set up from phone",

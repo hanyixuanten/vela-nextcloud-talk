@@ -22,10 +22,9 @@ export const DEFAULT_SETTINGS = {
   screenType: 'circle',
   // Milliseconds between background polls of the open conversation.
   pollInterval: 15000,
-  // NOTE: background retention (the `keeper` micro service) used to be a
-  // `backgroundKeep` flag here. It is not a preference any more — the service
-  // always runs (docs/design.md §12.6) — and `normalize()` drops the stale key
-  // so an old "off" in storage cannot resurrect the switch.
+  // NOTE: background retention used to be a `backgroundKeep` flag here.
+  // Background polling was removed entirely in 1.0.20; `normalize()` still
+  // drops the stale key so an old "off" in storage cannot confuse anything.
   // small | normal | large
   fontScale: 'normal'
 }

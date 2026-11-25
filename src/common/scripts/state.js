@@ -21,9 +21,9 @@ export default {
   // Conversation currently open in pages/chat: { token, name, ... }
   activeRoom: null,
 
-  // Values that must survive a page switch (the keeper summary, the launch
-  // gate's probe evidence) do NOT live here: this module is inlined into every
-  // page bundle, so each page would get its own copy. They live on the app
-  // instance instead — see common/scripts/shared.js.
+  // Values that must survive a page switch (the launch gate's probe evidence)
+  // do NOT live here: this module is inlined into every page bundle, so each
+  // page would get its own copy. They live on the app instance instead — see
+  // common/scripts/shared.js.
 
 }

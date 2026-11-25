@@ -178,13 +178,8 @@ vela-nextcloud-talk/
 │   │       ├── textlayout.js     # 气泡/详情页共用的折行与文本度量
 │   │       ├── network.js        # 启动网络门（类型判定 + bilibili/服务器探针证据）
 │   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
-│   │       ├── keeper.js         # 后台留存的决策逻辑（纯 JS，可单测，三方共用）
-│   │       ├── keeperClient.js   # @system.serviceclient 封装（policy always）
-│   │       ├── bgSync.js         # config.background + request.download 的传输层
-│   │       ├── summary.js        # nctalk.keeper 摘要读写（app.ux 与服务共用）
+│   │       ├── keepAliveAudio.js # 表冠退出后的静音音频保活（表盘悬浮入口）
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
-│   ├── services/
-│   │   └── keeper.js             # 微服务：后台轮询会话列表、留存未读、振动
 │   ├── components/
 │   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
 │   │   └── InputMethod/          # 三方输入法（vendored，勿手改）
@@ -231,8 +226,7 @@ vela-nextcloud-talk/
 │   ├── tap-recovery.test.mjs     # 点击不被状态位吞掉：刷新可重发、卡住的读取会超时放行
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试（顺序、四行预览、展开全文、窗口上限）
-│   ├── keeper.test.mjs           # 后台留存：前台租约、振动冷却、摘要容错、重连
-│   ├── bgsync.test.mjs           # 进程级后台：下载 URL/头/文件名、manifest 声明、心跳条件
+│   ├── keepalive.test.mjs        # 表冠退出保活：静音音频接线、后台机制不复活、前台轮询健在
 │   └── build-watch.test.cjs      # 屏幕条件编译测试
 ├── LICENSE                       # 根仓库 MIT 许可
 ├── SECURITY.md                   # 漏洞报告与安全边界
@@ -283,24 +277,13 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 从手机推来的凭据在手表上要经历「写 storage → 最长 20 秒的校验 → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。写盘排在校验之前，校验失败也保留输入（回执文字带「已保存；」前缀）；只有写盘本身失败才什么都不留。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
 
-### 后台留存为什么是微服务
+### 挂后台：表盘悬浮入口（1.0.20）
 
-Vela 的 `config.background` 只认 `system.audio` / `system.request` / `system.geolocation`，而且要求其中之一**正在运行**才允许应用留在后台；聊天轮询走 `@system.fetch`，不在名单里。所以后台留存改成官方[微服务](https://iot.mi.com/vela/quickapp/zh/features/other/serviceclient.html)：`manifest.json` 声明 `services: [{ name: "keeper", path: "services/keeper", autoStart: true }]`，`src/services/keeper.js` 用 `@system.fetch` + `@system.storage` + `@system.vibrator` 轮询会话列表，应用侧用 `serviceclient.connect({ policy: "always" })` 连接。前台由页面轮询、后台由服务轮询，`shouldPoll()` 保证同一时刻只有一个轮询者。
+需求不是后台消息同步，而是 HyperBilibili 那种「按下表冠回表盘 → 表盘出现悬浮图标 → 点它回到原状态」。对照 HyperBilibili 仓库：commit `0ccb19b`（音频播放器出现之前）仅凭 manifest `config.background.features: ["system.request", "system.audio"]` 声明实现挂后台，表盘悬浮入口就是音频播放时系统挂出的**媒体卡片**。
 
-留存的是摘要而不是消息：`nctalk.keeper` 里只有 `{ at, total, account, rooms: [{ token, name, preview, unread, at }] }`，会话页冷启动时先渲染它再发真实请求；`account` 不匹配就丢弃。首次轮询只建立基线不振动，之后未读上升且应用不在前台才 `vibrate({ mode: 'short' })`，60 秒冷却。间隔取 `max(pollInterval, 30s)`。
+Talk 因此声明 `system.audio`（`features` + `config.background.features`），并在 `app.ux` 的 `onHide` 里用 `@system.audio` 循环播放打包的静音 WAV（`src/common/audio/keepalive.wav`，音量 0、标题 Talk）；`onShow` / `onDestroy` 停止。音频在播期间进程不死后，系统保住悬浮入口，点回去页面原样保留。`@system.audio` 与曾经的 `@system.serviceclient` 一样懒加载 + try/catch：feature 缺失时打日志退回普通客户端行为，绝不带崩 app.ux。
 
-**它没有开关，也不再依赖应用主动说再见。** 前台状态是一条 90 秒的租约：`app.ux` 每 30 秒续租一次，续租一停（进程被杀、上划关闭、固件漏发 `onHide`）服务就自己恢复轮询——1.0.14 用布尔量，一次没收到 `onHide` 就永久静默，这是「后台留存不工作」的直接原因。连接失败（1000/1001）现在会退避重连，而不是一次失败就整场失效。
-
-### 后台留存为什么不只是微服务
-
-Vela 有两条互不相同的「离开屏幕还能跑」的路，微服务只是第二条：
-
-| 机制 | 条件 | 覆盖 | 机型支持 |
-| --- | --- | --- | --- |
-| `config.background.features` | 声明后台接口，且切后台那一刻**有一个正在运行**（结束后只有 20 秒窗口） | 进程还活着：回表盘 / 息屏 | 有支持明细，`system.request` 在 S3 / S4 / REDMI Watch 5 都支持 |
-| 微服务 | `connect({ policy: 'always' })` | 应用被**关闭**后仍在跑 | **没有**支持明细表 |
-
-HyperBilibili 走的是第一条：`config.background.features: ["system.request", "system.audio"]`，没有 `services`，它能留在后台是因为它真的在播音频、真的在下载。聊天应用没有音频，但「拉会话列表」本身就是一次下载——所以 `app.ux` 的后台 tick 就是 `request.download` 一次 OCS 接口，落成 `nctalk-rooms.txt` 再 `file.readText` 读回来（`src/common/scripts/bgSync.js`），节奏 15 秒以留在 20 秒窗口内。两条路共用 `createKeeper` 的决策逻辑，靠租约决定谁在干活，细节与**真机待验证项**（20 秒窗口、`request.download` 的 Basic Auth 头、缓存文件可读性、后台通知）见 [`docs/design.md`](docs/design.md) 第 12 节。
+**1.0.20 起没有后台轮询**：keeper 微服务（`services/`、`serviceclient`）与进程内 15 秒下载 ticker（`bgSync.js`）整体拆除，用户明确不需要后台消息同步。轮询只在前台发生——会话页 `onShow` 刷新列表，聊天页可见时按间隔拉消息。`tests/keepalive.test.mjs` 钉住这两半：保活音频的接线正确、被拆除的机制不复活、前台轮询健在。
 
 ### 输入态为什么要两个页面状态
 

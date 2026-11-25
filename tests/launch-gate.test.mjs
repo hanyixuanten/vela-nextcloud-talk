@@ -94,7 +94,10 @@ test('cross-page verdict lives on the app instance, not module state', () => {
   // only object every page can reach.
   assert.match(app, /shared: shared,/)
   assert.match(app, /controlProbe: null/)
-  assert.match(app, /backgroundSummary: null/)
+  // backgroundSummary was removed with the keeper service (1.0.20): nothing
+  // produces it any more, and index must not pretend to read it.
+  assert.ok(!app.includes('backgroundSummary'), 'no retained-summary slot on shared')
+  assert.ok(!readFileSync(new URL('../src/pages/index/index.ux', import.meta.url), 'utf8').includes('backgroundSummary'))
   // No gate verdict on the shared object: nothing may read one.
   assert.ok(!app.includes('gateOnline'), 'no cross-page gate verdict')
   const helper = readFileSync(new URL('../src/common/scripts/shared.js', import.meta.url), 'utf8')

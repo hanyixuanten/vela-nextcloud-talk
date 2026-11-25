@@ -2,8 +2,8 @@
   "package": "com.hanyixuanten.nctalk",
   "name": "Talk",
   "icon": "/common/images/icon.png",
-  "versionName": "1.0.19",
-  "versionCode": 35,
+  "versionName": "1.0.20",
+  "versionCode": 36,
   "minPlatformVersion": 1000,
   "deviceTypeList": ["watch"],
   "features": [
@@ -18,22 +18,13 @@
     { "name": "system.interconnect" },
     { "name": "system.network" },
     { "name": "system.brightness" },
-    { "name": "system.audio" },
-    { "name": "system.serviceclient" }
-  ],
-  "services": [
-    {
-      "name": "keeper",
-      "path": "services/keeper",
-      "autoStart": true,
-      "permissions": []
-    }
+    { "name": "system.audio" }
   ],
   "config": {
     "logLevel": "log",
     "designWidth": 480,
     "background": {
-      "features": ["system.request", "system.audio"]
+      "features": ["system.audio"]
     }
   },
   "router": {

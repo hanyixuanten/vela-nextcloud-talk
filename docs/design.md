@@ -319,112 +319,33 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 
 `versionName` 不动时，同一个版本号既可能指修复前的包也可能指修复后的包，无法从版本号判断表上装的是哪一版。
 
-## 12. 后台留存（两种机制）
+## 12. 挂后台：表盘悬浮入口（1.0.20）
 
-目标：离开应用（回表盘 / 息屏 / 上划关闭）后仍能按间隔拉会话列表，把未读数留住，有新消息时振一下。这不是「消息推送」——Vela 没有给第三方 app 的推送通道，能做的上限就是「后台自己轮询 + 本地留存」。
+需求不是后台消息同步，而是 HyperBilibili 那种「按下表冠回表盘 → 表盘出现悬浮图标 → 点它回到原状态」。1.0.14–1.0.19 走过三条路（布尔量前台标记 → keeper 微服务 → 进程内 15 秒下载 ticker），全部以「后台留存不可用」告终；对 HyperBilibili 仓库考古（commit `0ccb19b`，音频播放器出现之前）给出了答案：它的「挂后台」就是 manifest 里 `config.background.features: ["system.request", "system.audio"]` 的声明，表盘悬浮入口是音频播放时系统挂出的**媒体卡片**。
 
-### 12.1 两条路，各有边界
+### 12.1 实现
 
-Vela 官方文档里「应用离开屏幕还能继续跑」有**两个**互不相同的机制，1.0.16 之前只用了第二个，这也是「后台留存不工作」时最容易先怀疑错的地方：
+- manifest：`features` 与 `config.background.features` 都声明 `system.audio`。
+- `app.ux` 的 `onHide` 用 `@system.audio` 循环播放打包的静音 WAV（`src/common/audio/keepalive.wav`，2 秒 8kHz 单声道，音量 0，标题 Talk）；`onShow` / `onDestroy` 停止。
+- `@system.audio` 懒加载 + try/catch（沿用 `serviceclient` 的教训：feature 缺失的模块级 import 会在 app.ux 初始化时抛异常带崩一切）。固件没有音频时打日志退回普通行为。
 
-| 机制 | 条件 | 覆盖范围 | 机型支持 |
-| --- | --- | --- | --- |
-| `config.background.features` | 声明了后台接口，**且切换后台那一刻至少有一个正在运行**；全部结束后只有 20 秒窗口 | 进程还活着（回表盘 / 息屏 / 按 home）；**上划关闭就没了** | 文档有支持明细：`system.request` 在 Watch S3 / S4 / REDMI Watch 5 都是「支持」 |
-| 微服务 `services` + `serviceclient` | `connect({policy:'always'})`，服务独立于应用生命周期 | 应用**关闭**后仍在跑 | **文档没有支持明细表** |
+### 12.2 轮询只在foreground
 
-两者不是替代关系：进程级机制确定能用但只覆盖「还活着」，微服务覆盖「被关闭」但能不能用要看机型。所以 1.0.16 起两条都实现，靠 §12.3 的租约决定谁在干活。
+1.0.20 起**没有后台轮询**：keeper 微服务（`services/`、`@system.serviceclient`）与进程内 15 秒下载 ticker（`bgSync.js`、`createKeeper`）整体拆除——用户明确不需要后台消息同步。轮询只在前台发生：
 
-`config.background` 的两个条件里，第二个（有接口正在运行）是聊天应用真正卡住的地方：`@system.fetch` 不在名单里，项目也没有音频和用户发起的下载。1.0.14 因此完全不用这条路。
+- 会话页 `onShow` 刷新列表（1.5 秒防双击下限不变）；
+- 聊天页可见时按 `pollInterval` 短轮询消息。
 
-**1.0.16 的答案：把轮询本身做成一次下载。** `@system.request` 支持 `download`，而「拉会话列表」本来就是下载一个 JSON——于是后台的每一次 tick 就是 `request.download` 一次 OCS 会话列表接口，落成缓存里的一个文本文件，再用 `@system.file.readText` 读回来解析（`common/scripts/bgSync.js` + `app.ux`）。这不是为了保活而伪造的任务：它做的就是轮询要做的事，只是走了「上传下载」这个后台接口。
+`tests/keepalive.test.mjs` 钉住三件事：保活音频接线正确；被拆除的机制不复活（`services/` 目录、`keeperClient`、`bgKeeper` 等不得回到 `app.ux`，manifest 不得再有 `services` / `serviceclient`）；前台轮询健在。
 
-HyperBilibili 也是同一套：`manifest.json` 里 `config.background.features: ["system.request", "system.audio"]`，没有 `services`；它能留在后台是因为它**真的**在播视频音频、**真的**在下载缓存，条件自然满足。
-
-代价与取舍：
-
-- 后台节奏必须是 **15 秒**（`BG_SYNC_MS`）：全部接口结束后只有 20 秒窗口，30 秒会被系统停掉。微服务那侧仍然是 30 秒下限，因为不受这条规则约束。
-- 每 tick 写一次同一个文件（`nctalk-rooms.txt`，`.txt` 不是 `.json`——旧固件的 file 接口会拒绝 json 资源，见 `dictionaryLoader.js` 的注释），不做递增文件。
-- 非音频的后台接口会让系统显示「应用正在后台运行」的通知；上划关闭后进程消失，这条路失效，由微服务接手。
-
-### 12.2 用微服务承载后台轮询
-
-[微服务](https://iot.mi.com/vela/quickapp/zh/features/other/serviceclient.html)是官方给出的「脱离应用生命周期」的能力：
-
-```json
-"services": [{ "name": "keeper", "path": "services/keeper", "autoStart": true, "permissions": [] }]
-```
-
-- 服务文件 `src/services/keeper.js`，与页面共包、随应用安装；`autoStart: true` 让框架启动时就拉起它，不必等用户打开应用。
-- 客户端 `serviceclient.connect({ name: 'keeper', policy: 'always' })`：`always` 表示**应用关闭后服务不关闭**；`byNeeds` 会在最后一个客户端断开时关掉服务，不适合本场景。
-- 服务端只有 `serviceManager` 全局（`postMessage` / `getClientsInfo` / `disconnectClient` / `terminate`），不能用 `@system.router` / `prompt` / `brightness` 这些页面侧接口。服务侧 feature 能力表里 `fetch`、`storage`、`vibrator`、`file`、`interconnect` 都是 `all`，所以轮询 + 写盘 + 振动都在允许范围内。
-
-### 12.3 轮询归属：同一时刻只有一个轮询者
-
-服务和应用如果都轮询，同一份会话列表会被请求两遍。约定：
-
-| 状态 | 谁轮询 | 说明 |
-| --- | --- | --- |
-| 应用在前台 | 页面 | 会话列表 `onShow` 拉一次；聊天页按 `pollInterval` 拉消息 |
-| 应用在后台、进程还活着 | `app.ux` 的 `bgKeeper` | `config.background` + 15 秒一次的下载 tick（§12.1） |
-| 应用已被关闭 | keeper 服务 | 只有它跨进程；能不能用看机型 |
-| 三者的切换 | 同一份 `createKeeper` 决策逻辑 + 租约 | 见下 |
-
-`bgKeeper` 与页面、服务共用 `common/scripts/keeper.js` 的 `createKeeper`：基线不振动、未读上升才振、60 秒冷却、摘要容错全都是一份实现，只是三者的传输和节奏不同（页面 `fetch` / `bgKeeper` `download` + 15s / 服务 `fetch` + 30s 下限）。
-
-**1.0.14 用布尔量表示「应用在前台」，这是它「后台留存不工作」的根因。** `app.ux` 的 `onHide` 发 `{type:'background'}`、`onShow` 发 `{type:'foreground'}`；服务收到 foreground 就把定时器清掉、`foreground = true`。只要这条 background 没到——上划关闭、息屏被系统回收、固件漏发 `onHide`——服务就带着 `foreground = true` 和空定时器活到重启，一次都不再轮询，而应用侧完全看不出异常。
-
-现在换成**租约**（`FOREGROUND_LEASE_MS = 90s`）：
-
-1. `{type:'foreground'}` 只写一个到期时间 `now + 90s`，并排一个到期时刻的唤醒定时器；
-2. `app.ux` 每 30s（`LEASE_HEARTBEAT_MS`）发一次 `{type:'foreground'}` 续租，所以应用真的在前台时服务一直不问网络；
-3. 续租一停（进程被杀、`onHide` 没发、服务被重启）租约自动过期，服务在到期那次唤醒里恢复轮询；
-4. `onDisConnect` 时若这是最后一个客户端，立即清租约并轮询——比等 90s 更早恢复。
-
-`tick()` 里的 `isForeground()/leaseRemaining()` 就是这条规则的唯一实现，`tests/keeper.test.mjs` 直接钉它（含「租约不续期会恢复轮询」）。`app.ux` 把服务端的 `{type:'rooms'}` 推送写进 `shared.backgroundSummary`，会话页在 `onShow` 先用它渲染一遍，再发真实请求。
-
-连接本身也会失败：`policy: 'always'` 的 `connect()` 在 `app.onCreate` 阶段可能撞上服务运行时尚未就绪（错误码 1000/1001）。1.0.14 在尝试**之前**就把 `started` 置为 true，一次失败即整场失效；现在只有拿到实例才置位，失败按 1s / 5s / 15s / 45s / 60s 退避重连，`onerror`（1000/1001/1003）也会触发重连。
-
-### 12.4 留存的数据
-
-`@system.storage` 的 `nctalk.keeper` 只存一份摘要，不存消息正文：
-
-```json
-{ "at": 1732100000000, "total": 3, "account": "alice@https://cloud.example.com",
-  "rooms": [{ "token": "abc", "name": "项目群", "preview": "Alice: 在吗", "unread": 3, "at": 1732099999 }] }
-```
-
-- `account` 是 `user@baseUrl`。换账号后旧摘要不能出现在新账号的列表里，会话页比对不上就丢弃。
-- 读取侧（`parseSummary`）把摘要当不可信输入：损坏 JSON、旧结构、`total` 与 `rooms` 不一致时一律重算或退回空摘要。
-- 清除本地数据走 `storage.clear()`，会一并清掉这份摘要。
-
-### 12.5 振动语义
-
-- **首次成功轮询只建立基线，不振动**：服务启动时已经存在的未读不是「新消息」。
-- 只在未读总数上升且应用不在前台时振 `mode: 'short'`；`BUZZ_COOLDOWN_MS`（60 秒）内不重复振，否则群聊每个轮询周期都会振一次。
-- 未读下降（用户在别处读完）不振动，只更新摘要。
-
-### 12.6 间隔与失败
-
-- 后台轮询间隔 = `max(pollInterval, 30000)`。界面上的 15 秒是给人看的刷新节奏，后台没有屏幕要更新，15 秒一次 OCS 请求纯烧电。
-- 单次失败（断网、超时、401）只写日志，**保留上一份摘要并继续排下一次**：手表离线时还能显示上次的未读数，是有意义的行为，不是降级。
-- **后台留存没有开关，一直开启。** 1.0.14 在设置里留了「后台留存 开/关」，`settings.backgroundKeep` 一旦存成 false，服务连启动都不做——而它本来就是「有账号就该跑」的行为，不是一个需要用户理解的取舍。现在：`store.js` 的 `DEFAULT_SETTINGS` 没有这个键，`normalize()` 会把旧值 `delete` 掉，设置页那一行与 `settings.background|on|off` 三个 i18n 键一并删除，服务端只认 `stopped`（`shutdown` / `terminate`）。`tests/keeper.test.mjs` 用「存储里留着 `backgroundKeep: false` 仍照常轮询」钉住这条。
-
-### 12.7 未在文档中确认的部分（真机必查）
+### 12.3 真机待验证
 
 | 项 | 现状 | 处理 |
 | --- | --- | --- |
-| 微服务的机型支持 | 官方只给了 `@system.request`、`vibrator` 等的支持明细，**微服务没有支持明细表** | 真机确认 S3 / S4 / REDMI Watch 5 上 `connect` 返回 1000/1001 与否；连不上时客户端只打日志，应用照旧当前台客户端用 |
-| 服务内 `setTimeout` | 文档未写；打包产物里确实注入了 `setTimeout` / `setInterval` | 真机看日志里是否按 30 秒间隔出现 `keeper: poll failed` / 摘要更新 |
-| `serviceManager.postMessage` 签名 | 文档表格写 `postMessage(clientId, Object)`（clientId 可省，0 = 广播），唯一示例写 `postMessage({ clientId, params })` | 先按客户端列表逐条 `postMessage(client.id, payload)`（语义无歧义），退化到 `getClientsInfo` 不可用时才用示例形式，再退化到 `(0, payload)`（`src/services/keeper.js`） |
-| 后台网络是否被系统挂起 | 未验证 | 观察息屏 10 分钟后摘要时间戳是否还在推进 |
-| `config.background` 的 20 秒窗口 | 快应用标准里写明「全部后台接口结束后 20 秒倒计时」，Vela 文档没提 | 真机看 `background sync:` 日志是否每 15 秒一条；若只在切后台后跑一次就停，说明这台机没有窗口，需要改成常驻下载（长轮询） |
-| `request.download` 带 Basic Auth | `header` 是 JSON 字符串（照 HyperBilibili 的写法），OCS 依赖 `OCS-APIRequest: true` | 日志若出现 `download could not start, code=`，先看是否 `invalid header`；这一步失败整条进程级路径都无效 |
-| 下载的缓存文件能否被 `file.readText` 读 | 写的是 `nctalk-rooms.txt`（旧固件拒绝 json 资源） | 日志 `file read failed` 说明 uri 不可读，需要改用 `internal://cache/` 显式路径 |
-| 「应用正在后台运行」通知 | 非音频后台接口会显示系统通知 | 属于预期行为；不想要就只能放弃这条路 |
+| 静音音频（volume 0）能否维持媒体卡片 | 未验证 | 进 app → 按表冠 → 看表盘是否出现悬浮图标；不出现则改音量 0.01 或换 m4a |
+| 悬浮图标点回后状态 | 未验证 | 应原样回到离开前的页面；被杀则说明音频没撑住进程 |
+| 息屏数小时后的存活 | 未验证 | 若夜间被回收属平台行为，可接受（回表盘当时可用即可） |
 
-构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。决策逻辑由 `tests/keeper.test.mjs` 守护（含服务名与 manifest 的一致性）；manifest / app.ux / i18n 的接线只能在真机上验证，见上表。
-
-真机验证一条最短路径：进设置确认那一行「后台留存」已经不存在 → 回表盘（或上划关闭）→ 等 2 分钟 → 用手机给这个账号发一条消息 → 手表应在 `max(pollInterval, 30s)` 内振一下；日志里应有 `keeper client error` 之后的重连记录，不应只有一次 `connect failed` 就安静下去。
 
 ## 13. 消息顺序、长消息与内存
 
