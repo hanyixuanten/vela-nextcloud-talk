@@ -107,13 +107,17 @@ test('the serviceclient feature is required lazily, never imported', () => {
 
 console.log('\nmanifest / app wiring')
 
-test('the manifest declares the background interface it uses', () => {
+test('the manifest declares the background interfaces it uses', () => {
   const features = (manifest.features || []).map((item) => item.name)
   assert.ok(features.includes('system.request'), 'system.request must be in features')
   const background = manifest.config && manifest.config.background
   assert.ok(background && Array.isArray(background.features), 'config.background.features is required')
-  assert.deepEqual(background.features, ['system.request'])
+  // system.audio is the keep-alive interface (see common/scripts/keepAliveAudio.js):
+  // a looping silent WAV while the app is hidden is what puts the media entry on
+  // the watch face, the way HyperBilibili's 挂后台 works.
+  assert.deepEqual(background.features, ['system.request', 'system.audio'])
   assert.ok(features.includes('system.file'), 'the downloaded file has to be readable')
+  assert.ok(features.includes('system.audio'), 'the audio feature itself must be declared')
 })
 
 test('app.ux keeps the in-process ticker paused while the app is visible', () => {
@@ -122,7 +126,7 @@ test('app.ux keeps the in-process ticker paused while the app is visible', () =>
   const sync = app.slice(app.indexOf('startBackgroundSync() {'), app.indexOf('startBackgroundSync() {') + 400)
   assert.match(sync, /\{ type: 'foreground' \}/, 'start paused')
   assert.ok(sync.indexOf("{ type: 'foreground' }") < sync.indexOf('bgKeeper.start()'), 'lease before start')
-  const hide = app.slice(app.indexOf('onHide()'), app.indexOf('onHide()') + 300)
+  const hide = app.slice(app.indexOf('onHide() {'), app.indexOf('onDestroy() {'))
   assert.match(hide, /\{ type: 'background' \}/, 'onHide has to tick immediately')
 })
 
@@ -149,6 +153,23 @@ test('the settings page can say why retention is (not) working', () => {
   const settings = read('../src/pages/settings/settings.ux')
   assert.match(settings, /keeperClient\.diagnostics\(\)/, 'the probe row reads the client state')
   assert.match(settings, /refreshKeeper/, 'the row refreshes on show and on tap')
+})
+
+test('the keep-alive audio is wired to hide/show like the media-card entry needs', () => {
+  // The floating resume icon on the watch face exists while audio plays, so
+  // onHide must start it and onShow must stop it — and the feature must be
+  // resolved lazily: a module-level import of a missing feature takes app.ux
+  // down with it (the 1.0.17 serviceclient lesson).
+  const keepAlive = read('../src/common/scripts/keepAliveAudio.js')
+  assert.match(keepAlive, /require\('@system\.audio'\)/, 'lazy require, never a module-level import')
+  assert.match(keepAlive, /catch/, 'the resolution is caught')
+  assert.match(keepAlive, /loop = true/, 'a loop, or the silence ends and the process dies with it')
+  assert.match(keepAlive, /keepalive\.wav/, 'a packaged silent file, not a network stream')
+  assert.match(app, /keepAliveAudio\.start\(\)/, 'onHide starts the loop')
+  const show = app.slice(app.indexOf('onShow() {'), app.indexOf('onHide() {'))
+  assert.match(show, /keepAliveAudio\.stop\(\)/, 'onShow stops it')
+  const destroy = app.slice(app.indexOf('onDestroy() {'))
+  assert.match(destroy, /keepAliveAudio\.stop\(\)/, 'teardown stops it')
 })
 
 let failedCount = 0

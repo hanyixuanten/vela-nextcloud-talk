@@ -8,6 +8,7 @@ import fmt from './common/scripts/format'
 import state from './common/scripts/state'
 import base64Encode from './common/scripts/base64'
 import keeperClient from './common/scripts/keeperClient'
+import keepAliveAudio from './common/scripts/keepAliveAudio'
 import { FOREGROUND_LEASE_MS, createKeeper } from './common/scripts/keeper'
 import { readSummary, writeSummary } from './common/scripts/summary'
 import { BG_SYNC_MS, ROOMS_FILE, roomsUrl, downloadHeader, parseRoomsFile } from './common/scripts/bgSync'
@@ -228,12 +229,20 @@ export default {
 
   onShow() {
     this.visible = true
+    // Back on screen: the silent keep-alive loop is no longer needed, and the
+    // media entry on the watch face would only be stale.
+    keepAliveAudio.stop()
     keeperClient.foreground(true)
     bgKeeper.onMessage(0, { type: 'foreground' })
   },
 
   onHide() {
     this.visible = false
+    // The crown exit path: with a looping silent audio running the platform
+    // keeps the process alive and shows the media entry on the watch face, so
+    // tapping it returns to the app exactly as it was (HyperBilibili's way of
+    // 挂后台). The download ticker below keeps the background condition honest.
+    keepAliveAudio.start()
     keeperClient.foreground(false)
     // First tick immediately: the platform checks the background condition as
     // the app leaves the screen, so a download has to be running right then.
@@ -245,6 +254,7 @@ export default {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
     }
+    keepAliveAudio.stop()
     bgKeeper.stop()
     console.log('app destroyed')
   }
