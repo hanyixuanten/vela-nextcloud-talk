@@ -52,6 +52,7 @@ fail=0
 "$NODE" "$ROOT/tests/chat-layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/index-layout.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/navigation.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/tap-recovery.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/keeper.test.mjs" || fail=1

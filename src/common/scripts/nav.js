@@ -1,74 +1,88 @@
-// Page navigation that does not trust router.push().
+// Page navigation that only uses the form this firmware actually honours.
 //
-// Report from the watch (0.2.13): tapping a conversation card, and tapping 设置
-// in the footer, both did nothing at all — no transition, no error. 刷新 on the
-// same footer row worked, and it is the only one of the three that does not
-// navigate. Both dead taps are the two call sites of `router.push` in the app;
-// every other transition (splash → index / setup / offline) uses
-// `router.replace` and demonstrably lands. So on this firmware `push` can
-// silently do nothing, and a silent no-op on a watch is indistinguishable from
-// a frozen screen: there is no console to read.
+// Two device reports, in order:
 //
-// Hence this helper treats push as "may not land":
+//   1.0.0 — tapping a conversation card and tapping 设置 did nothing at all
+//           (no transition, no error) while 刷新 on the same footer row worked.
+//           The two dead handlers were the app's only `router.push` call sites;
+//           every transition that demonstrably lands (splash → index / setup /
+//           offline) uses `router.replace`.
+//   1.0.1 — same dead taps, and now 刷新 is dead too. 1.0.1's only change to
+//           the tap path was adding the push → wait → replace fallback and the
+//           `leftPage` flag it consults. So the fallback is what failed: a
+//           dropped `push` still runs the page's onHide (the runtime reacts to
+//           the request, not to the result), `leftPage` then reads "we left",
+//           and the retry is skipped forever — a silent no-op again, this time
+//           with a guard that hides it.
 //
-//   1. remember that we are leaving (the page sets `leftPage` in onHide);
-//   2. push();
-//   3. shortly after, if the page is still here, replace() to the same target —
-//      the form the launch gate uses;
-//   4. if that also leaves us here, say so on screen instead of swallowing it.
+// Hence the rule now: **there is exactly one form, and it is `replace`** — the
+// one every working transition in this app already uses. No push, no state
+// machine that can talk itself out of retrying.
 //
-// The point of (4) is the next bug report: a toast means "navigation ran and
-// both forms were dropped", no toast means "the tap never reached the handler".
+// What is left is the part that made the report decidable: after the replace,
+// if nothing positively says we are somewhere else, say so on screen. On a
+// watch with no console, a silent dead tap and a frozen screen look identical.
 
 import router from '@system.router'
 import prompt from '@system.prompt'
 
-const PUSH_CHECK_MS = 300
-const REPLACE_CHECK_MS = 400
+const SETTLE_MS = 500
 
 export function navigate(vm, uri, params, failMessage) {
+  // A second tap inside the settle window would stack two transitions.
   if (!vm || vm.navigating) return
   vm.navigating = true
+  vm.leftPage = false
   const target = params ? { uri: uri, params: params } : { uri: uri }
 
+  let threw = null
   try {
-    router.push(target)
+    router.replace(target)
   } catch (err) {
-    console.log('navigate: push threw: ' + ((err && err.message) || err) + ' -> ' + uri)
+    threw = err
+    console.log('navigate: replace threw: ' + ((err && err.message) || err) + ' -> ' + uri)
   }
 
   setTimeout(() => {
     vm.navigating = false
-    // onHide / onDestroy ran (or the runtime says we are not visible), so the
-    // push did land. Nothing else to do.
-    if (left(vm)) return
-
-    console.log('navigate: still on the page after push, replacing: ' + uri)
-    try {
-      router.replace(target)
-    } catch (err) {
-      console.log('navigate: replace threw: ' + ((err && err.message) || err) + ' -> ' + uri)
-    }
-
-    setTimeout(() => {
-      if (left(vm)) return
-      prompt.showToast({ message: failMessage || '打不开，请重试', duration: 2500 })
-    }, REPLACE_CHECK_MS)
-  }, PUSH_CHECK_MS)
+    // A throw is already proof the transition never happened: report it without
+    // waiting for the "are we still here?" check to guess.
+    if (!threw && left(vm, uri)) return
+    prompt.showToast({ message: failMessage || '打不开，请重试', duration: 2500 })
+  }, SETTLE_MS)
 }
 
-// Did we actually leave? `leftPage` is set by the page's own onHide/onDestroy;
-// `$visible === false` is the runtime's own answer where it exists. Both must
-// say "still here" before we treat the navigation as dropped.
-function left(vm) {
+// Did we actually leave? Three independent answers, and any one of them is
+// enough. `leftPage` is set by the page's own onHide/onDestroy, `$visible` is
+// the runtime's, and the router can be asked directly — that last one is the
+// only answer that comes from the router rather than from the page we are
+// trying to leave, so it is checked first.
+function left(vm, uri) {
+  if (onRoute(uri)) return true
+  if (vm.destroyedPage) return true
   if (vm.leftPage) return true
   return vm.$visible === false
 }
 
+// `getState()` is not guaranteed on this firmware; a missing or odd answer just
+// means "no opinion", never a false "we left".
+function onRoute(uri) {
+  if (!uri) return false
+  let info = null
+  try {
+    info = typeof router.getState === 'function' ? router.getState() : null
+  } catch (err) {
+    return false
+  }
+  if (!info) return false
+  const current = info.path || info.uri || ''
+  return typeof current === 'string' && current.indexOf(uri) >= 0
+}
+
 /**
- * Leave a page that may have been installed by navigate()'s replace fallback.
- * A replaced page sits at the bottom of the stack, where back() has nowhere to
- * go; in that case go to `home` instead of doing nothing.
+ * Leave a page that was installed with replace() rather than push(). It sits at
+ * the bottom of the stack, where back() has nowhere to go; in that case go to
+ * `home` instead of doing nothing.
  */
 export function leave(home) {
   let info = null

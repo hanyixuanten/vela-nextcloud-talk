@@ -6,9 +6,10 @@
 // every transition that demonstrably lands (splash → index / setup / offline)
 // uses `router.replace`. So `push` is treated as "may silently do nothing":
 //
-//   common/scripts/nav.js   push → verify via the page's onHide → replace →
-//                           finally a toast, because a silent no-op and a
-//                           frozen screen look identical on a watch.
+//   common/scripts/nav.js   replace (the only form that lands) → ask the
+//                           router whether we got there → a toast if we did
+//                           not, because a silent no-op and a frozen screen
+//                           look identical on a watch.
 //
 // These checks pin the shape of that fix. The 0.2.13 sources fail them: they
 // called router.push from pages/index and pages/settings with no verification
@@ -41,14 +42,16 @@ test('no page navigates with a bare push any more', () => {
   }
 })
 
-test('nav.js pushes, verifies, then replaces', () => {
-  const pushAt = nav.indexOf('router.push(target)')
-  const replaceAt = nav.indexOf('router.replace(target)')
-  assert.ok(pushAt > 0, 'push is still the first attempt')
-  assert.ok(replaceAt > pushAt, 'replace is the fallback, after the push')
-  // The skip condition is the page telling us it left; without it the retry
-  // would fire on every successful push and double the navigation.
-  assert.ok(/if \(vm\.leftPage\) return/.test(nav), 'the retry must be skipped once the page hid')
+test('nav.js uses the one form that lands, and never pushes', () => {
+  // 1.0.1 shipped push → wait → replace and the taps were still dead: a dropped
+  // push still runs the page's onHide, so the "we left" flag hid the retry.
+  // One form only, and it is the one every working transition already uses.
+  assert.ok(!/router\.push\s*\(/.test(nav), 'nav still tries push')
+  assert.ok(/router\.replace\(target\)/.test(nav), 'the transition must be a replace')
+  assert.ok(/getState/.test(nav), 'the router itself has to say whether we left')
+  // A transition that threw is proof it never happened; it must be reported
+  // even when the page's own flags claim otherwise.
+  assert.ok(/threw/.test(nav), 'a throwing replace has to be reported')
 })
 
 test('nav.js says so on screen when both forms are dropped', () => {

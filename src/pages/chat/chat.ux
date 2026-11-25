@@ -33,8 +33,9 @@
           <div class="placeholder" if="{{loading && messages.length === 0}}">
             <text class="placeholder-hint">{{ $t('index.loading') }}</text>
           </div>
-          <div class="placeholder" if="{{!loading && error}}">
+          <div class="placeholder" if="{{!loading && error}}" @click="loadInitial">
             <text class="placeholder-error">{{ error }}</text>
+            <text class="placeholder-hint">{{ $t('common.retry') }}</text>
           </div>
           <div class="history-action" if="{{olderCursor > 0}}" @click="loadOlder">
             <text class="history-label">{{ loading ? $t('index.loading') : $t('chat.loadolder') }}</text>
@@ -128,6 +129,11 @@ const DRAFT_VIEW_LIMIT = 60
 const REPLY_VIEW_LIMIT = 48
 const PAGE_SIZE = 12
 const WINDOW_SIZE = 24
+// A request that outlives the api layer's own timeout by this much has lost its
+// answer (no callback, no error). Without a floor like this `receiving` stays
+// true forever, and the page then refuses every later read — the conversation
+// looks permanently "loading".
+const STALE_RECEIVE_MS = api.REQUEST_TIMEOUT_MS + 5000
 const REACTIONS = ['👍', '❤️', '😂']
 
 function reactionMask(message) {
@@ -211,6 +217,7 @@ export default {
     this.visible = false
     this.reacting = false
     this.receiveGeneration = 0
+    this.receiveStartedAt = 0
 
     this.settingsReady = store.load().then((settings) => {
       state.settings = settings
@@ -224,6 +231,7 @@ export default {
 
   onShow() {
     this.visible = true
+    this.releaseStaleReceive()
     this.refreshSettings().then(() => {
       if (!this.visible) return
       if (!this.token) {
@@ -263,8 +271,23 @@ export default {
     this.onHide()
   },
 
+  /**
+   * A read whose answer never arrived keeps `receiving` (and the spinner) set
+   * for good; receive() then refuses every later call and the page sits on
+   * 正在加载… with no way back. The api layer times out at 20s, so anything
+   * older than that is stale by definition and has to be released.
+   */
+  releaseStaleReceive() {
+    if (!this.receiving) return
+    if (Date.now() - this.receiveStartedAt <= STALE_RECEIVE_MS) return
+    console.log('chat: releasing a read that never answered')
+    this.receiving = false
+    this.loading = false
+  },
+
   schedulePoll(delay) {
     this.stopPolling()
+    this.releaseStaleReceive()
     if (!this.visible || this.browsingHistory || this.receiving || this.reacting) return
     this.timer = setTimeout(() => {
       this.timer = null
@@ -300,9 +323,11 @@ export default {
 
   // Serialize message reads, including retries and foreground transitions.
   receive(mode) {
+    this.releaseStaleReceive()
     if (!this.visible || !this.token || this.receiving || this.reacting) return
     this.stopPolling()
     this.receiving = true
+    this.receiveStartedAt = Date.now()
     const generation = ++this.receiveGeneration
     if (mode !== 'forward') this.closeActions()
     const forward = mode === 'forward'

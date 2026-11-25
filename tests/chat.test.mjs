@@ -31,6 +31,7 @@ const ctx = {
   prompt: { showToast: ({ message }) => toasts.push(message) },
   store: { load: async () => ({ user: 'alice' }) },
   api: {
+    REQUEST_TIMEOUT_MS: 20000,
     configure() {},
     getMessages: (token, query) => new Promise((resolve, reject) => requests.push({ token, query, resolve, reject })),
     sendMessage: async (token, text, replyTo) => {

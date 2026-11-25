@@ -77,6 +77,11 @@ export default {
   },
 
   onInit() {
+    // Token of the fetch in flight. A tap must always be able to start a new
+    // one (see refresh()); the token is what keeps a late answer from a
+    // superseded request from overwriting a newer list.
+    this.fetchToken = 0
+    this.fetchStartedAt = 0
     this.readyPromise = store.load().then((settings) => {
       state.settings = settings
       api.configure(settings)
@@ -91,13 +96,16 @@ export default {
   },
 
   onDestroy() {
-    // A destroyed page has left; without this the second check inside
+    // A destroyed page has left; without this the "did we leave?" check inside
     // nav.navigate() would toast right after a replace that actually worked.
     this.leftPage = true
+    this.destroyedPage = true
     if (typeof this.unsubscribe === 'function') this.unsubscribe()
   },
 
-  // Only used by nav.navigate(): "did the push actually take us off this page?"
+  // Only used by nav.navigate(): "did the transition actually take us off this
+  // page?" A page replaced away is destroyed, never hidden, so both flags mean
+  // the same thing here.
   onHide() {
     this.leftPage = true
   },
@@ -109,6 +117,10 @@ export default {
     // nav.navigate() reads this to decide whether a push landed; returning from
     // the chat page must clear it, otherwise the retry is skipped next time.
     this.leftPage = false
+    this.destroyedPage = false
+    // Whatever a previous request left behind, a visible page is not "busy":
+    // a spinner stuck on screen is what made 刷新 look like a dead button.
+    this.loading = false
     const ready = this.readyPromise || Promise.resolve({})
     ready.then((settings) => {
       // No "did the gate pass?" check here on purpose. The verdict lives in
@@ -155,26 +167,46 @@ export default {
     }))
   },
 
+  /**
+   * Load the conversation list.
+   *
+   * A tap on 刷新 is a request for fresh data, so it must never be dropped.
+   * 1.0.1's version returned early while `loading` was true, and one request
+   * that never settled turned the button into a permanent no-op — reported from
+   * the watch as "刷新按钮不起作用". Every call now supersedes the previous one
+   * (the token invalidates its answer) and the 1.5s floor is only there to keep
+   * a double-tap from firing two requests.
+   */
   refresh() {
-    if (this.loading) return
+    const now = Date.now()
+    if (this.loading && now - this.fetchStartedAt < 1500) return
     if (!api.isConfigured()) {
       router.replace({ uri: ROUTE.setup })
       return
     }
 
+    const token = ++this.fetchToken
+    this.fetchStartedAt = now
     this.loading = true
     this.error = ''
 
+    const current = () => token === this.fetchToken
     api.listConversations()
       .then((rooms) => {
+        if (!current()) return
         this.rooms = rooms.map((room) => this.toView(room))
         state.rooms = this.rooms
       })
       .catch((err) => {
+        if (!current()) return
         this.error = this.describeError(err)
       })
+      // Both arguments: a throw inside toView() must clear the spinner too,
+      // otherwise the list is stuck showing 正在加载… for good.
       .then(() => {
-        this.loading = false
+        if (current()) this.loading = false
+      }, () => {
+        if (current()) this.loading = false
       })
   },
 

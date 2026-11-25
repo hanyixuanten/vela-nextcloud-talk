@@ -114,7 +114,7 @@ pages/login  ──submit──> api.getCurrentUser()
                           └─ fail → 留在本页，显示错误
 
 pages/index  ──tap 会话──> state.activeRoom + shared.pendingRoom → nav.navigate(pages/chat, {token, name})
-                          nav.navigate = push → 300ms 后仍在页面上 → replace 同一目标 → 仍失败才 toast
+                          nav.navigate = replace only → 500ms 后由 getState/onHide 确认到达 → 都没有才 toast
 
 pages/chat   onInit  → 取 token：router params → shared.pendingRoom → state.activeRoom
              onShow  → 首次拉最近一页；之后恢复轮询（历史模式除外）
@@ -287,25 +287,42 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 
 界面尺寸与显隐不变式由四个测试守护：`tests/layout-sizing.test.mjs` 断言页面根没有相对定位、`.app-bg` 用像素值且 `object-fit` 合法、三个滚动页的 `.list` 与卡片在每种屏幕下都是像素宽度；`tests/chat-layout.test.mjs` 断言聊天页两态用 `if`、模板不出现 `show`，并算出固定块之上留给消息列表的高度（圆屏 226、矩形 466）；`tests/index-layout.test.mjs` 对会话列表做同样的检查（不出现 `show`、`.list` 480px、卡片 394 / 413，圆屏 268 / 矩形 478 可用高度）。百分比只在父节点有确定宽度时才用（例如 `.app-page` 的直接子节点）。
 
-### 跳转不能只靠 `router.push`
+### 跳转只保留能落地的形式
 
 1.0.0 的真机报告：点会话卡片、点「设置」**都没有任何反应**（不是报错、不是闪一下，就是停在原地），而同一行里的「刷新」正常。这三个处理器里只有「刷新」不跳转——两条死掉的路正是全应用仅有的两处 `router.push`；所有确实能落地的跳转（splash → index / setup / offline）用的都是 `router.replace`。结论：**这块固件上 `push` 可能静默不生效**，而手表没有控制台，静默失败和界面卡死从外面看是一样的。
 
-`src/common/scripts/nav.js` 因此把 push 当成「可能不落地」：
+1.0.1 按「push 可能不落地」加了 push → 300ms → replace 的兜底，真机回报**会话仍然点不开，而且「刷新」也一起死了**。1.0.1 对点击路径的改动只有这个兜底和它依赖的 `leftPage`，所以问题就出在兜底本身：`push` 被丢弃时固件仍会触发当前页的 `onHide`（它响应的是「发起了跳转」，不是「跳转成功了」），`leftPage` 因此读到「已经离开」，重试被永久跳过——又一次静默无响应，还多了一个帮忙掩盖它的状态位。
+
+所以现在的规则是：**只有一种形式，就是 `replace`**，也就是所有已验证能落地的跳转用的那一种。没有 push，也就没有一个能说服自己不重试的状态机。
 
 | 步骤 | 做法 | 为什么 |
 | --- | --- | --- |
-| 1 | 页面在 `onHide` / `onDestroy` 里置 `leftPage = true` | 用来判断「到底离没离开」，`$visible` 只在固件实现时才可用，两者都看 |
-| 2 | `push(target)` | 能落地时行为与以前完全一致（返回栈保留） |
-| 3 | 300ms 后仍在页面上 → `replace(target)` | 与启动门同一种写法，已验证能落地；代价是返回栈退化为「回列表」 |
-| 4 | 再 400ms 仍在页面上 → `prompt.showToast('打不开，请重试')` | 让下一次反馈可判定：有 toast = 导航跑了但两种形式都被丢弃；没 toast = 点击根本没进处理器 |
+| 1 | `replace(target)` | 唯一被真机证明能落地的形式；代价是返回栈退化为「回列表」 |
+| 2 | 500ms 后问三个来源：`router.getState()` 是否已在目标页、`onHide`/`onDestroy` 置的 `leftPage`/`destroyedPage`、`$visible === false` | 前两个都是页面自己的说法，只有 `getState()` 来自路由器本身，所以先问它 |
+| 3 | 三个来源都没有说「已经离开」→ `prompt.showToast('打不开，请重试')`；`replace` 抛异常则直接报 | 让下一次反馈可判定：有 toast = 导航跑了但被丢弃；没 toast = 点击根本没进处理器 |
 
 配套的两处：
 
 - 房间信息走两条通道：router params（`pages/chat` 的 `protected`）+ `$app.$def.shared.pendingRoom`（跨页对象，见 §9）。`pages/chat.onInit` 读完立刻清空，避免上一间房串到下一间。
 - 被 replace 打开的页面在栈底，`router.back()` 无处可去，所以 chat / settings / setup 的返回统一走 `nav.leave(ROUTE.home)`：`router.getState().index > 0` 才 `back()`，否则 replace 回 `pages/index`。
 
-`tests/navigation.test.mjs` 守护这条链：页面里不得再出现裸 `router.push`、`nav.js` 必须先 push 再 replace、`leftPage` 必须在 onHide 与 onDestroy 都置位（否则 replace 成功后会误报 toast）、以及 chat 必须读 `pendingRoom` 并清空。
+### 用户点了就必须有反应：状态位不能吞掉一次读取
+
+1.0.1 同时报「无法进入会话」和「刷新按钮不起作用」。两处共用一个坏习惯：**用一个布尔状态位拦住后面的读取**。
+
+| 位置 | 1.0.1 的写法 | 真机表现 |
+| --- | --- | --- |
+| `pages/index.refresh()` | `if (this.loading) return` | 有一次请求既不回调也不报错，`loading` 永远是 `true`，之后每次点「刷新」都被丢掉：没有转圈、没有错误、没有变化 |
+| `pages/chat.receive()` | `if (... \|\| this.receiving \|\| ...) return` | 同上，`receiving` 卡住后页面永远停在「正在加载…」，再也不发下一次读取 |
+
+现在的规则：
+
+1. **用户发起的读取永远优先**：`refresh()` 不再因为 `loading` 提前返回，而是用 `fetchToken` 让旧请求的答案失效（1.5s 内的重复点击才忽略，防连点）。
+2. **超过请求超时的状态位视为失效**：`releaseStaleReceive()` 在 `receive` / `schedulePoll` / `onShow` 开头把 20s + 5s 以上的 `receiving` 放掉，页面因此总能恢复。
+3. **回到页面时 `loading` 清零**：可见的页面不可能是「正在忙」，否则转圈会一直挂在那儿。
+4. **失败必须能点**：聊天页的错误占位块本身可点重试，不再是死胡同。
+
+`tests/tap-recovery.test.mjs` 守护这四条（1.0.1 的源码全部失败）。
 
 ### 0.2.5 的两个包不是同一个东西
 

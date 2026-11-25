@@ -91,7 +91,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试；`tests/network.test.mjs` 与 `tests/launch-gate.test.mjs` 守住启动网络门（接口类型判定、两个探针只作证据不拦人、入口页是 `pages/splash`、会话列表不再跳回网络门）。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/index-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题；`tests/navigation.test.mjs` 守住跳转链（页面不得裸调 `router.push`、`nav.js` 必须先 push 再 replace、`leftPage` 在 onHide/onDestroy 都要置位）。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试；`tests/network.test.mjs` 与 `tests/launch-gate.test.mjs` 守住启动网络门（接口类型判定、两个探针只作证据不拦人、入口页是 `pages/splash`、会话列表不再跳回网络门）。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/index-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题；`tests/navigation.test.mjs` 守住跳转链（页面不得裸调 `router.push`、`nav.js` 只用 `replace` 并要求路由器自证已到达），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」（刷新不能被 `loading` 吞掉、卡住的读取超时后自动放行、聊天错误占位块可点重试）。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -213,7 +213,8 @@ vela-nextcloud-talk/
 │   ├── network.test.mjs          # 网络门：类型判定 + 探针只作证据
 │   ├── launch-gate.test.mjs      # 入口页路由决策与「先探网络再进主界面」
 │   ├── index-layout.test.mjs     # 会话列表：无 show、像素宽度、可用高度
-│   ├── navigation.test.mjs       # 跳转：不许裸 push、push→replace 兜底、返回不落到空栈
+│   ├── navigation.test.mjs       # 跳转：不许裸 push、只用 replace、返回不落到空栈
+│   ├── tap-recovery.test.mjs     # 点击不被状态位吞掉：刷新可重发、卡住的读取会超时放行
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试
 │   ├── keeper.test.mjs           # 后台留存：轮询归属、振动冷却、摘要容错
@@ -337,7 +338,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 ## 已知限制
 
 - **跨页状态只能放 app 实例**：每个页面是独立 webpack entry，`common/scripts/state.js` 的模块级对象是「每页一份」，跨页判定/缓存必须经 `this.$app.$def.shared`（见 `src/common/scripts/shared.js` 与 design.md 第 9 节），否则会出现 splash ⇄ 会话页互相踢球的死循环。
-- **`router.push` 可能静默失败**：真机（1.0.0）点会话、点「设置」都毫无反应，而同一行不跳转的「刷新」正常——这块固件上 `push` 会不报错也不落地。所有跳转现在走 `src/common/scripts/nav.js`：先 push，300ms 后仍在页面上就 replace 同一目标，两次都不行才弹「打不开，请重试」。代价是走兜底时返回栈退化为「回会话列表」（`nav.leave` 会处理）。见 design.md 第 11 节。
+- **`router.push` 会静默失败**：真机（1.0.0）点会话、点「设置」都毫无反应，而同一行不跳转的「刷新」正常——这块固件上 `push` 会不报错也不落地。1.0.1 试过 push→replace 兜底，结果更糟：被丢弃的 push 仍会触发当前页 `onHide`，兜底据此以为已经离开，于是永久跳过重试。现在所有跳转只走 `src/common/scripts/nav.js` 的 `replace`（唯一被证明能落地的形式），500ms 后由路由器 `getState()`、页面 `onHide`/`onDestroy` 三方之一确认；都没有才弹「打不开，请重试」。代价是返回栈退化为「回会话列表」（`nav.leave` 会处理）。见 design.md 第 11 节。
 - **服务器不可达时仍可进入应用**：启动门只判网络接口类型（且仅 `none` 算离线），因此 `status.php` 探不通、`getType` 失败或超时都不会拦人；真正的失败会以「网络正常，但服务器不可达：网络请求失败：code=…」的文案出现在会话列表（对照探针通时），平台错误码同时打在日志里。启动页会显示当前阶段，卡住时能直接从表盘看出停在哪一步。
 - **短轮询**：使用 `lookIntoFuture=1` 拉取新消息，每次请求结束后再开始计时；按设置每 15s（可改 30s / 60s）轮询。浏览历史或离开页面时暂停轮询。
 - **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，因此做成设置里可关的开关。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
