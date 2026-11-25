@@ -28,26 +28,6 @@
           <text class="row-value">{{ keyboardType }}</text>
         </div>
 
-        <div class="row">
-          <text class="row-label">{{ $t('settings.screen') }}</text>
-          <!-- if true: process.env.SHAPE === 'CIRCLE' -->
-          <text class="row-value">{{ $t('settings.screenCircle') }}</text>
-          <!-- endif -->
-          <!-- if true: process.env.SHAPE === 'RECT' -->
-          <text class="row-value">{{ $t('settings.screenRect') }}</text>
-          <!-- endif -->
-        </div>
-
-        <div class="row" @click="cyclePoll">
-          <text class="row-label">{{ $t('settings.poll') }}</text>
-          <text class="row-value">{{ pollLabel }}</text>
-        </div>
-
-        <div class="row" @click="cycleFont">
-          <text class="row-label">{{ $t('settings.font') }}</text>
-          <text class="row-value">{{ fontLabel }}</text>
-        </div>
-
         <div class="row" @click="openAbout">
           <text class="row-label">{{ $t('settings.about') }}</text>
           <text class="row-value">{{ version }}</text>
@@ -71,28 +51,11 @@ import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
 import manifest from '../../manifest.json'
 
-const FONTS = ['small', 'normal', 'large']
-const FONT_LABEL_KEYS = {
-  small: 'settings.fontSmall',
-  normal: 'settings.fontNormal',
-  large: 'settings.fontLarge'
-}
-const POLLS = [15000, 30000, 60000]
-
-function nextInList(list, current) {
-  const index = list.indexOf(current)
-  return list[(index + 1 + list.length) % list.length]
-}
-
 export default {
   data: {
     version: manifest.versionName,
     accountLabel: '',
     keyboardType: 'QWERTY',
-    pollInterval: 15000,
-    pollLabel: '',
-    fontScale: 'normal',
-    fontLabel: '',
     clearArmed: false
   },
 
@@ -101,8 +64,6 @@ export default {
       state.settings = settings
       state.ready = store.hasAccount(settings)
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.pollInterval = settings.pollInterval || 15000
-      this.fontScale = settings.fontScale || 'normal'
       this.refreshLabels(settings)
     })
   },
@@ -129,8 +90,6 @@ export default {
     } else {
       this.accountLabel = this.$t('settings.notSet')
     }
-    this.fontLabel = this.$t(FONT_LABEL_KEYS[this.fontScale] || FONT_LABEL_KEYS.normal)
-    this.pollLabel = this.pollInterval / 1000 + this.$t('settings.seconds')
   },
 
   persist(patch) {
@@ -154,8 +113,6 @@ export default {
     store.load().then((settings) => {
       state.settings = settings
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.pollInterval = settings.pollInterval || 15000
-      this.fontScale = settings.fontScale || 'normal'
       this.refreshLabels(settings)
     })
     console.log('settings save failed: ' + ((err && err.message) || err))
@@ -166,20 +123,6 @@ export default {
     const value = this.keyboardType === 'QWERTY' ? 'T9' : 'QWERTY'
     this.keyboardType = value
     this.persist({ keyboardType: value }).catch((err) => this.handlePersistFailure(err))
-  },
-
-  cyclePoll() {
-    const value = nextInList(POLLS, this.pollInterval)
-    this.pollInterval = value
-    this.pollLabel = value / 1000 + this.$t('settings.seconds')
-    this.persist({ pollInterval: value }).catch((err) => this.handlePersistFailure(err))
-  },
-
-  cycleFont() {
-    const value = nextInList(FONTS, this.fontScale)
-    this.fontScale = value
-    this.fontLabel = this.$t(FONT_LABEL_KEYS[value])
-    this.persist({ fontScale: value }).catch((err) => this.handlePersistFailure(err))
   },
 
   openAccount() {

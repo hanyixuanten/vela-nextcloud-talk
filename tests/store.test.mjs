@@ -53,7 +53,11 @@ test('save writes canonical JSON and resolves the normalized settings', async ()
   assert.equal(log[0].op, 'set')
   assert.equal(log[0].key, 'nctalk.settings')
   const written = JSON.parse(JSON.stringify(saved))
-  assert.equal(written.pollInterval, 15000)
+  // The screen type / poll interval / font size settings rows were removed in
+  // 1.0.22; the persisted payload must not carry the stale keys either.
+  assert.ok(!('pollInterval' in written))
+  assert.ok(!('fontScale' in written))
+  assert.ok(!('screenType' in written))
 })
 
 test('fail(data, code) keeps both the code and the platform text', async () => {
@@ -133,7 +137,7 @@ test('load still resolves defaults when the read fails', async () => {
   behaviour.get = (options) => options.fail({ data: 'io error', code: 202 })
   const settings = await store.load()
   assert.equal(settings.user, '')
-  assert.equal(settings.pollInterval, 15000)
+  assert.ok(!('pollInterval' in settings))
 })
 
 test('clearAll reports the same shapes', async () => {

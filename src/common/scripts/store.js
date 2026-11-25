@@ -17,16 +17,12 @@ export const DEFAULT_SETTINGS = {
   displayName: '',
 
   // Keyboard: QWERTY | T9 (forwarded to the InputMethod component).
-  keyboardType: 'QWERTY',
-  // Screen shape: circle | rect (forwarded to the InputMethod component).
-  screenType: 'circle',
-  // Milliseconds between background polls of the open conversation.
-  pollInterval: 15000,
-  // NOTE: background retention used to be a `backgroundKeep` flag here.
-  // Background polling was removed entirely in 1.0.20; `normalize()` still
-  // drops the stale key so an old "off" in storage cannot confuse anything.
-  // small | normal | large
-  fontScale: 'normal'
+  keyboardType: 'QWERTY'
+  // NOTE: `screenType`, `pollInterval` and `fontScale` used to live here. The
+  // settings UI rows were removed in 1.0.22: the screen shape is decided at
+  // build time, the poll interval is fixed at 15000 ms and the font at
+  // `normal`. `normalize()` drops the stale keys so old values in storage
+  // cannot confuse anything.
 }
 
 // Vela documents fail as fail(data, code), but the tag / firmware builds do not
@@ -145,6 +141,11 @@ function normalize(settings) {
   // Retention is always on; a value written by 1.0.14 and earlier would only
   // confuse the next reader of this object.
   delete merged.backgroundKeep
+  // Same for the settings rows removed in 1.0.22 (screen type, poll interval,
+  // font size): nothing reads them any more, so strip them from old payloads.
+  delete merged.screenType
+  delete merged.pollInterval
+  delete merged.fontScale
   return merged
 }
 

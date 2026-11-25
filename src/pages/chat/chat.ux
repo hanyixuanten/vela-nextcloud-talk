@@ -146,7 +146,6 @@ import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
 import {
   FONT_METRICS,
-  scaleName,
   splitRows,
   countRows,
   clipDisplay,
@@ -269,24 +268,8 @@ export default {
       state.settings = settings
       api.configure(settings)
       this.myUser = String(settings.user || '').toLowerCase()
-      this.applyFontScale(settings.fontScale)
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.pollInterval = settings.pollInterval || 15000
     })
-  },
-
-  // Font scale drives the row class and the metrics rows are split against, so
-  // it has to re-split the messages already on screen, not just the next page.
-  applyFontScale(scale) {
-    const name = scaleName(scale)
-    this.fontScale = name
-    this.fontSize = FONT_METRICS[name].size
-    if (this.messages && this.messages.length) {
-      this.messages = this.messages.map((row) => Object.assign({}, row, {
-        rows: splitRows(row.text, this.fontSize, PREVIEW_ROWS),
-        more: countRows(row.text, this.fontSize) > PREVIEW_ROWS
-      }))
-    }
   },
 
   onShow() {
@@ -320,9 +303,7 @@ export default {
     this.settingsReady = this.settingsReady.then(() => store.load()).then((settings) => {
       state.settings = settings
       api.configure(settings)
-      this.applyFontScale(settings.fontScale)
       this.keyboardType = settings.keyboardType || 'QWERTY'
-      this.pollInterval = settings.pollInterval || 15000
     })
     return this.settingsReady
   },
