@@ -154,9 +154,10 @@ export function shouldPoll(state) {
   return !s.foreground
 }
 
-export function intervalFor(pollInterval) {
+export function intervalFor(pollInterval, floor) {
   const value = Number(pollInterval) || 0
-  return value > MIN_BACKGROUND_INTERVAL_MS ? value : MIN_BACKGROUND_INTERVAL_MS
+  const min = Number(floor) > 0 ? Number(floor) : MIN_BACKGROUND_INTERVAL_MS
+  return value > min ? value : min
 }
 
 /**
@@ -198,6 +199,12 @@ export function createKeeper(deps) {
   let generation = 0
 
   function interval() {
+    // `intervalMs` is an explicit override for the in-app background ticker
+    // (app.ux, see bgSync.js): that one must stay under the 20s window the
+    // platform gives between two background-interface calls, which is below
+    // MIN_BACKGROUND_INTERVAL_MS and therefore not expressible through
+    // `intervalFor()`.
+    if (Number(d.intervalMs) > 0) return Number(d.intervalMs)
     return intervalFor(settings && settings.pollInterval)
   }
 

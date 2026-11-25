@@ -319,18 +319,32 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 
 `versionName` 不动时，同一个版本号既可能指修复前的包也可能指修复后的包，无法从版本号判断表上装的是哪一版。
 
-## 12. 后台留存（微服务）
+## 12. 后台留存（两种机制）
 
 目标：离开应用（回表盘 / 息屏 / 上划关闭）后仍能按间隔拉会话列表，把未读数留住，有新消息时振一下。这不是「消息推送」——Vela 没有给第三方 app 的推送通道，能做的上限就是「后台自己轮询 + 本地留存」。
 
-### 12.1 为什么不用 `config.background`
+### 12.1 两条路，各有边界
 
-官方[后台运行](https://iot.mi.com/vela/quickapp/zh/guide/framework/other/background-running.html)的两个条件是硬条件：
+Vela 官方文档里「应用离开屏幕还能继续跑」有**两个**互不相同的机制，1.0.16 之前只用了第二个，这也是「后台留存不工作」时最容易先怀疑错的地方：
 
-1. `manifest.json` 的 `config.background.features` 声明了后台接口——**只有** `system.audio`、`system.request`、`system.geolocation` 三个可选；
-2. 切换后台时**至少有一个已声明的后台接口正在运行**，否则应用被停止。
+| 机制 | 条件 | 覆盖范围 | 机型支持 |
+| --- | --- | --- | --- |
+| `config.background.features` | 声明了后台接口，**且切换后台那一刻至少有一个正在运行**；全部结束后只有 20 秒窗口 | 进程还活着（回表盘 / 息屏 / 按 home）；**上划关闭就没了** | 文档有支持明细：`system.request` 在 Watch S3 / S4 / REDMI Watch 5 都是「支持」 |
+| 微服务 `services` + `serviceclient` | `connect({policy:'always'})`，服务独立于应用生命周期 | 应用**关闭**后仍在跑 | **文档没有支持明细表** |
 
-聊天轮询走 `@system.fetch`，不在名单里；本项目也没有音频、定位或真实的下载任务。为了保活去跑一个假的静音音频或空下载，既过不了「后台运行需求是否合理」的审核，也是纯粹的电量浪费，因此**不声明 `config.background`**。
+两者不是替代关系：进程级机制确定能用但只覆盖「还活着」，微服务覆盖「被关闭」但能不能用要看机型。所以 1.0.16 起两条都实现，靠 §12.3 的租约决定谁在干活。
+
+`config.background` 的两个条件里，第二个（有接口正在运行）是聊天应用真正卡住的地方：`@system.fetch` 不在名单里，项目也没有音频和用户发起的下载。1.0.14 因此完全不用这条路。
+
+**1.0.16 的答案：把轮询本身做成一次下载。** `@system.request` 支持 `download`，而「拉会话列表」本来就是下载一个 JSON——于是后台的每一次 tick 就是 `request.download` 一次 OCS 会话列表接口，落成缓存里的一个文本文件，再用 `@system.file.readText` 读回来解析（`common/scripts/bgSync.js` + `app.ux`）。这不是为了保活而伪造的任务：它做的就是轮询要做的事，只是走了「上传下载」这个后台接口。
+
+HyperBilibili 也是同一套：`manifest.json` 里 `config.background.features: ["system.request", "system.audio"]`，没有 `services`；它能留在后台是因为它**真的**在播视频音频、**真的**在下载缓存，条件自然满足。
+
+代价与取舍：
+
+- 后台节奏必须是 **15 秒**（`BG_SYNC_MS`）：全部接口结束后只有 20 秒窗口，30 秒会被系统停掉。微服务那侧仍然是 30 秒下限，因为不受这条规则约束。
+- 每 tick 写一次同一个文件（`nctalk-rooms.txt`，`.txt` 不是 `.json`——旧固件的 file 接口会拒绝 json 资源，见 `dictionaryLoader.js` 的注释），不做递增文件。
+- 非音频的后台接口会让系统显示「应用正在后台运行」的通知；上划关闭后进程消失，这条路失效，由微服务接手。
 
 ### 12.2 用微服务承载后台轮询
 
@@ -351,7 +365,11 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 | 状态 | 谁轮询 | 说明 |
 | --- | --- | --- |
 | 应用在前台 | 页面 | 会话列表 `onShow` 拉一次；聊天页按 `pollInterval` 拉消息 |
-| 应用在后台 / 已关闭 | keeper 服务 | 前台的「暂停」是一条会过期的租约，见下 |
+| 应用在后台、进程还活着 | `app.ux` 的 `bgKeeper` | `config.background` + 15 秒一次的下载 tick（§12.1） |
+| 应用已被关闭 | keeper 服务 | 只有它跨进程；能不能用看机型 |
+| 三者的切换 | 同一份 `createKeeper` 决策逻辑 + 租约 | 见下 |
+
+`bgKeeper` 与页面、服务共用 `common/scripts/keeper.js` 的 `createKeeper`：基线不振动、未读上升才振、60 秒冷却、摘要容错全都是一份实现，只是三者的传输和节奏不同（页面 `fetch` / `bgKeeper` `download` + 15s / 服务 `fetch` + 30s 下限）。
 
 **1.0.14 用布尔量表示「应用在前台」，这是它「后台留存不工作」的根因。** `app.ux` 的 `onHide` 发 `{type:'background'}`、`onShow` 发 `{type:'foreground'}`；服务收到 foreground 就把定时器清掉、`foreground = true`。只要这条 background 没到——上划关闭、息屏被系统回收、固件漏发 `onHide`——服务就带着 `foreground = true` 和空定时器活到重启，一次都不再轮询，而应用侧完全看不出异常。
 
@@ -399,6 +417,10 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 | 服务内 `setTimeout` | 文档未写；打包产物里确实注入了 `setTimeout` / `setInterval` | 真机看日志里是否按 30 秒间隔出现 `keeper: poll failed` / 摘要更新 |
 | `serviceManager.postMessage` 签名 | 文档表格写 `postMessage(clientId, Object)`（clientId 可省，0 = 广播），唯一示例写 `postMessage({ clientId, params })` | 先按客户端列表逐条 `postMessage(client.id, payload)`（语义无歧义），退化到 `getClientsInfo` 不可用时才用示例形式，再退化到 `(0, payload)`（`src/services/keeper.js`） |
 | 后台网络是否被系统挂起 | 未验证 | 观察息屏 10 分钟后摘要时间戳是否还在推进 |
+| `config.background` 的 20 秒窗口 | 快应用标准里写明「全部后台接口结束后 20 秒倒计时」，Vela 文档没提 | 真机看 `background sync:` 日志是否每 15 秒一条；若只在切后台后跑一次就停，说明这台机没有窗口，需要改成常驻下载（长轮询） |
+| `request.download` 带 Basic Auth | `header` 是 JSON 字符串（照 HyperBilibili 的写法），OCS 依赖 `OCS-APIRequest: true` | 日志若出现 `download could not start, code=`，先看是否 `invalid header`；这一步失败整条进程级路径都无效 |
+| 下载的缓存文件能否被 `file.readText` 读 | 写的是 `nctalk-rooms.txt`（旧固件拒绝 json 资源） | 日志 `file read failed` 说明 uri 不可读，需要改用 `internal://cache/` 显式路径 |
+| 「应用正在后台运行」通知 | 非音频后台接口会显示系统通知 | 属于预期行为；不想要就只能放弃这条路 |
 
 构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。决策逻辑由 `tests/keeper.test.mjs` 守护（含服务名与 manifest 的一致性）；manifest / app.ux / i18n 的接线只能在真机上验证，见上表。
 

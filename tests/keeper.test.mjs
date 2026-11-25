@@ -164,6 +164,20 @@ test('intervalFor clamps the background period to the floor', () => {
   assert.equal(intervalFor(undefined), MIN_BACKGROUND_INTERVAL_MS)
 })
 
+test('intervalMs overrides the stored poll interval (in-app background ticker)', async () => {
+  // app.ux's background sync must tick inside the platform's 20s window, so it
+  // cannot inherit either the 60s setting or the service's 30s floor.
+  const env = makeDeps()
+  env.deps.intervalMs = 15000
+  env.settings.pollInterval = 60000
+  const service = createKeeper(env.deps)
+  await service.start()
+  await runNext(env.timers)
+  assert.equal(env.record.polls, 1)
+  assert.equal(env.timers[0].ms, 15000, 'the explicit cadence wins over pollInterval')
+  assert.equal(service.state().interval, 15000)
+})
+
 test('summarizeRooms keeps name/preview/unread and totals unread', () => {
   const summary = summarizeRooms(ROOMS, (message) => (message ? message.message : ''), 42)
   assert.equal(summary.total, 2)

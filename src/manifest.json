@@ -9,6 +9,7 @@
   "features": [
     { "name": "system.router" },
     { "name": "system.fetch" },
+    { "name": "system.request" },
     { "name": "system.storage" },
     { "name": "system.file" },
     { "name": "system.prompt" },
@@ -29,7 +30,10 @@
   ],
   "config": {
     "logLevel": "log",
-    "designWidth": 480
+    "designWidth": 480,
+    "background": {
+      "features": ["system.request"]
+    }
   },
   "router": {
     "entry": "pages/splash",

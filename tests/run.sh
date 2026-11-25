@@ -35,6 +35,8 @@ cp "$ROOT/src/common/scripts/protocol.js" "$BUILD/protocol.mjs"
 cp "$ROOT/src/common/scripts/launch.js" "$BUILD/launch.mjs"
 cp "$ROOT/src/common/scripts/keeper.js" "$BUILD/keeper.mjs"
 cp "$ROOT/src/common/scripts/textlayout.js" "$BUILD/textlayout.mjs"
+sed -e "s#from './keeper'#from './keeper.mjs'#" \
+    "$ROOT/src/common/scripts/bgSync.js" > "$BUILD/bgSync.mjs"
 cp "$ROOT/src/common/scripts/shared.js" "$BUILD/shared.mjs"
 cp "$ROOT/tests/fetch-double.mjs" "$BUILD/fetch-double.mjs"
 cp "$ROOT/tests/storage-double.mjs" "$BUILD/storage-double.mjs"
@@ -55,6 +57,7 @@ fail=0
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/keeper.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/bgsync.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then
   rm -rf "$BUILD"

@@ -10,48 +10,12 @@
 // Everything decision-shaped lives in common/scripts/keeper.js so it can be
 // unit tested without a watch. This file is only the platform binding.
 
-import storage from '@system.storage'
 import vibrator from '@system.vibrator'
 import api from '../common/scripts/api'
 import store from '../common/scripts/store'
 import fmt from '../common/scripts/format'
-import { createKeeper, SUMMARY_KEY, SERVICE_NAME } from '../common/scripts/keeper'
-
-function readSummary() {
-  return new Promise((resolve) => {
-    try {
-      storage.get({
-        key: SUMMARY_KEY,
-        default: '',
-        success: (value) => resolve(value || ''),
-        fail: (data, code) => {
-          // A read failure is not fatal: an empty summary is a valid answer and
-          // the next successful poll overwrites it anyway.
-          console.log('keeper: summary read failed, code=' + code)
-          resolve('')
-        }
-      })
-    } catch (err) {
-      console.log('keeper: summary read threw: ' + ((err && err.message) || err))
-      resolve('')
-    }
-  })
-}
-
-function writeSummary(summary) {
-  return new Promise((resolve, reject) => {
-    try {
-      storage.set({
-        key: SUMMARY_KEY,
-        value: JSON.stringify(summary),
-        success: () => resolve(),
-        fail: (data, code) => reject(new Error('summary write failed, code=' + code))
-      })
-    } catch (err) {
-      reject(err)
-    }
-  })
-}
+import { readSummary, writeSummary } from '../common/scripts/summary'
+import { createKeeper, SERVICE_NAME } from '../common/scripts/keeper'
 
 // serviceManager.postMessage is documented twice with different signatures:
 // postMessage(clientId, Object) in the table (clientId optional, 0 = broadcast)

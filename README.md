@@ -136,7 +136,7 @@ npm run check:live      # 或 node scripts/check-credentials.mjs [--file other.e
 | 发送消息 | ✅ | POST `/chat/{token}`，发送后本地立即上屏 |
 | 已读标记 | ✅ | 打开会话或收到新消息后 POST `/chat/{token}/read` |
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
-| 后台留存 | ✅ | 微服务在退到后台 / 关闭应用后继续拉会话列表，留存未读、新消息振动；**始终开启，无开关** |
+| 后台留存 | ✅ | 两条官方机制并用：`config.background` + 下载轮询管「回表盘 / 息屏」，微服务管「应用被关闭」；留存未读、新消息振动，**始终开启，无开关** |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
 | 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表先保存再校验；校验期间不熄屏 |
@@ -178,8 +178,10 @@ vela-nextcloud-talk/
 │   │       ├── textlayout.js     # 气泡/详情页共用的折行与文本度量
 │   │       ├── network.js        # 启动网络门（类型判定 + bilibili/服务器探针证据）
 │   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
-│   │       ├── keeper.js         # 后台留存的决策逻辑（纯 JS，可单测）
+│   │       ├── keeper.js         # 后台留存的决策逻辑（纯 JS，可单测，三方共用）
 │   │       ├── keeperClient.js   # @system.serviceclient 封装（policy always）
+│   │       ├── bgSync.js         # config.background + request.download 的传输层
+│   │       ├── summary.js        # nctalk.keeper 摘要读写（app.ux 与服务共用）
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
 │   ├── services/
 │   │   └── keeper.js             # 微服务：后台轮询会话列表、留存未读、振动
@@ -230,6 +232,7 @@ vela-nextcloud-talk/
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试（顺序、四行预览、展开全文、窗口上限）
 │   ├── keeper.test.mjs           # 后台留存：前台租约、振动冷却、摘要容错、重连
+│   ├── bgsync.test.mjs           # 进程级后台：下载 URL/头/文件名、manifest 声明、心跳条件
 │   └── build-watch.test.cjs      # 屏幕条件编译测试
 ├── LICENSE                       # 根仓库 MIT 许可
 ├── SECURITY.md                   # 漏洞报告与安全边界
@@ -286,7 +289,18 @@ Vela 的 `config.background` 只认 `system.audio` / `system.request` / `system.
 
 留存的是摘要而不是消息：`nctalk.keeper` 里只有 `{ at, total, account, rooms: [{ token, name, preview, unread, at }] }`，会话页冷启动时先渲染它再发真实请求；`account` 不匹配就丢弃。首次轮询只建立基线不振动，之后未读上升且应用不在前台才 `vibrate({ mode: 'short' })`，60 秒冷却。间隔取 `max(pollInterval, 30s)`。
 
-**它没有开关，也不再依赖应用主动说再见。** 前台状态是一条 90 秒的租约：`app.ux` 每 30 秒续租一次，续租一停（进程被杀、上划关闭、固件漏发 `onHide`）服务就自己恢复轮询——1.0.14 用布尔量，一次没收到 `onHide` 就永久静默，这是「后台留存不工作」的直接原因。连接失败（1000/1001）现在会退避重连，而不是一次失败就整场失效。设计细节与**真机待验证项**（微服务机型支持、服务内定时器、`postMessage` 签名）见 [`docs/design.md`](docs/design.md) 第 12 节。
+**它没有开关，也不再依赖应用主动说再见。** 前台状态是一条 90 秒的租约：`app.ux` 每 30 秒续租一次，续租一停（进程被杀、上划关闭、固件漏发 `onHide`）服务就自己恢复轮询——1.0.14 用布尔量，一次没收到 `onHide` 就永久静默，这是「后台留存不工作」的直接原因。连接失败（1000/1001）现在会退避重连，而不是一次失败就整场失效。
+
+### 后台留存为什么不只是微服务
+
+Vela 有两条互不相同的「离开屏幕还能跑」的路，微服务只是第二条：
+
+| 机制 | 条件 | 覆盖 | 机型支持 |
+| --- | --- | --- | --- |
+| `config.background.features` | 声明后台接口，且切后台那一刻**有一个正在运行**（结束后只有 20 秒窗口） | 进程还活着：回表盘 / 息屏 | 有支持明细，`system.request` 在 S3 / S4 / REDMI Watch 5 都支持 |
+| 微服务 | `connect({ policy: 'always' })` | 应用被**关闭**后仍在跑 | **没有**支持明细表 |
+
+HyperBilibili 走的是第一条：`config.background.features: ["system.request", "system.audio"]`，没有 `services`，它能留在后台是因为它真的在播音频、真的在下载。聊天应用没有音频，但「拉会话列表」本身就是一次下载——所以 `app.ux` 的后台 tick 就是 `request.download` 一次 OCS 接口，落成 `nctalk-rooms.txt` 再 `file.readText` 读回来（`src/common/scripts/bgSync.js`），节奏 15 秒以留在 20 秒窗口内。两条路共用 `createKeeper` 的决策逻辑，靠租约决定谁在干活，细节与**真机待验证项**（20 秒窗口、`request.download` 的 Basic Auth 头、缓存文件可读性、后台通知）见 [`docs/design.md`](docs/design.md) 第 12 节。
 
 ### 输入态为什么要两个页面状态
 

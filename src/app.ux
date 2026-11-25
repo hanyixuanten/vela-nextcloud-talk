@@ -1,10 +1,16 @@
 <script>
+import request from '@system.request'
+import file from '@system.file'
+import vibrator from '@system.vibrator'
 import store from './common/scripts/store'
 import api from './common/scripts/api'
 import fmt from './common/scripts/format'
 import state from './common/scripts/state'
+import base64Encode from './common/scripts/base64'
 import keeperClient from './common/scripts/keeperClient'
-import { FOREGROUND_LEASE_MS } from './common/scripts/keeper'
+import { FOREGROUND_LEASE_MS, createKeeper } from './common/scripts/keeper'
+import { readSummary, writeSummary } from './common/scripts/summary'
+import { BG_SYNC_MS, ROOMS_FILE, roomsUrl, downloadHeader, parseRoomsFile } from './common/scripts/bgSync'
 
 // The app renews the service's foreground lease from this heartbeat, so the
 // lease (90s) outlives two missed beats. Cheap: a postMessage, no network.
@@ -26,6 +32,116 @@ const shared = {
   pendingDetail: null
 }
 
+// --- background sync transport (config.background + @system.request) ---------
+//
+// See common/scripts/bgSync.js for why this exists next to the micro service:
+// while the process is alive, `config.background` keeps it running, and the
+// interface that is "running" is a real download of the conversation list.
+// HyperBilibili does the same thing for the same reason (it declares
+// [system.request, system.audio] and really downloads / really plays audio).
+
+// Settings for the download headers, refreshed by every tick.
+let bgSettings = null
+// When the last background download started. The heartbeat uses it to decide
+// whether this process is still doing the work, so a stalled ticker stops
+// renewing the service's lease instead of silencing the service for good.
+let lastBgAttemptAt = 0
+
+function readCachedText(uri) {
+  return new Promise((resolve, reject) => {
+    try {
+      file.readText({
+        uri: uri,
+        success: (data) => resolve(data || ''),
+        fail: (message, code) => reject(new Error('file read failed, code=' + code + (message ? ': ' + message : '')))
+      })
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+function downloadRooms() {
+  lastBgAttemptAt = Date.now()
+  const settings = bgSettings || {}
+  const url = roomsUrl(settings.baseUrl)
+  if (!url) return Promise.reject(new Error('background sync: no server configured'))
+  const header = downloadHeader(settings, base64Encode)
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const fail = (reason) => {
+      if (settled) return
+      settled = true
+      reject(reason instanceof Error ? reason : new Error(String(reason)))
+    }
+    const done = (rooms) => {
+      if (settled) return
+      settled = true
+      resolve(rooms)
+    }
+
+    try {
+      request.download({
+        url: url,
+        header: header,
+        // Same filename every tick: the download overwrites its predecessor.
+        filename: ROOMS_FILE,
+        success: (res) => {
+          const token = res && res.token
+          if (!token) {
+            fail('background sync: download returned no token')
+            return
+          }
+          // Two-step by design: the task id arrives first, the file uri later.
+          request.onDownloadComplete({
+            token: token,
+            success: (result) => {
+              readCachedText(result && result.uri)
+                .then((text) => done(parseRoomsFile(text)))
+                .catch((err) => fail(err))
+            },
+            fail: (data, code) => fail('background sync: download failed, code=' + code)
+          })
+        },
+        fail: (data, code) => fail('background sync: download could not start, code=' + code)
+      })
+    } catch (err) {
+      fail('background sync: download threw: ' + ((err && err.message) || err))
+    }
+  })
+}
+
+// The same decision logic the service uses (baseline, buzz cooldown, summary),
+// with the download as its `listRooms` and an explicit 15s cadence: the platform
+// stops the process if no background interface runs for 20s, so this ticker
+// cannot use the service's 30s floor.
+const bgKeeper = createKeeper({
+  intervalMs: BG_SYNC_MS,
+  loadSettings: () => store.load().then((settings) => {
+    bgSettings = settings
+    api.configure(settings)
+    return settings
+  }),
+  listRooms: downloadRooms,
+  loadSummary: readSummary,
+  saveSummary: writeSummary,
+  formatPreview: (message) => fmt.previewWithAuthor(message),
+  vibrate: (mode) => {
+    try {
+      vibrator.vibrate({ mode: mode || 'short' })
+    } catch (err) {
+      console.log('background sync: vibrate failed: ' + ((err && err.message) || err))
+    }
+  },
+  notify: (payload) => {
+    if (payload && payload.type === 'rooms') shared.backgroundSummary = payload.summary
+  },
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (id) => clearTimeout(id),
+  now: () => Date.now()
+})
+
 export default {
   // Explicit key, not shorthand: pages reach it as $app.$def.shared.
   shared: shared,
@@ -42,8 +158,9 @@ export default {
     // started from inside the `.then()` below, so a slow or failing storage read
     // (or a first launch with no account yet) left the service unconnected for
     // the whole session — the app kept working, background retention never did.
-    // The service reads the account itself on every tick anyway.
+    // Both pollers read the account themselves on every tick.
     this.startKeeper()
+    this.startBackgroundSync()
     this.startHeartbeat()
 
     // Settings are read once at startup so every page gets a configured API
@@ -61,13 +178,14 @@ export default {
       })
   },
 
-  // The keeper micro service owns polling while the app is away; the pages own
-  // it while the app is visible (they already fetch the same list and chat page
-  // has its own message poll). See docs/design.md §11–12.
+  // The keeper micro service owns polling once the app is *gone*; the pages own
+  // it while the app is visible; app.ux's background sync owns it while the
+  // process is alive but off screen. See docs/design.md §12.
   //
   // Retention is not a setting: there is no account-, preference- or
   // toggle-shaped path that turns it off (design.md §12.6). Only the service
-  // answering "no such service" keeps it off, and that is retried.
+  // answering "no such service" keeps the cross-process half off, and that is
+  // retried.
   startKeeper() {
     keeperClient.start({
       onSummary: (summary) => {
@@ -81,13 +199,29 @@ export default {
     keeperClient.foreground(this.visible !== false)
   },
 
-  // Every beat keeps the service paused while the app is on screen. If the app
-  // is killed without a word, the beats stop and the service resumes on its own
-  // when the lease expires — the failure mode 1.0.14 could not escape.
+  /**
+   * In-process background polling. It starts paused: the foreground pages fetch
+   * the same list, and the lease logic in keeper.js keeps it from polling until
+   * the app is actually hidden (`onHide` sends `background`, which ticks once
+   * and then every BG_SYNC_MS).
+   */
+  startBackgroundSync() {
+    bgKeeper.onMessage(0, { type: 'foreground' })
+    bgKeeper.start().catch((err) => {
+      console.log('background sync: start failed: ' + ((err && err.message) || err))
+    })
+  },
+
+  // Every beat keeps the service paused while this process is doing the polling
+  // itself - foreground or background. When the process dies (swipe-close,
+  // crash, a firmware that skips onHide) the beats stop and the service resumes
+  // at lease expiry. A backgrounded app whose ticker stopped also stops renewing
+  // here, so a broken download path cannot silence the service for good.
   startHeartbeat() {
     if (this.heartbeatTimer) return
     this.heartbeatTimer = setInterval(() => {
-      if (this.visible === false) return
+      const syncing = lastBgAttemptAt > 0 && Date.now() - lastBgAttemptAt < BG_SYNC_MS * 3
+      if (this.visible !== true && !syncing) return
       keeperClient.heartbeat()
     }, LEASE_HEARTBEAT_MS)
   },
@@ -95,11 +229,15 @@ export default {
   onShow() {
     this.visible = true
     keeperClient.foreground(true)
+    bgKeeper.onMessage(0, { type: 'foreground' })
   },
 
   onHide() {
     this.visible = false
     keeperClient.foreground(false)
+    // First tick immediately: the platform checks the background condition as
+    // the app leaves the screen, so a download has to be running right then.
+    bgKeeper.onMessage(0, { type: 'background' })
   },
 
   onDestroy() {
@@ -107,6 +245,7 @@ export default {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
     }
+    bgKeeper.stop()
     console.log('app destroyed')
   }
 }
