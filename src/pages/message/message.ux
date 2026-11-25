@@ -1,0 +1,214 @@
+<template>
+  <div class="app-page">
+    <image class="app-bg" src="/common/images/bg/blue.png"></image>
+
+    <div class="bar">
+      <div class="back" @click="goBack">
+        <text class="back-icon">‹</text>
+      </div>
+      <text class="bar-title">{{ $t('message.title') }}</text>
+    </div>
+
+    <!-- Full text of one message, the way HyperBilibili shows a long comment
+         (src/pages/tools/textdetail): a card inside a scrolling page, the text
+         wrapping naturally at a definite width. The chat bubble is the fixed
+         four-row preview; this page is where the rest of the text lives. -->
+    <scroll class="scroll" scroll-y="{{true}}">
+      <div class="list">
+        <div class="card">
+          <text class="meta" if="{{ caption }}">{{ caption }}</text>
+          <text class="body-{{ size }}" if="{{ body }}">{{ body }}</text>
+          <text class="body-{{ size }}" if="{{ !body }}">{{ $t('message.empty') }}</text>
+        </div>
+      </div>
+    </scroll>
+  </div>
+</template>
+
+<script>
+import state from '../../common/scripts/state'
+import { sharedOf } from '../../common/scripts/shared'
+import { ROUTE } from '../../common/scripts/launch'
+import { scaleName } from '../../common/scripts/textlayout'
+import nav from '../../common/scripts/nav'
+
+export default {
+  // Params from the router; the app-level object is the fallback for the
+  // params-less rung of nav.navigate's ladder (pages/chat.openDetail writes it
+  // and this page clears it on read, exactly like pages/chat does with
+  // `pendingRoom`). `private` must not be called `data` next to `protected`.
+  protected: {
+    text: '',
+    meta: '',
+    scale: 'normal'
+  },
+
+  private: {
+    // Router params land on `protected`, which is not observed by the template
+    // on this VM in every case; the page renders from these instead.
+    body: '',
+    caption: '',
+    size: 'normal'
+  },
+
+  onInit() {
+    const shared = sharedOf(this, state)
+    const pending = (shared && shared.pendingDetail) || null
+    if (shared && shared.pendingDetail) shared.pendingDetail = null
+    const fallback = pending || {}
+    this.body = String(this.text || fallback.text || '')
+    this.caption = String(this.meta || fallback.meta || '')
+    this.size = scaleName(this.scale || fallback.scale)
+    this.leftPage = false
+  },
+
+  onShow() {
+    this.leftPage = false
+    this.destroyedPage = false
+  },
+
+  onHide() {
+    this.leftPage = true
+  },
+
+  onDestroy() {
+    this.leftPage = true
+    this.destroyedPage = true
+    // The page is only ever opened for one message; drop the string with the
+    // page instead of keeping a 1-2k character string alive in the VM.
+    this.body = ''
+  },
+
+  goBack() {
+    // Opened with nav.navigate (which may have used replace), so back() alone is
+    // not trustworthy: land on the conversation either way.
+    nav.leave(ROUTE.chat)
+  }
+}
+</script>
+
+<style>
+@import "../../common/styles/theme.css";
+
+/* Same chord budget as pages/chat: 480 - (70 + 72 + 6 bar) - 16 = 316. The RECT
+ * block overrides for the 640 screen. Fixed pixels, never `flex: 1` — a
+ * flex-resolved scroll on this firmware compresses its content instead of
+ * letting it overflow (docs/design.md §11). */
+.bar {
+  width: 70%;
+  margin-top: 70px;
+  margin-bottom: 6px;
+}
+
+.scroll {
+  width: 480px;
+  height: 316px;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Design pixels, not 100%: scroll content has no definite width to resolve a
+ * percentage against. */
+.list {
+  width: 480px;
+  padding-bottom: 12px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.card {
+  width: 394px;
+  margin-top: 6px;
+  padding-bottom: 16px;
+  border-radius: 26px;
+  background-color: #262626;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.meta {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 14px;
+  margin-bottom: 6px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #9c9c9c;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+/* The body is the one place in the app that renders a multi-line text: it is
+ * the only shape that can hold an arbitrarily long message without turning it
+ * into 40-100 row nodes (one text per line, like the bubble). The width and the
+ * font size sit in the SAME block, and there is no `lines` clamp, so the card
+ * grows with the text instead of clipping it. */
+.body-small {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  font-size: 20px;
+  font-weight: 500;
+  color: #ffffff;
+  text-align: left;
+}
+
+.body-normal {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  font-size: 23px;
+  font-weight: 500;
+  color: #ffffff;
+  text-align: left;
+}
+
+.body-large {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  font-size: 27px;
+  font-weight: 500;
+  color: #ffffff;
+  text-align: left;
+}
+
+/* if true: process.env.SHAPE === 'CIRCLE' */
+/* The base block above is already the circle layout; this block exists so both
+ * shape conditionals stay balanced (see scripts/build-watch.cjs). */
+.scroll {
+  height: 316px;
+}
+/* endif */
+
+/* if true: process.env.SHAPE === 'RECT' */
+.app-bg {
+  width: 480px;
+  height: 640px;
+}
+.bar {
+  width: 86%;
+  margin-top: 10px;
+}
+/* 640 - (10+72+6 bar) - 16 = 536 */
+.scroll {
+  height: 536px;
+}
+.card {
+  width: 413px;
+}
+.meta {
+  width: 381px;
+}
+.body-small {
+  width: 381px;
+}
+.body-normal {
+  width: 381px;
+}
+.body-large {
+  width: 381px;
+}
+/* endif */
+</style>

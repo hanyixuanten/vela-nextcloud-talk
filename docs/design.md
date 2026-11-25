@@ -265,10 +265,11 @@ Vela 对百分比与显隐的解析有几处与 CSS 规范不同，这些写法�
 | `<scroll>` 内容根 `.list` | `width: 100%` | 滚动内容没有确定宽度，百分比解析不到基准，子卡片全部塌成零宽 | `480px`（设计宽度），子卡片用 394 / 413 / 374 这类设计像素 |
 | **`<scroll>` 本身** | `flex: 1` | **这就是「被压扁而不是可滚动」的根因**：flex 解析出高度后，这块固件把内容压进视口而不是让它溢出——列表永远不滚，子节点在主轴上被压缩，文字量出来就是 0 高（`chat: row0 343x0`） | 固定设计像素高度 = 屏幕高 − 固定 chrome：chat 226 / index 268 / settings 408（矩形屏 466 / 478 / 568）。参照 HyperBilibili `src/less/global.less` 的 `.scroll { width/height: 100% }`——滚动区永远有一个确定的盒子，内容才可能比它高 |
 | 会话气泡内的文字（`.msg-meta` / `.msg-body` / `.msg-row` / `.reaction-summary`） | 不写 `width` | 没有确定宽度时 `text` 按内容固有宽度排，长消息**不换行** | `362px`（= 394 − 16 × 2），矩形屏 `381px`（= 413 − 32），见 `chat.ux` |
-| 会话气泡内的正文 | 多行 `text`；`for` 逐行；行加 `height`；把字号拆到第二个 class | 这些写法在滚动区还是 `flex: 1` 的时期实测全是 0 高（`343x0`）；真因见上面那行——内容被压进视口。改完滚动区后它们没再逐一回测，所以仍按已验证的形态保留 | 正文在 `splitRows()` 里按宽度预估切行，模板里**六个手写索引槽位**（两个 `for` 共用 `$idx` 键，内层不产出节点），每行是气泡的直接子节点、单个自包含 class：`width` + 侧边距 + `font-size` + `font-weight` + `color` + `lines: 1`，不加 `height`、不加 `line-height` |
+| 会话气泡内的正文 | 多行 `text`；`for` 逐行；行加 `height`；把字号拆到第二个 class | 这些写法在滚动区还是 `flex: 1` 的时期实测全是 0 高（`343x0`）；真因见上面那行——内容被压进视口。改完滚动区后它们没再逐一回测，所以仍按已验证的形态保留 | 正文在 `common/scripts/textlayout.js` 的 `splitRows()` 里按宽度预估切行，模板里**四个手写索引槽位**（两个 `for` 共用 `$idx` 键，内层不产出节点），每行是气泡的直接子节点、单个自包含 class：`width` + 侧边距 + `font-size` + `font-weight` + `color` + `lines: 1`，不加 `height`、不加 `line-height`。第 5 行起不再进气泡，改由 `pages/message`（展开全文）承载，见 §13 |
 | 会话列表卡片里的文字（`.room-name` / `.room-preview`） | `width: 100%` | 与上一条同源：在 flex 卡片里没有自己的确定宽度 | `200px`（矩形屏 `219px` = 卡片宽 − 头像 56 − 各段边距），`lines: 1` 与字号写在同一个块里 |
 | 状态容器（`main` / `editor` / 输入条） | `show="{{...}}"` | 隐藏节点仍占高度：148 + 212 + 150 = 510 > 480，`flex: 1` 的列表解析成 0 | `if="{{...}}"`，模板内不出现 `show` |
 | 会话列表的占位块与 `.badge` | `show="{{...}}"` | 占位块躲在列表末尾一起占高度；未读为 0 时徽标仍占 30px，把时间顶出行 | `if="{{...}}"` |
+| `pages/message` 的正文 | 逐行 `text` | 一条消息最长 2000 字，按行切会变成 60–100 个节点，滚动区一次全部实例化 | 整段一个多行 `text`（`.body-*`：像素宽 + 字号 + 无 `lines`），卡片高度随文本增长。这是全应用唯一的多行正文，形状抄自 HyperBilibili `pages/tools/textdetail` 的 `.text`（`width: 95%` + `padding`，不写 `lines`） |
 
 `tests/layout.test.mjs` 守住这些不变式：页面根静态定位、`.app-bg` 用像素值且 `object-fit` 合法、三个滚动页的 `.list` 与卡片在每种屏幕下都是像素宽、两态用 `if`、固定块之上留给消息列表的高度（圆屏 / 矩形屏都 ≥ 180px）、气泡内每个 `text` 都等于「气泡宽 − 左右边距」且都是 `lines: 1` 带固定高度（旧样式读不到这个宽度，测试直接报错），以及登录页键盘占位不低于真实键盘高度。百分比只在父节点有确定宽度时才用（例如 `.app-page` 的直接子节点）。
 
@@ -350,9 +351,20 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 | 状态 | 谁轮询 | 说明 |
 | --- | --- | --- |
 | 应用在前台 | 页面 | 会话列表 `onShow` 拉一次；聊天页按 `pollInterval` 拉消息 |
-| 应用在后台 / 已关闭 | keeper 服务 | `app.ux` 的 `onHide` 发 `{type:'background'}` 让服务开始，`onShow` 发 `{type:'foreground'}` 让它停下 |
+| 应用在后台 / 已关闭 | keeper 服务 | 前台的「暂停」是一条会过期的租约，见下 |
 
-`shouldPoll()`（`src/common/scripts/keeper.js`）就是这条规则的唯一实现，单测直接钉它。`app.ux` 把服务端的 `{type:'rooms'}` 推送写进 `state.backgroundSummary`，会话页在 `onShow` 先用它渲染一遍，再发真实请求。
+**1.0.14 用布尔量表示「应用在前台」，这是它「后台留存不工作」的根因。** `app.ux` 的 `onHide` 发 `{type:'background'}`、`onShow` 发 `{type:'foreground'}`；服务收到 foreground 就把定时器清掉、`foreground = true`。只要这条 background 没到——上划关闭、息屏被系统回收、固件漏发 `onHide`——服务就带着 `foreground = true` 和空定时器活到重启，一次都不再轮询，而应用侧完全看不出异常。
+
+现在换成**租约**（`FOREGROUND_LEASE_MS = 90s`）：
+
+1. `{type:'foreground'}` 只写一个到期时间 `now + 90s`，并排一个到期时刻的唤醒定时器；
+2. `app.ux` 每 30s（`LEASE_HEARTBEAT_MS`）发一次 `{type:'foreground'}` 续租，所以应用真的在前台时服务一直不问网络；
+3. 续租一停（进程被杀、`onHide` 没发、服务被重启）租约自动过期，服务在到期那次唤醒里恢复轮询；
+4. `onDisConnect` 时若这是最后一个客户端，立即清租约并轮询——比等 90s 更早恢复。
+
+`tick()` 里的 `isForeground()/leaseRemaining()` 就是这条规则的唯一实现，`tests/keeper.test.mjs` 直接钉它（含「租约不续期会恢复轮询」）。`app.ux` 把服务端的 `{type:'rooms'}` 推送写进 `shared.backgroundSummary`，会话页在 `onShow` 先用它渲染一遍，再发真实请求。
+
+连接本身也会失败：`policy: 'always'` 的 `connect()` 在 `app.onCreate` 阶段可能撞上服务运行时尚未就绪（错误码 1000/1001）。1.0.14 在尝试**之前**就把 `started` 置为 true，一次失败即整场失效；现在只有拿到实例才置位，失败按 1s / 5s / 15s / 45s / 60s 退避重连，`onerror`（1000/1001/1003）也会触发重连。
 
 ### 12.4 留存的数据
 
@@ -377,7 +389,7 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 
 - 后台轮询间隔 = `max(pollInterval, 30000)`。界面上的 15 秒是给人看的刷新节奏，后台没有屏幕要更新，15 秒一次 OCS 请求纯烧电。
 - 单次失败（断网、超时、401）只写日志，**保留上一份摘要并继续排下一次**：手表离线时还能显示上次的未读数，是有意义的行为，不是降级。
-- 设置里「后台留存」关闭时：服务不再发请求、不再排定时器；重新打开会先 `start()` 再 `refresh()` 立刻同步一次。关闭后服务进程可能仍驻留到重启，但没有任何网络与定时行为。
+- **后台留存没有开关，一直开启。** 1.0.14 在设置里留了「后台留存 开/关」，`settings.backgroundKeep` 一旦存成 false，服务连启动都不做——而它本来就是「有账号就该跑」的行为，不是一个需要用户理解的取舍。现在：`store.js` 的 `DEFAULT_SETTINGS` 没有这个键，`normalize()` 会把旧值 `delete` 掉，设置页那一行与 `settings.background|on|off` 三个 i18n 键一并删除，服务端只认 `stopped`（`shutdown` / `terminate`）。`tests/keeper.test.mjs` 用「存储里留着 `backgroundKeep: false` 仍照常轮询」钉住这条。
 
 ### 12.7 未在文档中确认的部分（真机必查）
 
@@ -385,7 +397,56 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 | --- | --- | --- |
 | 微服务的机型支持 | 官方只给了 `@system.request`、`vibrator` 等的支持明细，**微服务没有支持明细表** | 真机确认 S3 / S4 / REDMI Watch 5 上 `connect` 返回 1000/1001 与否；连不上时客户端只打日志，应用照旧当前台客户端用 |
 | 服务内 `setTimeout` | 文档未写；打包产物里确实注入了 `setTimeout` / `setInterval` | 真机看日志里是否按 30 秒间隔出现 `keeper: poll failed` / 摘要更新 |
-| `serviceManager.postMessage` 签名 | 文档表格写 `postMessage(clientId, Object)`，唯一示例写 `postMessage({ clientId, params })` | 先按示例调用，抛异常再退回两参数形式（`src/services/keeper.js`） |
+| `serviceManager.postMessage` 签名 | 文档表格写 `postMessage(clientId, Object)`（clientId 可省，0 = 广播），唯一示例写 `postMessage({ clientId, params })` | 先按客户端列表逐条 `postMessage(client.id, payload)`（语义无歧义），退化到 `getClientsInfo` 不可用时才用示例形式，再退化到 `(0, payload)`（`src/services/keeper.js`） |
 | 后台网络是否被系统挂起 | 未验证 | 观察息屏 10 分钟后摘要时间戳是否还在推进 |
 
-构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。决策逻辑由 `tests/keeper.test.mjs` 守护（含服务名与 manifest 的一致性）；manifest / app.ux / 设置页 / i18n 的接线只能在真机上验证，见上表。
+构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。决策逻辑由 `tests/keeper.test.mjs` 守护（含服务名与 manifest 的一致性）；manifest / app.ux / i18n 的接线只能在真机上验证，见上表。
+
+真机验证一条最短路径：进设置确认那一行「后台留存」已经不存在 → 回表盘（或上划关闭）→ 等 2 分钟 → 用手机给这个账号发一条消息 → 手表应在 `max(pollInterval, 30s)` 内振一下；日志里应有 `keeper client error` 之后的重连记录，不应只有一次 `connect failed` 就安静下去。
+
+## 13. 消息顺序、长消息与内存
+
+### 13.1 最新的消息在最下面
+
+1.0.14 把消息按 id 降序排，最新一条在列表顶部，而输入条在底部——读一条新消息要先往上翻。1.0.15 起全链路改为升序：
+
+| 位置 | 变化 |
+| --- | --- |
+| `receive()` | `views.sort((a, b) => a.id - b.id)`；`newest` 取数组末尾 |
+| `mergeViews()` | 窗口保留 `slice(-WINDOW_SIZE)`（`keepOldest` 时保留 `slice(0, WINDOW_SIZE)`，即正在往回翻的旧页） |
+| `olderCursor` | 最旧一行变成 `messages[0]`（原来是最末一行） |
+| 模板 | 「加载更早消息」与所有占位块移到列表**顶部**，消息循环在其下 |
+| 滚动 | `scrollToLatest()` 在首次加载、翻回最新、发送成功、以及轮询到新消息时滚到底；`loadOlder()` 之后滚到顶（历史被插到上方，偏移不变会让画面错位） |
+
+滚动用 `scrollTo({ top: 100000 })`，由平台 clamp 到内容高度，不需要事先量；再在 `SCROLL_RETRY_MS = 200ms` 后重复一次，因为首帧的内容盒子可能还是旧高度（HyperBilibili 的 `dmpage.ScrollToEnd` 也是延后 500ms 才滚）。
+
+### 13.2 长消息：四行预览 + 展开全文
+
+HyperBilibili 的评论区就是「固定高度预览 → 点开是整段文本的独立页」（`src/components/Reply/Reply.ux` 的 `.replycontent` 200px 卡片 + `src/pages/tools/textdetail`）：手表屏幕放不下整段文本，但也不能让它消失。
+
+本项目照同一分工实现：
+
+- 气泡固定显示 `PREVIEW_ROWS = 4` 行（原为 6 行），末尾带 `…`；
+- 超出的消息多一行 `.msg-more`（「展开全文 ›」），**它是气泡里唯一的点击目标**——气泡本身留给长按操作面板，两种手势不抢；
+- 点它进入 `pages/message`：整段文本放在一张卡片里、页面可滚动，形状与 `textdetail` 一致（`.body-*` 像素宽 + 字号，无 `lines`）；
+- 文本在 `toView()` 里最多保留 `MESSAGE_LIMIT = 2000` 字符，超出部分连详情页也不显示（见 13.3）。
+
+路由参数走 `nav.navigate(ROUTE.message, { text, meta, scale })`，同时写一份 `shared.pendingDetail`，供 `nav.navigate` 梯子里那级「不带参数的 replace」兜底；页面 `onInit` 读完立刻清空。
+
+### 13.3 内存：把上限写进代码
+
+固件在销毁页面时记过一次 out-of-memory 警告，所以三条上限都落在常量里，而不是「应该不会太多」：
+
+| 上限 | 值 | 为什么 |
+| --- | --- | --- |
+| `WINDOW_SIZE` | 16（原 24） | 圆屏两屏、方屏八屏；每个气泡 = 视图对象 + 4 个行字符串 + 5 个 `text` 节点 |
+| `PREVIEW_ROWS` | 4（原 6） | 每个气泡少两个 `text` 节点；剩下的交给详情页 |
+| `MESSAGE_LIMIT` | 2000 字符 | 一条 5 万字的粘贴不会变成上千个行字符串；详情页也只渲染这一段 |
+
+另外三处：
+
+1. **轮询不再重算已知消息**：`receive('forward')` 先用现有 id 建一张表，服务端回包里的老消息直接跳过 `toView()`（不重切行、不再分配字符串），只转换新 id；
+2. **`onDestroy` 显式释放**：`messages = []`、`draft`、`replySummary` 一并清空，`scrollTimer` 清掉——页面 VM 在 destroy 之后仍会存活一段时间，那 16 个视图对象是它身上最大的一块；
+3. **详情页 `onDestroy` 清掉正文**，它只服务一条消息。
+
+`tests/chat.test.mjs` 钉住 13.1 与 13.2（顺序、窗口保留哪一端、四行预览、`more` 标志、`openDetail` 的参数），`tests/layout.test.mjs` 钉住详情页的像素预算。

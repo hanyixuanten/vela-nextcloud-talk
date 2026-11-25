@@ -46,6 +46,9 @@
       "pages/chat": {
         "component": "chat"
       },
+      "pages/message": {
+        "component": "message"
+      },
       "pages/settings": {
         "component": "settings"
       },

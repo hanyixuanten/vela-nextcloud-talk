@@ -91,7 +91,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页与轮询，以及针对模拟 Nextcloud 的接口集成测试。启动网络门由 `tests/network.test.mjs`（接口类型判定、探针只作证据）和 `tests/launch-gate.test.mjs`（入口页路由决策）守住；`tests/layout.test.mjs` 是一组纯静态的布局断言，守住设计像素尺寸、`if` 显隐、键盘占位，以及**每个 `<scroll>` 必须是「屏幕高 − 固定 chrome」的像素高度（`flex: 1` 会让这块固件把内容压进视口、滚不动）**——这些只能靠真机才能发现的问题。`tests/navigation.test.mjs` 守住跳转链，`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页/顺序/长消息与轮询，以及针对模拟 Nextcloud 的接口集成测试。启动网络门由 `tests/network.test.mjs`（接口类型判定、探针只作证据）和 `tests/launch-gate.test.mjs`（入口页路由决策）守住；`tests/layout.test.mjs` 是一组纯静态的布局断言，守住设计像素尺寸、`if` 显隐、键盘占位，以及**每个 `<scroll>` 必须是「屏幕高 − 固定 chrome」的像素高度（`flex: 1` 会让这块固件把内容压进视口、滚不动）**——这些只能靠真机才能发现的问题。`tests/navigation.test.mjs` 守住跳转链，`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -132,18 +132,20 @@ npm run check:live      # 或 node scripts/check-credentials.mjs [--file other.e
 | --- | --- | --- |
 | 账号登录 / 校验 | ✅ | 先落盘再走 `/ocs/v2.php/cloud/user` 校验；校验失败也保留输入 |
 | 会话列表 | ✅ | 按最近活跃排序、未读数、最后一条消息预览 |
-| 历史消息 | ✅ | 每次拉 12 条；列表底部点「加载更早消息」，最多保留 24 条 |
+| 历史消息 | ✅ | 每次拉 12 条；列表顶部点「加载更早消息」，窗口最多保留 16 条 |
 | 发送消息 | ✅ | POST `/chat/{token}`，发送后本地立即上屏 |
 | 已读标记 | ✅ | 打开会话或收到新消息后 POST `/chat/{token}/read` |
 | 轮询新消息 | ✅ | 默认 15s，可在设置里改成 30s / 60s |
-| 后台留存 | ✅ | 微服务在退到后台 / 关闭应用后继续拉会话列表，留存未读、新消息振动；可在设置里关闭 |
+| 后台留存 | ✅ | 微服务在退到后台 / 关闭应用后继续拉会话列表，留存未读、新消息振动；**始终开启，无开关** |
 | 中文 / 英文 / 日语输入 | ✅ | 内置三⽅输入法组件，QWERTY 与 T9 两种布局 |
-| 设置 | ✅ | 键盘布局、轮询间隔、后台留存、字号、清除数据 |
+| 设置 | ✅ | 键盘布局、轮询间隔、字号、清除数据 |
 | 从手机配置凭据 | ✅ | AstroBox 插件经 interconnect 推送，手表先保存再校验；校验期间不熄屏 |
 | 启动网络检测 | ✅ | 只看 `@system.network` 类型，且仅 `none` 判离线（空/失败/4 s 无回调都算「未知」并放行）；bilibili（对照）与 `<baseUrl>/status.php`（目标）两个探针只记录、不拦人 |
 | 图片 / 文件消息 | ❌ | 只显示文件名及文字，不下载图片 |
 | 长轮询 / WebSocket | ❌ | 见「已知限制」 |
 | 通知推送 | ❌ | Vela 没有第三方 app 的推送通道；后台留存只在本地轮询后振动，不能唤醒屏幕或弹通知 |
+| 长消息 | ✅ | 气泡显示 4 行预览，点「展开全文」进详情页看整段文本 |
+| 消息顺序 | ✅ | 最新的消息在最下面，紧挨输入条 |
 | 引用回复 | ✅ | 长按可回复的消息 →「回复」；点 × 可取消引用 |
 | 表情反应 | ✅ | 长按普通消息 →「表情」，可添加或撤销 👍、❤️、😂（Talk 14+） |
 | 通话 | ❌ | 尚未实现 |
@@ -173,6 +175,7 @@ vela-nextcloud-talk/
 │   │       ├── store.js          # @system.storage 封装 + 设置默认值
 │   │       ├── state.js          # 跨页面共享的运行时缓存
 │   │       ├── format.js         # 时间、Rich Object String、头像取色
+│   │       ├── textlayout.js     # 气泡/详情页共用的折行与文本度量
 │   │       ├── network.js        # 启动网络门（类型判定 + bilibili/服务器探针证据）
 │   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
 │   │       ├── keeper.js         # 后台留存的决策逻辑（纯 JS，可单测）
@@ -186,7 +189,8 @@ vela-nextcloud-talk/
 │   └── pages/
 │       ├── splash/splash.ux      # 路由入口：先探网络，通过才进主界面
 │       ├── index/index.ux        # 会话列表
-│       ├── chat/chat.ux          # 聊天（含输入态）
+│       ├── chat/chat.ux          # 聊天（含输入态，最新消息在最下面）
+│       ├── message/message.ux    # 单条消息的完整文本（气泡「展开全文」的目标页）
 │       ├── login/login.ux        # 账号录入
 │       ├── setup/setup.ux        # 等手机推送凭据（interconnect，校验期间保持亮屏）
 │       ├── offline/offline.ux    # 网络不通时的唯一出口，只提供重试
@@ -224,8 +228,8 @@ vela-nextcloud-talk/
 │   ├── page-vm.test.mjs          # 页面 VM：有 protected 就不能再写 data（否则页面建不出来）
 │   ├── tap-recovery.test.mjs     # 点击不被状态位吞掉：刷新可重发、卡住的读取会超时放行
 │   ├── setup.test.mjs            # 配置页接收与确认流程
-│   ├── chat.test.mjs             # 聊天交互测试
-│   ├── keeper.test.mjs           # 后台留存：轮询归属、振动冷却、摘要容错
+│   ├── chat.test.mjs             # 聊天交互测试（顺序、四行预览、展开全文、窗口上限）
+│   ├── keeper.test.mjs           # 后台留存：前台租约、振动冷却、摘要容错、重连
 │   └── build-watch.test.cjs      # 屏幕条件编译测试
 ├── LICENSE                       # 根仓库 MIT 许可
 ├── SECURITY.md                   # 漏洞报告与安全边界
@@ -280,7 +284,9 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 Vela 的 `config.background` 只认 `system.audio` / `system.request` / `system.geolocation`，而且要求其中之一**正在运行**才允许应用留在后台；聊天轮询走 `@system.fetch`，不在名单里。所以后台留存改成官方[微服务](https://iot.mi.com/vela/quickapp/zh/features/other/serviceclient.html)：`manifest.json` 声明 `services: [{ name: "keeper", path: "services/keeper", autoStart: true }]`，`src/services/keeper.js` 用 `@system.fetch` + `@system.storage` + `@system.vibrator` 轮询会话列表，应用侧用 `serviceclient.connect({ policy: "always" })` 连接。前台由页面轮询、后台由服务轮询，`shouldPoll()` 保证同一时刻只有一个轮询者。
 
-留存的是摘要而不是消息：`nctalk.keeper` 里只有 `{ at, total, account, rooms: [{ token, name, preview, unread, at }] }`，会话页冷启动时先渲染它再发真实请求；`account` 不匹配就丢弃。首次轮询只建立基线不振动，之后未读上升且应用不在前台才 `vibrate({ mode: 'short' })`，60 秒冷却。间隔取 `max(pollInterval, 30s)`。设计细节与**真机待验证项**（微服务机型支持、服务内定时器、`postMessage` 签名）见 [`docs/design.md`](docs/design.md) 第 12 节。
+留存的是摘要而不是消息：`nctalk.keeper` 里只有 `{ at, total, account, rooms: [{ token, name, preview, unread, at }] }`，会话页冷启动时先渲染它再发真实请求；`account` 不匹配就丢弃。首次轮询只建立基线不振动，之后未读上升且应用不在前台才 `vibrate({ mode: 'short' })`，60 秒冷却。间隔取 `max(pollInterval, 30s)`。
+
+**它没有开关，也不再依赖应用主动说再见。** 前台状态是一条 90 秒的租约：`app.ux` 每 30 秒续租一次，续租一停（进程被杀、上划关闭、固件漏发 `onHide`）服务就自己恢复轮询——1.0.14 用布尔量，一次没收到 `onHide` 就永久静默，这是「后台留存不工作」的直接原因。连接失败（1000/1001）现在会退避重连，而不是一次失败就整场失效。设计细节与**真机待验证项**（微服务机型支持、服务内定时器、`postMessage` 签名）见 [`docs/design.md`](docs/design.md) 第 12 节。
 
 ### 输入态为什么要两个页面状态
 
@@ -348,7 +354,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 - **页面 VM 不能同时声明 `data` 与 `protected`**：同时声明 `data` 与 `protected` 时页面 VM 根本建不出来：路由发出跳转，目标页构造失败，表现就是「点会话没反应」。会话页的状态块因此叫 `private`，`protected` 只接路由参数，`tests/page-vm.test.mjs` 对所有页面做这条静态检查。
 - **服务器不可达时仍可进入应用**：启动门只判网络接口类型（且仅 `none` 算离线），因此 `status.php` 探不通、`getType` 失败或超时都不会拦人；真正的失败会以「网络正常，但服务器不可达：网络请求失败：code=…」的文案出现在会话列表（对照探针通时），平台错误码同时打在日志里。启动页会显示当前阶段，卡住时能直接从表盘看出停在哪一步。
 - **短轮询**：使用 `lookIntoFuture=1` 拉取新消息，每次请求结束后再开始计时；按设置每 15s（可改 30s / 60s）轮询。浏览历史或离开页面时暂停轮询。
-- **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，因此做成设置里可关的开关。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
+- **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，但只保留一个开关会让「有账号就该跑」这件事变成一个用户要理解的取舍，所以固定开启。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
 - **HTTPS-only**：手动登录、候选账号校验与手机凭据协议均拒绝明文 HTTP；客户端依赖系统 TLS 校验，不做证书 pinning。
 - **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。清除本地账号后也应在 Nextcloud 吊销对应应用密码。
 - **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。不提供缩略图，也不下载或解码图片：`<image>` 不承诺按显示尺寸解码，`fetch` 也没有传输字节上限。

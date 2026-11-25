@@ -24,6 +24,8 @@ export const ROUTE = {
   offline: 'pages/offline',
   login: 'pages/login',
   chat: 'pages/chat',
+  // Full text of one message, opened from the chat bubble's 展开全文 line.
+  message: 'pages/message',
   settings: 'pages/settings'
 }
 

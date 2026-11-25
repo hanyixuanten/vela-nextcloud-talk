@@ -21,27 +21,14 @@
 
       <scroll id="chat-scroll" class="scroll" scroll-y="{{true}}">
         <div class="list">
-          <div class="msg {{ $item.mine ? 'msg-mine' : '' }} {{ $item.id === actionId ? 'msg-selected' : '' }}" for="{{messages}}" @longpress="selectMessage($item.id)">
-            <text class="msg-meta {{ $item.mine ? 'msg-meta-mine' : '' }}">{{ $item.meta }}</text>
-            <!-- One text per visual line, six hand-indexed slots, each a direct
-                 child of the bubble with the same shape as the meta line above:
-                 a definite width plus `lines: 1` (see .msg-row-normal). Rows are
-                 pre-split in splitRows(); six is the ceiling, the rest ends in
-                 an ellipsis. Indexed by hand rather than a nested `for`: two
-                 `for`s share the `$idx` index key on this firmware and the inner
-                 one produced no children. -->
-            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[0] }}">{{ $item.rows[0] }}</text>
-            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[1] }}">{{ $item.rows[1] }}</text>
-            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[2] }}">{{ $item.rows[2] }}</text>
-            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[3] }}">{{ $item.rows[3] }}</text>
-            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[4] }}">{{ $item.rows[4] }}</text>
-            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[5] }}">{{ $item.rows[5] }}</text>
-            <text class="reaction-summary" if="{{!!$item.reactionSummary}}">{{ $item.reactionSummary }}</text>
+          <!-- Oldest first: the newest message is the one nearest the input
+               bar, which is where a thumb looks first (1.0.15). So the older
+               page and every placeholder now sit at the TOP of the list, and
+               the list is scrolled to the bottom after every load. -->
+          <div class="history-action" if="{{olderCursor > 0}}" @click="loadOlder">
+            <text class="history-label">{{ loading ? $t('index.loading') : $t('chat.loadolder') }}</text>
           </div>
 
-          <div class="placeholder" if="{{!loading && !error && !olderCursor && messages.length === 0}}">
-            <text class="placeholder-hint">{{ $t('chat.empty') }}</text>
-          </div>
           <div class="placeholder" if="{{loading && messages.length === 0}}">
             <text class="placeholder-hint">{{ $t('index.loading') }}</text>
           </div>
@@ -49,8 +36,30 @@
             <text class="placeholder-error">{{ error }}</text>
             <text class="placeholder-hint">{{ $t('common.retry') }}</text>
           </div>
-          <div class="history-action" if="{{olderCursor > 0}}" @click="loadOlder">
-            <text class="history-label">{{ loading ? $t('index.loading') : $t('chat.loadolder') }}</text>
+          <div class="placeholder" if="{{!loading && !error && !olderCursor && messages.length === 0}}">
+            <text class="placeholder-hint">{{ $t('chat.empty') }}</text>
+          </div>
+
+          <div class="msg {{ $item.mine ? 'msg-mine' : '' }} {{ $item.id === actionId ? 'msg-selected' : '' }}" for="{{messages}}" @longpress="selectMessage($item.id)">
+            <text class="msg-meta {{ $item.mine ? 'msg-meta-mine' : '' }}">{{ $item.meta }}</text>
+            <!-- One text per visual line, four hand-indexed slots, each a direct
+                 child of the bubble with the same shape as the meta line above:
+                 a definite width plus `lines: 1` (see .msg-row-normal). Rows are
+                 pre-split in splitRows(); four is the preview ceiling and the
+                 rest is behind 展开全文 (pages/message), the same split the
+                 HyperBilibili reply card uses (fixed-height preview, full text
+                 on its own page). Indexed by hand rather than a nested `for`:
+                 two `for`s share the `$idx` index key on this firmware and the
+                 inner one produced no children. -->
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[0] }}">{{ $item.rows[0] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[1] }}">{{ $item.rows[1] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[2] }}">{{ $item.rows[2] }}</text>
+            <text class="msg-row-{{ fontScale }} {{ $item.mine ? 'msg-row-mine' : '' }}" if="{{ $item.rows[3] }}">{{ $item.rows[3] }}</text>
+            <!-- Only for clipped messages, and the only tap target that opens
+                 the detail page: a tap on the bubble itself stays free for the
+                 long-press action sheet to keep owning its own gesture. -->
+            <text class="msg-more {{ $item.mine ? 'msg-more-mine' : '' }}" if="{{ $item.more }}" @click="openDetail($item.id)">{{ $t('chat.more') }}</text>
+            <text class="reaction-summary" if="{{!!$item.reactionSummary}}">{{ $item.reactionSummary }}</text>
           </div>
         </div>
       </scroll>
@@ -135,31 +144,44 @@ import fmt from '../../common/scripts/format'
 import { sharedOf } from '../../common/scripts/shared'
 import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
+import {
+  FONT_METRICS,
+  scaleName,
+  splitRows,
+  countRows,
+  clipDisplay,
+  trimLastChar
+} from '../../common/scripts/textlayout'
 
-// Font scale drives both a class name (colour/type) and the metrics used to
-// split a message into single-line rows.
-const FONT_SCALES = ['small', 'normal', 'large']
-const FONT_METRICS = {
-  small: { size: 20 },
-  normal: { size: 23 },
-  large: { size: 27 }
-}
-// The bubble is 394 (413 on the rect screen) wide with 16px on each side.
-const ROW_WIDTH = 362
-// The template renders six fixed row slots (a nested `for` produced nothing on
-// this firmware), so this is also the most rows a message can show. Six rows is
-// about a screen of text; the rest ends in an ellipsis.
-const MAX_ROWS = 6
+// Rows shown in a bubble before 「展开全文」 takes over. Four rows is about two
+// thirds of the 226px list on the round screen, so a long message still reads as
+// a message instead of filling the screen, and the node count per bubble stays
+// at four `text` elements instead of six.
+const PREVIEW_ROWS = 4
+// The detail page shows `text` verbatim, so this is also the longest message the
+// app will hold: a 50 000 character paste must not become 1 000 row strings in
+// RAM on a watch.
+const MESSAGE_LIMIT = 2000
 const DRAFT_VIEW_LIMIT = 60
 const REPLY_VIEW_LIMIT = 48
 const PAGE_SIZE = 12
-const WINDOW_SIZE = 24
+// Messages kept in the list. 16 is a bit over two screens on the round shape and
+// 8 on the rect one, and it is the real memory bound: every row is a text node
+// plus a view object, and the watchdog complained at 24 with six rows each.
+const WINDOW_SIZE = 16
 // A request that outlives the api layer's own timeout by this much has lost its
 // answer (no callback, no error). Without a floor like this `receiving` stays
 // true forever, and the page then refuses every later read — the conversation
 // looks permanently "loading".
 const STALE_RECEIVE_MS = api.REQUEST_TIMEOUT_MS + 5000
 const REACTIONS = ['👍', '❤️', '😂']
+// `scrollTo` clamps to the content height, so "the end" does not have to be
+// measured. The deferred second attempt is for the first paint: the content box
+// may still be the old one when the list is assigned, and the clamp would then
+// stop short of the real bottom (HyperBilibili defers its scroll for the same
+// reason — src/pages/message/dmpage, ScrollToEnd + 500ms).
+const SCROLL_BOTTOM = 100000
+const SCROLL_RETRY_MS = 200
 
 function reactionMask(message) {
   const self = message.reactionsSelf
@@ -179,81 +201,6 @@ function describeReactions(counts, mask) {
 function isReactionEvent(message) {
   const type = message.systemMessage
   return type === 'reaction' || type === 'reaction_revoked' || type === 'reaction_deleted'
-}
-
-function clipDisplay(value, limit) {
-  if (value.length <= limit) return value
-  const last = value.charCodeAt(limit - 1)
-  return value.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit) + '…'
-}
-
-/**
- * Splits one message into single-line rows.
- *
- * History, because it explains the shape of this page: while the list scrolled
- * with `flex: 1`, this firmware compressed the content into the viewport instead
- * of letting it overflow, and every text in a bubble measured 0 tall except the
- * 16px meta line (see docs/design.md §11). Rows were introduced during that
- * hunt; they survived it because they are verified on device and they make the
- * bubble height exact rather than inferred.
- *
- * A row is a fixed-width, `lines: 1` text, so the wrapping has to be estimated
- * here: CJK counts 2 units, latin 1, and one row holds ROW_WIDTH / (size / 2)
- * units. A row can therefore end a glyph narrow or wide. Six rows max, the last
- * one ends in an ellipsis.
- */
-function isWideChar(code) {
-  return (
-    (code >= 0x1100 && code <= 0x115f) ||
-    (code >= 0x2e80 && code <= 0xa4cf) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe30 && code <= 0xfe4f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6)
-  )
-}
-
-function splitRows(text, size, maxRows) {
-  const source = String(text == null ? '' : text)
-  // One unit is half a latin glyph: a latin char is 1, a CJK glyph 2.
-  const perRow = Math.max(6, Math.floor(ROW_WIDTH / (size / 2)))
-  const rows = []
-
-  source.split('\n').forEach((paragraph) => {
-    let row = ''
-    let used = 0
-    const chars = Array.from(paragraph)
-    for (let i = 0; i < chars.length; i += 1) {
-      const cost = isWideChar(chars[i].charCodeAt(0)) ? 2 : 1
-      if (row && used + cost > perRow) {
-        rows.push(row)
-        row = ''
-        used = 0
-      }
-      row += chars[i]
-      used += cost
-    }
-    rows.push(row)
-  })
-
-  if (rows.length > maxRows) {
-    const kept = rows.slice(0, maxRows)
-    // One glyph over the row budget is fine: the row clips at its width.
-    kept[maxRows - 1] = kept[maxRows - 1] + '…'
-    return kept
-  }
-  return rows
-}
-
-function trimLastChar(text) {
-  const source = String(text || '')
-  if (source.length === 0) return ''
-  const last = source.charCodeAt(source.length - 1)
-  if (last >= 0xdc00 && last <= 0xdfff && source.length >= 2) {
-    return source.slice(0, source.length - 2)
-  }
-  return source.slice(0, source.length - 1)
 }
 
 export default {
@@ -315,6 +262,8 @@ export default {
     this.reacting = false
     this.receiveGeneration = 0
     this.receiveStartedAt = 0
+    this.scrollTimer = null
+    this.pendingScroll = false
 
     this.settingsReady = store.load().then((settings) => {
       state.settings = settings
@@ -329,17 +278,23 @@ export default {
   // Font scale drives the row class and the metrics rows are split against, so
   // it has to re-split the messages already on screen, not just the next page.
   applyFontScale(scale) {
-    const name = FONT_SCALES.indexOf(scale) >= 0 ? scale : 'normal'
+    const name = scaleName(scale)
     this.fontScale = name
     this.fontSize = FONT_METRICS[name].size
     if (this.messages && this.messages.length) {
-      this.messages = this.messages.map((row) =>
-        Object.assign({}, row, { rows: splitRows(row.text, this.fontSize, MAX_ROWS) }))
+      this.messages = this.messages.map((row) => Object.assign({}, row, {
+        rows: splitRows(row.text, this.fontSize, PREVIEW_ROWS),
+        more: countRows(row.text, this.fontSize) > PREVIEW_ROWS
+      }))
     }
   },
 
   onShow() {
     this.visible = true
+    // A page that is being (re-)entered is not mid-edit: the keyboard belongs to
+    // the foreground session that opened it, so returning from the detail page
+    // or from the background must not leave it on screen.
+    if (!this.sending) this.editing = false
     this.releaseStaleReceive()
     // First entry already has onInit()'s read in flight; awaiting a second
     // storage read here only put a second round trip between the page appearing
@@ -377,6 +332,7 @@ export default {
     this.receiveGeneration += 1
     this.closeActions()
     this.stopPolling()
+    this.cancelScroll()
     this.receiving = false
     this.loading = false
   },
@@ -397,6 +353,17 @@ export default {
     else if (this.timer !== null) {
       clearTimeout(this.timer)
       this.timer = null
+    }
+    // Release the message window explicitly. The page VM is kept alive by the
+    // runtime after a destroy long enough to show up in heap reports, and 16
+    // view objects (each with four row strings) is the largest thing on it.
+    this.messages = []
+    this.draft = ''
+    this.draftView = ''
+    this.replySummary = ''
+    if (this.scrollTimer) {
+      clearTimeout(this.scrollTimer)
+      this.scrollTimer = null
     }
   },
 
@@ -476,7 +443,20 @@ export default {
       const snapshots = Object.create(null)
       let rawFirst = 0
       let rawLast = 0
+      // Highest id that is a real message (reaction events excluded): the read
+      // marker must never move to an event id, but it must still cover a message
+      // that was already on screen (e.g. the one this page just sent).
+      let newestSeen = 0
       const views = []
+      // In forward mode the list already holds most of what comes back (the
+      // server answers with the unchanged tail as well). Converting those again
+      // would re-split every row on every 15s poll — steady allocation churn on
+      // a device that has already logged an OOM warning — so only unknown ids
+      // are turned into views. `older`/`latest` rebuild their page in full.
+      const known = Object.create(null)
+      if (forward) {
+        this.messages.forEach((row) => { known[row.id] = true })
+      }
       result.messages.forEach((message) => {
         const id = Number(message.id) || 0
         if (id > 0) {
@@ -484,7 +464,8 @@ export default {
           rawLast = rawLast ? Math.min(rawLast, id) : id
         }
         if (!isReactionEvent(message)) {
-          views.push(this.toView(message))
+          newestSeen = Math.max(newestSeen, id)
+          if (!known[id]) views.push(this.toView(message))
           return
         }
         if (!forward || !message.parent || message.parent.deleted) return
@@ -493,21 +474,23 @@ export default {
           snapshots[parentId] = { id, parent: message.parent }
         }
       })
-      views.sort((a, b) => b.id - a.id)
-      const first = views.length ? views[0].id : 0
+      // Oldest first: the list is read top-down and the newest row is the one
+      // next to the input bar.
+      views.sort((a, b) => a.id - b.id)
+      const newest = views.length ? views[views.length - 1].id : 0
       if (older) {
         // The header may include filtered rows, so a short page is not EOF.
         const previous = result.lastGiven || rawLast
         this.olderCursor = !result.notModified && previous > 0 && previous < cursor ? previous : 0
         this.mergeViews(views.filter((view) => view.id < cursor), true)
         this.browsingHistory = true
+        // History is prepended at the top, which pushes everything down without
+        // moving the scroll offset; jump to the top so the newly loaded page is
+        // the thing on screen instead of a mid-list slice.
+        this.scrollToTop()
         return
       }
       if (!forward) {
-        if (this.browsingHistory && this.$element) {
-          const scroll = this.$element('chat-scroll')
-          if (scroll && scroll.scrollTo) scroll.scrollTo({ top: 0 })
-        }
         this.messages = []
         this.forwardCursor = rawFirst || result.lastGiven || 0
         this.olderCursor = result.lastGiven || rawLast
@@ -519,7 +502,8 @@ export default {
       if (views.length) {
         const trimmed = this.mergeViews(views, false)
         if (forward && (trimmed || !this.olderCursor)) {
-          this.olderCursor = this.messages[this.messages.length - 1].id
+          // The oldest row is now the head of the list.
+          this.olderCursor = this.messages[0].id
         }
       }
       if (forward && Object.keys(snapshots).length) {
@@ -534,7 +518,9 @@ export default {
         })
         if (this.pickerOpen) this.openPicker()
       }
-      if (first > (forward ? cursor : 0)) return first
+      if (!forward || newest > cursor) this.scrollToLatest()
+      const readId = Math.max(newestSeen, newest)
+      if (readId > (forward ? cursor : 0)) return readId
     }).then((id) => {
       if (id && this.visible) return api.markRead(this.token, id).catch(() => undefined)
     }).catch((err) => {
@@ -547,14 +533,74 @@ export default {
     })
   },
 
+  /**
+   * Merge `views` into the window, oldest first.
+   *
+   * `keepOldest` is what 加载更早 needs: the caller is browsing backwards, so the
+   * window must keep the *oldest* rows (the head of the array) instead of the
+   * newest ones. Everything else keeps the tail, because the newest message is
+   * the one the user is looking at.
+   */
   mergeViews(views, keepOldest) {
     if (!views.length) return false
     const all = views.concat(this.messages)
-    all.sort((a, b) => b.id - a.id)
+    all.sort((a, b) => a.id - b.id)
     const unique = all.filter((view, i) => i === 0 || all[i - 1].id !== view.id)
-    this.messages = keepOldest ? unique.slice(-WINDOW_SIZE) : unique.slice(0, WINDOW_SIZE)
+    this.messages = keepOldest ? unique.slice(0, WINDOW_SIZE) : unique.slice(-WINDOW_SIZE)
     if (this.actionId && !this.messages.some((row) => row.id === this.actionId)) this.closeActions()
     return unique.length > WINDOW_SIZE
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* scrolling                                                           */
+  /* ------------------------------------------------------------------ */
+
+  cancelScroll() {
+    if (this.scrollTimer) {
+      clearTimeout(this.scrollTimer)
+      this.scrollTimer = null
+    }
+    this.pendingScroll = false
+  },
+
+  /**
+   * Jump to the newest message (the bottom of the list).
+   *
+   * `scrollTo` clamps to the content height, so the value can be "past the end".
+   * It is repeated once after SCROLL_RETRY_MS: on the first paint the content box
+   * may still have the old height, and the clamp would then stop short — the
+   * same reason HyperBilibili defers its ScrollToEnd by 500ms.
+   */
+  scrollToLatest() {
+    const scroll = this.$element && this.$element('chat-scroll')
+    if (!scroll || typeof scroll.scrollTo !== 'function') return
+    const jump = () => {
+      try {
+        scroll.scrollTo({ top: SCROLL_BOTTOM })
+      } catch (err) {
+        console.log('chat: scrollTo failed: ' + ((err && err.message) || err))
+      }
+    }
+    jump()
+    // One pending scroll at a time; a second load inside 200ms supersedes it.
+    this.cancelScroll()
+    this.pendingScroll = true
+    this.scrollTimer = setTimeout(() => {
+      this.scrollTimer = null
+      if (!this.pendingScroll) return
+      this.pendingScroll = false
+      jump()
+    }, SCROLL_RETRY_MS)
+  },
+
+  scrollToTop() {
+    const scroll = this.$element && this.$element('chat-scroll')
+    if (!scroll || typeof scroll.scrollTo !== 'function') return
+    try {
+      scroll.scrollTo({ top: 0 })
+    } catch (err) {
+      console.log('chat: scrollTo failed: ' + ((err && err.message) || err))
+    }
   },
 
   toView(message) {
@@ -564,13 +610,20 @@ export default {
     const author = clipDisplay(String(message.actorDisplayName || ''), 48)
     const reactable = !isSystem && message.deleted !== true && (!message.messageType || message.messageType === 'comment')
     const mask = reactable ? reactionMask(message) : 0
-    const text = clipDisplay(fmt.renderMessage(message), 512)
+    // The full text is kept (up to MESSAGE_LIMIT) because the detail page shows
+    // it verbatim; only the bubble is clipped, and by rows rather than by
+    // characters, so the cut is at a line boundary the reader can see.
+    const text = clipDisplay(fmt.renderMessage(message), MESSAGE_LIMIT)
+    const rows = splitRows(text, this.fontSize, PREVIEW_ROWS)
 
     return {
       id: Number(message.id),
       text: text,
       // Pre-split: the template renders one <text lines="1"> per row.
-      rows: splitRows(text, this.fontSize, MAX_ROWS),
+      rows: rows,
+      // `more` drives the 展开全文 line and is why the bubble never silently
+      // eats the second half of a message.
+      more: countRows(text, this.fontSize) > PREVIEW_ROWS,
       meta: mine ? fmt.formatClock(message.timestamp) : author + ' · ' + fmt.formatClock(message.timestamp),
       mine: mine,
       replyable: !isSystem && message.isReplyable === true,
@@ -578,6 +631,23 @@ export default {
       reactionMask: mask,
       reactionSummary: reactable ? describeReactions(message.reactions, mask) : ''
     }
+  },
+
+  /**
+   * Open the full message, the way HyperBilibili opens a long comment: the card
+   * is a fixed-height preview and the whole text lives on `pages/message`
+   * (`pages/tools/textdetail` there). Router params carry the text; `shared`
+   * carries the same object for the params-less rung of the navigate ladder
+   * (see pages/message onInit).
+   */
+  openDetail(id) {
+    if (!this.visible || this.sending || this.editing || this.reacting) return
+    const row = this.messages.find((message) => message.id === id)
+    if (!row) return
+    const detail = { text: row.text, meta: row.meta, scale: this.fontScale }
+    const shared = sharedOf(this, state)
+    if (shared && shared !== state) shared.pendingDetail = detail
+    nav.navigate(this, ROUTE.message, detail, this.$t('common.openFailed'))
   },
 
   /* ------------------------------------------------------------------ */
@@ -718,8 +788,9 @@ export default {
         }
         if (this.visible && message && message.id) {
           const trimmed = this.mergeViews([this.toView(message)], false)
-          if (trimmed || !this.olderCursor) this.olderCursor = this.messages[this.messages.length - 1].id
+          if (trimmed || !this.olderCursor) this.olderCursor = this.messages[0].id
           // The forward cursor must not skip intervening messages from others.
+          this.scrollToLatest()
         }
         this.schedulePoll(0)
       })
@@ -899,6 +970,25 @@ export default {
   text-align: right;
 }
 
+/* The 展开全文 line, the only tap target inside a bubble (the bubble itself
+ * belongs to the long-press action sheet). Same self-contained shape as a row:
+ * pixel width, font size and `lines: 1` in one block. */
+.msg-more {
+  width: 362px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ff7da8;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.msg-more-mine {
+  color: #56232f;
+  text-align: right;
+}
 .reaction-summary {
   width: 362px;
   margin-left: 16px;
@@ -1118,6 +1208,9 @@ export default {
   width: 381px;
 }
 .msg-row-large {
+  width: 381px;
+}
+.msg-more {
   width: 381px;
 }
 .reaction-summary {

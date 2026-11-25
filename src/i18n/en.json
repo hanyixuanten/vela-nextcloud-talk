@@ -71,7 +71,12 @@
     "sending": "Sending",
     "empty": "No messages yet",
     "errtoken": "Missing conversation token",
-    "backfailed": "Couldn't go back, please try again"
+    "backfailed": "Couldn't go back, please try again",
+    "more": "Show all ›"
+  },
+  "message": {
+    "title": "Message",
+    "empty": "Nothing to show"
   },
   "settings": {
     "title": "Settings",
@@ -94,10 +99,7 @@
     "seconds": "s",
     "cleared": "Cleared",
     "clearFailed": "Could not clear data. Please try again.",
-    "clearAgain": "Tap again to confirm clearing",
-    "background": "Background",
-    "on": "On",
-    "off": "Off"
+    "clearAgain": "Tap again to confirm clearing"
   },
   "setup": {
     "title": "Set up from phone",

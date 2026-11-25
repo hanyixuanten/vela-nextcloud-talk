@@ -71,7 +71,12 @@
     "sending": "发送中",
     "empty": "还没有消息",
     "errtoken": "会话参数缺失",
-    "backfailed": "返回失败，请重试"
+    "backfailed": "返回失败，请重试",
+    "more": "展开全文 ›"
+  },
+  "message": {
+    "title": "消息详情",
+    "empty": "没有内容"
   },
   "settings": {
     "title": "设置",
@@ -94,10 +99,7 @@
     "seconds": "秒",
     "cleared": "已清除",
     "clearFailed": "清除失败，请重试",
-    "clearAgain": "再次点击确认清除",
-    "background": "后台留存",
-    "on": "开",
-    "off": "关"
+    "clearAgain": "再次点击确认清除"
   },
   "setup": {
     "title": "从手机配置",

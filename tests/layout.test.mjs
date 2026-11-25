@@ -24,6 +24,7 @@ const pages = {
   chat: read('../src/pages/chat/chat.ux'),
   settings: read('../src/pages/settings/settings.ux'),
   login: read('../src/pages/login/login.ux'),
+  message: read('../src/pages/message/message.ux'),
   setup: read('../src/pages/setup/setup.ux'),
   offline: read('../src/pages/offline/offline.ux')
 }
@@ -192,18 +193,19 @@ test('the chat list gets an explicit pixel height, never flex: 1', () => {
 })
 
 test('the chat bubbles wrap: a body of single-line row slots, no height, no nested for', () => {
-  // The body is one fixed-width `lines: 1` text per visual row (chat.ux
-  // splitRows), rendered as six hand-indexed slots. Rows were born while chasing
-  // the "flat strip" reports — the real cause turned out to be the scroll box
-  // (see the explicit-height test above), but the row shape is what is verified
-  // on the device, so it stays, and the bubble height follows the row count.
+  // The body is one fixed-width `lines: 1` text per visual row (textlayout.js
+  // splitRows), rendered as four hand-indexed preview slots. Rows were born while
+  // chasing the "flat strip" reports — the real cause turned out to be the scroll
+  // box (see the explicit-height test above), but the row shape is what is
+  // verified on the device, so it stays, and the bubble height follows the row
+  // count. Anything past the preview lives on pages/message (展开全文).
   const { base, circle, rect } = shapes(pages.chat.split('<style>')[1].split('</style>')[0])
   for (const [shape, shapeStyle, bubble] of [
     ['circle', circle, 394],
     ['rect', rect, 413]
   ]) {
     assert.equal(size(base, shapeStyle, ['.msg', 'width']), bubble, `${shape}: bubble width moved`)
-    for (const selector of ['.msg-meta', '.msg-row-small', '.msg-row-normal', '.msg-row-large', '.reaction-summary']) {
+    for (const selector of ['.msg-meta', '.msg-row-small', '.msg-row-normal', '.msg-row-large', '.msg-more', '.reaction-summary']) {
       const width = size(base, shapeStyle, [selector, 'width'])
       assert.equal(width, bubble - 32, `${shape}: ${selector} must be ${bubble - 32}px, got ${width}`)
     }
@@ -215,7 +217,7 @@ test('the chat bubbles wrap: a body of single-line row slots, no height, no nest
   }
   // Every text in a bubble is a single line with an explicit height; the
   // multi-line default is what produced the zero-height body.
-  for (const selector of ['.msg-meta', '.msg-row-small', '.msg-row-normal', '.msg-row-large', '.reaction-summary']) {
+  for (const selector of ['.msg-meta', '.msg-row-small', '.msg-row-normal', '.msg-row-large', '.msg-more', '.reaction-summary']) {
     for (const block of blocks(base, selector)) {
       assert.match(block, /lines:\s*1;/, `${selector} must be a single-line text`)
     }
@@ -233,17 +235,64 @@ test('the chat bubbles wrap: a body of single-line row slots, no height, no nest
     assert.doesNotMatch(variant[0], /height:/, `.msg-row-${scale} must not set a height`)
     assert.doesNotMatch(variant[0], /line-height:/, `.msg-row-${scale} must not set line-height`)
   }
-  // Six fixed slots, not a nested for: two nested loops share the `$idx` index
-  // key on this firmware and the inner one produced no children at all.
+  // Four fixed preview slots, not a nested for: two nested loops share the
+  // `$idx` index key on this firmware and the inner one produced no children at
+  // all.
   const template = templateOf(pages.chat)
   const slots = [...new Set([...template.matchAll(/\{\{ \$item\.rows\[(\d)\] \}\}/g)].map((m) => Number(m[1])))]
-  assert.deepEqual(slots, [0, 1, 2, 3, 4, 5], 'the body renders six indexed row slots')
+  assert.deepEqual(slots, [0, 1, 2, 3], 'the body renders four indexed preview row slots')
+  // The truncation affordance has to be a real tap target that opens the full
+  // text; a preview that silently eats the rest of the message is the bug this
+  // replaced.
+  assert.match(template, /class="msg-more [^"]*"[^>]*@click="openDetail\(\$item\.id\)"/, 'the 展开全文 line opens the detail page')
+  assert.match(template, /if="\{\{ \$item\.more \}\}"/, 'the 展开全文 line only exists for clipped messages')
   assert.doesNotMatch(template, /for="\{\{ row in/, 'no nested for inside the message loop')
   assert.doesNotMatch(
     template,
     /class="msg-(row|text)[^"]*"[^>]*style=/,
     'the message text must take its font-size from a class, not an inline style'
   )
+})
+
+test('the full-message page is a fixed-height scroll with a pixel-width body', () => {
+  // pages/message is the 展开全文 target: one message, unbounded length, so it is
+  // the only page whose body text wraps naturally instead of being pre-split
+  // into rows. Everything around it follows the same rules as the chat page —
+  // definite pixel widths inside the scroll, and a scroll height that is the
+  // leftover budget rather than `flex: 1` (which compresses instead of scrolling).
+  const { base, circle, rect } = shapes(pages.message.split('<style>')[1].split('</style>')[0])
+  const barChrome = (shapeStyle) =>
+    size(theme, base, circle, rect, ['.bar', 'height']) +
+    size(base, shapeStyle, ['.bar', 'margin-top']) +
+    size(base, shapeStyle, ['.bar', 'margin-bottom'])
+
+  for (const [shape, shapeStyle, screen] of [
+    ['circle', circle, 480],
+    ['rect', rect, 640]
+  ]) {
+    const declared = size(base, shapeStyle, ['.scroll', 'height'])
+    assert.equal(declared, screen - barChrome(shapeStyle) - 16, `${shape}: detail scroll must be the leftover budget`)
+  }
+  for (const block of blocks(base, '.scroll')) {
+    assert.doesNotMatch(block, /flex:/, 'the detail scroll must not be sized by flex')
+  }
+  assert.equal(size(base, circle, ['.list', 'width']), 480)
+  assert.equal(size(base, circle, ['.card', 'width']), 394)
+  assert.equal(size(base, rect, ['.card', 'width']), 413)
+  for (const [scale, fontSize, bubbleText] of [
+    ['small', 20, 362],
+    ['normal', 23, 362],
+    ['large', 27, 362]
+  ]) {
+    const selector = '.body-' + scale
+    const rule = blocks(base, selector)
+    assert.equal(rule.length, 1, `${selector} must exist exactly once in the base block`)
+    // Same self-contained shape as a chat row: width and font size in one block.
+    assert.match(rule[0], new RegExp('width:\\s*' + bubbleText + 'px'), `${selector} needs a pixel width`)
+    assert.match(rule[0], new RegExp('font-size:\\s*' + fontSize + 'px'), `${selector} is ${fontSize}px`)
+    assert.doesNotMatch(rule[0], /lines:/, `${selector} must not clamp lines: the whole message has to show`)
+    assert.equal(size(base, rect, [selector, 'width']), 381, `rect ${selector}`)
+  }
 })
 
 test('the conversation list gets an explicit pixel height too', () => {
