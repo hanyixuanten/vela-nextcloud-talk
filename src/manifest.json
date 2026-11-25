@@ -2,8 +2,8 @@
   "package": "com.hanyixuanten.nctalk",
   "name": "Talk",
   "icon": "/common/images/icon.png",
-  "versionName": "1.0.6",
-  "versionCode": 22,
+  "versionName": "1.0.14",
+  "versionCode": 30,
   "minPlatformVersion": 1000,
   "deviceTypeList": ["watch"],
   "features": [
