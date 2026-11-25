@@ -49,10 +49,15 @@ KNOWN_PERMISSIONS = {
 # Known-useless but harmless; rendering needs no permission.
 SUSPICIOUS_PERMISSIONS = {"ui"}
 
-# AstroBox runs level 2/3 plugins on wasmtime 38, whose WASI p2 implementation
-# reports 0.2.6. A component that imports a newer 0.2.x cannot be linked there,
-# and the failure looks like "the plugin does not install".
+# The toolchain in rust-toolchain.toml emits wasi 0.2.6 p2 imports, a baseline
+# both runtimes know: level 2/3 uses wasmtime 38, level 4 uses wasmtime 48 with
+# p2 + p3 installed. A newer 0.2.x import needs revalidation on the host; an
+# unchecked bump still looks like "the plugin does not install".
 MAX_WASI_PATCH = 6
+
+# api_level and wasi_version must describe the same runtime family. Level 4
+# declares p3 in the manifest while its std imports still resolve through p2.
+EXPECTED_WASI = {2: 2, 3: 2, 4: 3}
 
 WASI_VERSION_RE = re.compile(rb"@0\.2\.(\d+)")
 
@@ -85,7 +90,7 @@ class Report:
 
 
 def check_wasi_version(blob, report):
-    """Reject components that need a newer WASI p2 than the host provides."""
+    """Reject components whose p2 imports exceed the known-good baseline."""
     patches = [int(match) for match in WASI_VERSION_RE.findall(blob)]
     if not patches:
         report.note("no wasi:*/@0.2.x imports (WASI-free component)")
@@ -94,13 +99,13 @@ def check_wasi_version(blob, report):
     newest = max(patches)
     if newest > MAX_WASI_PATCH:
         report.error(
-            f"component imports wasi 0.2.{newest}, but AstroBox's level 2/3 runtime "
-            f"(wasmtime 38) provides 0.2.{MAX_WASI_PATCH}; the component will fail to "
-            "link, which looks exactly like an install failure. Pin an older toolchain "
-            "(see rust-toolchain.toml)."
+            f"component imports wasi 0.2.{newest}, above the pinned 0.2.{MAX_WASI_PATCH} "
+            "baseline; the host's p2 world may not provide it, which looks exactly like "
+            "an install failure. Keep the toolchain in rust-toolchain.toml or revalidate "
+            "the bump on a Level 4 host."
         )
     else:
-        report.note(f"wasi 0.2.{newest} <= 0.2.{MAX_WASI_PATCH} (host ceiling)")
+        report.note(f"wasi 0.2.{newest} <= 0.2.{MAX_WASI_PATCH} (known-good baseline)")
 
 
 def check(path, report):
@@ -152,6 +157,16 @@ def check(path, report):
             if not isinstance(value, int) or isinstance(value, bool):
                 report.error(f"manifest.{field} must be an integer, got {value!r}")
 
+        api_level = manifest.get("api_level")
+        if api_level in EXPECTED_WASI:
+            expected_wasi = EXPECTED_WASI[api_level]
+            if manifest.get("wasi_version") != expected_wasi:
+                report.error(
+                    f"api_level {api_level} needs wasi_version {expected_wasi}, got "
+                    f"{manifest.get('wasi_version')!r}; the host picks the runtime from "
+                    "these two fields together"
+                )
+
         entry = manifest.get("entry") or ""
         if entry:
             if entry not in names:
@@ -194,8 +209,12 @@ def check(path, report):
             if not unknown:
                 report.note(f"permissions look known: {', '.join(permissions) or '(none)'}")
 
-        api_level = manifest.get("api_level")
-        if api_level == 3:
+        if api_level == 4:
+            report.note(
+                "api_level 4 runs on the new wasmtime runtime (WASI p3 + p2); "
+                "requires a recent AstroBox"
+            )
+        elif api_level == 3:
             report.note("api_level 3 requires AstroBox >= 2.1.0")
         elif api_level == 2:
             report.note("api_level 2 runs on AstroBox >= 2.0.0")

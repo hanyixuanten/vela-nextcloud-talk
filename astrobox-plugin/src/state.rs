@@ -1,7 +1,7 @@
 // Single mutable state shared by the ui / event callbacks.
 //
 // AstroBox calls into the plugin from different entry points (on_load,
-// on_ui_event_v3, on_event) that can interleave with async work, so everything
+// on_ui_event, on_event) that can interleave with async work, so everything
 // lives behind one mutex. `with` never nests: callers clone a snapshot first,
 // then build UI from the snapshot, otherwise a re-render inside a lock would
 // deadlock.

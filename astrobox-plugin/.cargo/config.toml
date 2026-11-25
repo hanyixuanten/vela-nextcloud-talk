@@ -1,2 +1,6 @@
+# Level 4 declares WASI p3 in the manifest, but the host also installs p2
+# imports because std/runtimes still link against p2. Rust's stable p3 target is
+# not available in the pinned toolchain, so build the component at p2 and let
+# the v4 runtime provide both worlds.
 [build]
 target = "wasm32-wasip2"

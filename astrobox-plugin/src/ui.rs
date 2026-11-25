@@ -1,6 +1,6 @@
-// Declarative UI for the credential form (ui-v3 element builder).
+// Declarative UI for the credential form (psys-host-v4 ui element builder).
 
-use astrobox_ng_wit::astrobox::psys_host::ui_v3::{self, Element, ElementType, Event};
+use astrobox_ng_wit::astrobox::psys_host_v4::ui::{self, Element, ElementType, Event};
 
 use crate::state::{State, Status};
 
@@ -26,7 +26,7 @@ pub const MULTIPLE_DEVICES: &str = "连接了多台设备：请断开其他设�
 pub fn build(state: &State) -> Element {
     let mut form = Element::new(ElementType::Div, None)
         .flex()
-        .flex_direction(ui_v3::FlexDirection::Column)
+        .flex_direction(ui::FlexDirection::Column)
         .width_full()
         .padding(16)
         .gap(10);
@@ -261,6 +261,6 @@ fn status_line(status: &Status) -> Option<(String, &'static str)> {
 /// Re-render the current form if AstroBox has given us an element id.
 pub fn render(state: &State) {
     if let Some(id) = state.element_id.clone() {
-        ui_v3::render(&id, build(state));
+        ui::render(&id, build(state));
     }
 }

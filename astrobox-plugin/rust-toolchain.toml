@@ -1,14 +1,15 @@
-# Pinned on purpose: the WASI p2 version a component imports is decided by the
-# Rust std it is built against, and AstroBox runs level 2/3 plugins on
-# wasmtime 38, which implements WASI 0.2.6.
+# Pinned on purpose. API Level 4 runs on wasmtime 48 with WASI p2 + p3; this
+# component still links std through the p2 target, and the p2 import version is
+# decided by the Rust std it is built against:
 #
 #   rust 1.90 -> wasi 0.2.3
-#   rust 1.91/1.92/1.93 -> wasi 0.2.6   <- host ceiling
-#   rust 1.100 (stable today) -> wasi 0.2.12, which does NOT link there
+#   rust 1.91/1.92/1.93 -> wasi 0.2.6   <- known-good baseline
+#   rust 1.100 (stable today) -> wasi 0.2.12, needs revalidation on the host
 #
-# Symptom of getting this wrong is not a compile error: the plugin simply fails
-# to load/install. scripts/check_artifact.py enforces the ceiling.
+# The symptom of an unchecked bump is not a compile error: the component is
+# built fine but fails to load/install. scripts/check_artifact.py enforces the
+# baseline, and tests/v4.rs guards the Level 4 manifest/import contract.
 [toolchain]
-channel = "1.92.0"
+channel = "1.93.0"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-wasip2"]

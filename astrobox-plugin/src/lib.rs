@@ -1,4 +1,10 @@
-// AstroBox NG plugin: configure Nextcloud Talk credentials for the watch app.
+// AstroBox NG plugin (API Level 4): configure Nextcloud Talk credentials for
+// the watch app.
+//
+// Level 4 exports are all `async func`, so every handler below can await host
+// calls directly: no `block_on` inside sync callbacks, no `wit_future::new`
+// + `spawn` write-back boilerplate, and no "a spawned task may never be
+// polled" hazards -- the host runtime drives these tasks itself.
 
 mod logger;
 mod protocol;
@@ -7,13 +13,11 @@ mod ui;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use astrobox_ng_wit::FutureReader;
-use astrobox_ng_wit::astrobox::psys_host::ui_v3::Event;
-use astrobox_ng_wit::astrobox::psys_host::{
+use astrobox_ng_wit::astrobox::psys_host_v4::ui::Event as UiEvent;
+use astrobox_ng_wit::astrobox::psys_host_v4::{
     device, interconnect, os, register, thirdpartyapp, timer,
 };
-use astrobox_ng_wit::exports::astrobox::psys_plugin::{event_v3, lifecycle};
-use astrobox_ng_wit::wit_future;
+use astrobox_ng_wit::exports::astrobox::psys_plugin_v4::{event, lifecycle};
 
 use crate::state::{PendingSend, Status};
 
@@ -121,24 +125,25 @@ fn no_target_message(target: &Target) -> String {
 /// The quick app only accepts interconnect traffic while that page is in front,
 /// so this is the step that makes a send actually land.
 async fn launch_talk(addr: &str) -> Result<(), String> {
-    let apps = thirdpartyapp::get_thirdparty_app_list(addr)
+    let apps = thirdpartyapp::get_thirdparty_app_list(addr.to_string())
         .await
-        .map_err(|()| "无法读取手表上的应用列表，请检查设备连接".to_string())?;
+        .map_err(|reason| format!("无法读取手表上的应用列表（{reason}），请检查设备连接"))?;
     let app = apps
         .into_iter()
         .find(|app| app.package_name == protocol::PKG_NAME)
         .ok_or_else(|| "手表上没有安装 Talk（rpk），请先安装".to_string())?;
 
-    if thirdpartyapp::launch_qa(addr, &app, SETUP_PAGE)
+    if thirdpartyapp::launch_qa(addr.to_string(), app.clone(), SETUP_PAGE.to_string())
         .await
         .is_ok()
     {
         return Ok(());
     }
     // Older firmware may reject a non-entry page; fall back to the entry page.
-    thirdpartyapp::launch_qa(addr, &app, ENTRY_PAGE)
+    // Level 4 errors carry the host's reason, which is worth surfacing.
+    thirdpartyapp::launch_qa(addr.to_string(), app, ENTRY_PAGE.to_string())
         .await
-        .map_err(|()| "无法启动手表上的 Talk".to_string())
+        .map_err(|reason| format!("无法启动手表上的 Talk：{reason}"))
 }
 
 /// Drops a pending send whose ACK can no longer arrive, so the form recovers
@@ -215,7 +220,7 @@ fn handle_device_action(payload: &str) {
 /// Ask the watch whether Talk is installed. Needs only the `thirdpartyapp`
 /// grant, never `device`.
 async fn check_installed(addr: &str) -> Option<bool> {
-    thirdpartyapp::get_thirdparty_app_list(addr)
+    thirdpartyapp::get_thirdparty_app_list(addr.to_string())
         .await
         .ok()
         .map(|apps| {
@@ -226,14 +231,9 @@ async fn check_installed(addr: &str) -> Option<bool> {
 
 /// Ask the host for the devices it can reach, then decide.
 ///
-/// This is deliberately the *only* host work on the detection path, and it is
-/// always driven by `block_on` from a callback -- never by `spawn`. wit-bindgen
-/// documents that spawned tasks only run inside the async computation they were
-/// spawned in; a task queued from a callback that returns immediately may simply
-/// never be polled, in which case the plugin makes no host call at all: no
-/// `device` permission request, no dialog, and a panel that sits on "no device"
-/// forever. Both published plugins that work (BandTOTP, otp-helper) call
-/// `block_on` inside the callback for exactly this reason.
+/// Detection is the *only* host work on this path. Level 4 removed the old
+/// Level 2/3 trap where a task queued from a sync callback might never be
+/// polled: these handlers are async guest tasks the host drives itself.
 async fn probe_device() {
     clear_stale_pending();
     // A typed address removes the need for `device` enumeration altogether:
@@ -306,8 +306,7 @@ async fn probe_device() {
     }
 }
 
-/// Only queried when nothing was found, and only two cheap `os` calls, so it
-/// runs inline instead of being deferred to a task that may never be polled.
+/// Only queried when nothing was found, and only two cheap `os` calls.
 async fn fetch_host_info() {
     let platform = os::platform().await;
     let version = os::version().await;
@@ -397,9 +396,6 @@ fn fail_send(id: &str, message: &str) {
 }
 
 async fn start_send(id: String, payload: String) {
-    // The timeout is started from a detached task by the click handler, before
-    // any host future here can stall.
-
     // Always enumerate again on click. Never guess a target for credentials
     // if more than one device is connected.
     let target = resolve_target().await;
@@ -432,11 +428,10 @@ async fn start_send(id: String, payload: String) {
     // budget before the watch had even received the credentials. It is only
     // used below to explain a send that already failed, where the extra wait
     // costs nothing that is still working.
-    if register::register_interconnect_recv(&addr, protocol::PKG_NAME)
-        .await
-        .is_err()
+    if let Err(reason) =
+        register::register_interconnect_recv(addr.clone(), protocol::PKG_NAME.to_string()).await
     {
-        tracing::warn!("could not register Talk interconnect receiver");
+        tracing::warn!("could not register Talk interconnect receiver: {reason}");
         fail_send(
             &id,
             "无法订阅手表回复：请检查 AstroBox 的互联权限和设备连接。",
@@ -457,11 +452,10 @@ async fn start_send(id: String, payload: String) {
         return;
     }
 
-    if interconnect::send_qaic_message(&addr, protocol::PKG_NAME, &payload)
-        .await
-        .is_err()
+    if let Err(reason) =
+        interconnect::send_qaic_message(addr.clone(), protocol::PKG_NAME.to_string(), payload).await
     {
-        tracing::warn!("could not submit Talk interconnect message");
+        tracing::warn!("could not submit Talk interconnect message: {reason}");
         // Now that the send has already failed, the app list is worth its
         // 12 s host timeout: it separates "rpk missing" from "transport down".
         if check_installed(&addr).await == Some(false) {
@@ -482,7 +476,7 @@ async fn start_send(id: String, payload: String) {
     state::with(|state| state.app_installed = Some(true));
 
     // Success from the host means the message was submitted, not that the
-    // watch saved the credentials. The detached timeout waits for the ACK.
+    // watch saved the credentials. The timeout below waits for the ACK.
 }
 
 fn handle_ack(payload: &str) {
@@ -543,155 +537,127 @@ fn handle_timer(payload: &str) {
 }
 
 impl lifecycle::Guest for TalkCredentialPlugin {
-    fn on_load() {
+    async fn on_load() {
         logger::init();
-        tracing::info!("nctalk credential plugin loaded");
+        tracing::info!("nctalk credential plugin loaded (api level 4)");
     }
 }
 
-impl event_v3::Guest for TalkCredentialPlugin {
-    fn on_event(event_type: event_v3::EventType, event_payload: String) -> FutureReader<String> {
-        let (writer, reader) = wit_future::new::<String>(String::new);
+impl event::Guest for TalkCredentialPlugin {
+    async fn on_event(event_type: event::EventType, event_payload: String) -> String {
         match event_type {
-            event_v3::EventType::InterconnectMessage => handle_ack(&event_payload),
-            event_v3::EventType::Timer => handle_timer(&event_payload),
+            event::EventType::InterconnectMessage => handle_ack(&event_payload),
+            event::EventType::Timer => handle_timer(&event_payload),
             // The host reports connect/disconnect here. Without this the panel
             // keeps whatever it saw when it was first rendered, so a watch that
             // connects later still reads "no device" until the panel is reopened.
-            event_v3::EventType::DeviceAction => {
+            event::EventType::DeviceAction => {
                 // Capture the address first: it arrives with the event and needs
                 // no `device` permission, so it works even when enumeration is
-                // denied.
+                // denied. Then probe while this async task is still running, so
+                // the host sees a fresh device list by the time we return.
                 handle_device_action(&event_payload);
-                // Run the probe blocking. A task queued with `spawn` from a sync
-                // callback is not guaranteed to be polled at all, which shows up
-                // as "the plugin never asked for the device permission".
-                astrobox_ng_wit::block_on(async {
-                    probe_device().await;
-                    ui::render(&state::snapshot());
-                });
+                probe_device().await;
+                ui::render(&state::snapshot());
             }
             _ => {}
         }
-        // The returned future is resolved *after* this callback returns: the
-        // host only receives its reader once we hand it back, so blocking on the
-        // write here traps with "event loop cannot make further progress".
-        astrobox_ng_wit::spawn(async move {
-            let _ = writer.write(String::new()).await;
-        });
-        reader
+        String::new()
     }
 
-    fn on_ui_event_v3(
-        event_id: String,
-        event: Event,
-        event_payload: String,
-    ) -> FutureReader<String> {
-        let (writer, reader) = wit_future::new::<String>(String::new);
-        // Run the work blocking -- this is what BandTOTP and otp-helper do, and
-        // it is the only reliable way to make host calls from these callbacks.
-        // The writer is deliberately *not* captured here: see below.
-        let mut pending_write = Some(writer);
-        astrobox_ng_wit::block_on(async {
-            if event_id == ui::EV_SEND && matches!(event, Event::Click) {
-                let send = begin_send();
-                ui::render(&state::snapshot());
-                if let Some((id, payload)) = send {
-                    let timeout_payload = protocol::timeout_payload(&id);
-                    let _ = timer::set_timeout(TIMEOUT_MS, &timeout_payload).await;
-                    start_send(id, payload).await;
-                }
-            } else if event_id == ui::EV_REFRESH && matches!(event, Event::Click) {
-                // Await the probe so the host future only resolves once the
-                // fresh device list has been rendered.
-                probe_device().await;
-                ui::render(&state::snapshot());
-            } else if event_id == ui::EV_LAUNCH && matches!(event, Event::Click) {
-                let addr = state::with(|state| state.addr.clone());
-                match addr {
-                    Some(addr) => {
-                        state::with(|state| {
-                            state.status = Status::Ok("正在打开手表上的 Talk…".to_string())
-                        });
-                        ui::render(&state::snapshot());
-                        let result = launch_talk(&addr).await;
-                        state::with(|state| {
-                            state.status = match result {
-                                Ok(()) => {
-                                    Status::Ok("已打开手表上的 Talk（从手机配置页）".to_string())
-                                }
-                                Err(message) => Status::Err(message),
-                            };
-                        });
-                    }
-                    None => state::with(|state| {
-                        state.status = Status::Err("还没有可用设备：先点「重新检测」".to_string())
-                    }),
-                }
-                ui::render(&state::snapshot());
-            } else if event_id == ui::EV_MANUAL && matches!(event, Event::Input | Event::Change) {
-                // Keep this synchronous: no host call per keystroke.
-                let value = parse_input_value(&event_payload);
-                let manual = value.trim().to_string();
-                state::with(|state| {
-                    state.manual_addr = manual.clone();
-                    // Any in-flight probe must not overwrite what was typed.
-                    state.probe_seq += 1;
-                    state.app_installed = None;
-                    if manual.is_empty() {
-                        state.addr = None;
-                        state.device_name.clear();
-                        state.link_connected = false;
-                        state.known_devices = 0;
-                        state.connected_devices = 0;
-                        state.probed = false;
-                    } else {
-                        state.addr = Some(manual);
-                        state.device_name.clear();
-                        state.link_connected = true;
-                        state.known_devices = 1;
-                        state.connected_devices = 1;
-                        state.multiple_devices = false;
-                        state.probed = true;
-                        state.probing = false;
-                    }
-                });
-                ui::render(&state::snapshot());
-            } else if matches!(event, Event::Input | Event::Change) {
-                let value = parse_input_value(&event_payload);
-                let recovered = clear_stale_pending();
-                let changed = state::with(|state| {
-                    if state.pending.is_some() {
-                        return false;
-                    }
-                    match event_id.as_str() {
-                        ui::EV_SERVER => state.server = value,
-                        ui::EV_USER => state.user = value,
-                        ui::EV_PASSWORD => state.password = value,
-                        _ => return false,
-                    }
-                    true
-                });
-                if changed {
-                    // Keep the "reset" notice visible when the first keystroke
-                    // is what recovered a stuck send.
-                    if !recovered {
-                        state::with(|state| state.status = Status::Idle);
-                    }
+    async fn on_ui_event(event_id: String, event: UiEvent, event_payload: String) -> String {
+        if event_id == ui::EV_SEND && matches!(event, UiEvent::Click) {
+            let send = begin_send();
+            ui::render(&state::snapshot());
+            if let Some((id, payload)) = send {
+                let timeout_payload = protocol::timeout_payload(&id);
+                // Level 4 timers are local operations that return immediately;
+                // expiry arrives later as a timer event on on_event.
+                timer::set_timeout(TIMEOUT_MS, &timeout_payload);
+                start_send(id, payload).await;
+            }
+        } else if event_id == ui::EV_REFRESH && matches!(event, UiEvent::Click) {
+            // Await the probe so the host only sees this task complete once the
+            // fresh device list has been rendered.
+            probe_device().await;
+            ui::render(&state::snapshot());
+        } else if event_id == ui::EV_LAUNCH && matches!(event, UiEvent::Click) {
+            let addr = state::with(|state| state.addr.clone());
+            match addr {
+                Some(addr) => {
+                    state::with(|state| {
+                        state.status = Status::Ok("正在打开手表上的 Talk…".to_string())
+                    });
                     ui::render(&state::snapshot());
+                    let result = launch_talk(&addr).await;
+                    state::with(|state| {
+                        state.status = match result {
+                            Ok(()) => Status::Ok("已打开手表上的 Talk（从手机配置页）".to_string()),
+                            Err(message) => Status::Err(message),
+                        };
+                    });
                 }
+                None => state::with(|state| {
+                    state.status = Status::Err("还没有可用设备：先点「重新检测」".to_string())
+                }),
             }
-        });
-        astrobox_ng_wit::spawn(async move {
-            if let Some(writer) = pending_write.take() {
-                let _ = writer.write(String::new()).await;
+            ui::render(&state::snapshot());
+        } else if event_id == ui::EV_MANUAL && matches!(event, UiEvent::Input | UiEvent::Change) {
+            // Keep this synchronous: no host call per keystroke.
+            let value = parse_input_value(&event_payload);
+            let manual = value.trim().to_string();
+            state::with(|state| {
+                state.manual_addr = manual.clone();
+                // Any in-flight probe must not overwrite what was typed.
+                state.probe_seq += 1;
+                state.app_installed = None;
+                if manual.is_empty() {
+                    state.addr = None;
+                    state.device_name.clear();
+                    state.link_connected = false;
+                    state.known_devices = 0;
+                    state.connected_devices = 0;
+                    state.probed = false;
+                } else {
+                    state.addr = Some(manual);
+                    state.device_name.clear();
+                    state.link_connected = true;
+                    state.known_devices = 1;
+                    state.connected_devices = 1;
+                    state.multiple_devices = false;
+                    state.probed = true;
+                    state.probing = false;
+                }
+            });
+            ui::render(&state::snapshot());
+        } else if matches!(event, UiEvent::Input | UiEvent::Change) {
+            let value = parse_input_value(&event_payload);
+            let recovered = clear_stale_pending();
+            let changed = state::with(|state| {
+                if state.pending.is_some() {
+                    return false;
+                }
+                match event_id.as_str() {
+                    ui::EV_SERVER => state.server = value,
+                    ui::EV_USER => state.user = value,
+                    ui::EV_PASSWORD => state.password = value,
+                    _ => return false,
+                }
+                true
+            });
+            if changed {
+                // Keep the "reset" notice visible when the first keystroke
+                // is what recovered a stuck send.
+                if !recovered {
+                    state::with(|state| state.status = Status::Idle);
+                }
+                ui::render(&state::snapshot());
             }
-        });
-        reader
+        }
+        String::new()
     }
 
-    fn on_ui_render(element_id: String) -> FutureReader<()> {
-        let (writer, reader) = wit_future::new::<()>(|| ());
+    async fn on_ui_render(element_id: String) {
         state::with(|state| state.element_id = Some(element_id));
         // Paint only. Two reasons detection is user-triggered: both published
         // plugins that work (BandTOTP, otp-helper) read the device list from a
@@ -700,21 +666,9 @@ impl event_v3::Guest for TalkCredentialPlugin {
         // "not granted" -- after which the host returns an empty list, which
         // reads exactly like "no watch connected".
         ui::render(&state::snapshot());
-        // Nothing to wait for, and blocking on the write would deadlock: the
-        // host cannot read this future until the callback returns.
-        astrobox_ng_wit::spawn(async move {
-            let _ = writer.write(()).await;
-        });
-        reader
     }
 
-    fn on_card_render(_card_id: String) -> FutureReader<()> {
-        let (writer, reader) = wit_future::new::<()>(|| ());
-        astrobox_ng_wit::spawn(async move {
-            let _ = writer.write(()).await;
-        });
-        reader
-    }
+    async fn on_card_render(_card_id: String) {}
 }
 
 astrobox_ng_wit::export!(TalkCredentialPlugin);

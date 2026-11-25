@@ -63,7 +63,7 @@
 
 只有这一页在监听 interconnect。登录页底部也留了「从手机配置」入口，避免选了手动输入之后回不去。
 
-插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要 AstroBox ≥ 2.1.0，用 api_level 3；插件工具链固定 Rust 1.92，否则组件要求的 WASI 版本超过宿主上限）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
+插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`，API Level 4 / WASI Preview 3），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要带 Level 4 运行时的 AstroBox；旧版本只支持 Level 2/3，会拒绝加载。插件工具链固定 Rust 1.93，否则组件要求的 WASI 版本可能超过宿主上限）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
 
 ```bash
 cd astrobox-plugin
@@ -93,10 +93,11 @@ npm test          # 或 sh tests/run.sh
 
 JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页/顺序/长消息与轮询，以及针对模拟 Nextcloud 的接口集成测试。启动网络门由 `tests/network.test.mjs`（接口类型判定、探针只作证据）和 `tests/launch-gate.test.mjs`（入口页路由决策）守住；`tests/layout.test.mjs` 是一组纯静态的布局断言，守住设计像素尺寸、`if` 显隐、键盘占位，以及**每个 `<scroll>` 必须是「屏幕高 − 固定 chrome」的像素高度（`flex: 1` 会让这块固件把内容压进视口、滚不动）**——这些只能靠真机才能发现的问题。`tests/navigation.test.mjs` 守住跳转链，`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」。
 
-插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
+插件侧的协议单测与 v4 契约测试要另跑（插件本体只能编到 wasm，测试编到 host）：
 
 ```bash
-cd astrobox-plugin && cargo test --target x86_64-unknown-linux-gnu --test protocol
+cd astrobox-plugin
+PATH="$HOME/.cargo/bin:$PATH" cargo test --locked --target x86_64-unknown-linux-gnu
 ```
 
 真机或虚拟机联调前，可以先用本机凭据验一遍服务器：把 `.env.example` 复制成 `.env.local`（已进 `.gitignore`，权限 600），填 `NCTALK_BASE_URL` / `NCTALK_USER` / `NCTALK_APP_PASSWORD` 后跑
@@ -199,10 +200,11 @@ vela-nextcloud-talk/
 │   └── sync-input-method.sh      # 重新拉取并覆盖 InputMethod
 ├── astrobox-plugin/              # 手机侧配置凭据的 AstroBox 插件（Rust → wasm）
 │   ├── Cargo.toml
-│   ├── rust-toolchain.toml       # 固定 Rust 1.92（WASI 0.2.6 上限）
-│   ├── manifest.json             # entry / api_level / permissions
+│   ├── rust-toolchain.toml       # 固定 Rust 1.93（p2 0.2.6 已验证基线）
+│   ├── manifest.json             # entry / api_level 4 / wasi_version 3
 │   ├── src/                      # lib / ui / protocol / state / logger
 │   ├── tests/protocol.rs         # 协议单测（能跑，不依赖 wasm）
+│   ├── tests/v4.rs               # Level 4 manifest / async 导出契约测试
 │   └── scripts/build_dist.py     # 构建 + 打 .abp
 ├── .github/workflows/ci.yml      # GitHub Actions：测试 + 打包 rpk/abp
 ├── docs/

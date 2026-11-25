@@ -28,13 +28,13 @@ AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 T
 
 ## 宿主事件与限制
 
-- 插件使用 AstroBox API Level 3（WASI Preview 2），属于官方 [V2 系列接口](https://abox.run/docs/plugin-development/v2/host-api/interconnect)；Level 4 与之共存，本次不要求升级运行时。
+- 插件使用 AstroBox API Level 4（manifest `wasi_version: 3` / `api_level: 4`，见 [Level 4 文档](https://abox.run/docs/plugin-development/v4)），宿主接口全部是 `async func`；Level 2/3 的插件继续由旧运行时支持，但本插件不再兼容只支持 Level 2/3 的 AstroBox。
 - AstroBox 通过已连接设备地址和已安装快应用的包名定位目标。`send_qaic_message` 返回成功不等于手表已经处理。当前宿主的 `interconnect-message` 用 `{addr,pkgName,payloadText,payloadHex}` 包装回执；插件须解包后读取 `ok`。定时器事件也有宿主包装，应用应识别它并结束等待。
 - 设备状态是**实时**的：宿主在连接变化时推 `device-action`，插件收到后重新枚举并重绘；界面另有「检测设备」/「重新检测设备」按钮，点击时同样重测。二者都不依赖 `pending` 状态，因此上一次发送卡住也不会把面板锁死在旧结论上。
 - **设备枚举只由点击触发，不在 `on_ui_render` 里发起。** 两个已上架、能正常找到设备的插件（BandTOTP、otp-helper）都是从点击回调调 `get_connected_device_list()`；渲染期请求 `device` 授权是唯一会拿到「未授权 → 空列表」的时机，而空列表与「真的没设备」在宿主侧无法区分。打开面板只绘制，第一步是让用户点「检测设备」。
-- **宿主调用用 `block_on`，返回的 future 用 `spawn`——两者不能混。** 导出回调是同步函数，`spawn` 出去的任务在同步回调里不保证被 poll（表现就是插件**根本没发起过任何宿主调用**：没有 `device` 权限请求、没有弹窗、永远「没有设备」）；但反过来也不能 `block_on` 写那个要返回给宿主的 future——宿主必须等回调返回才拿到 reader，阻塞写会直接 trap：`wasm trap: deadlock detected: event loop cannot make further progress`。正确形态是同 BandTOTP / otp-helper：`block_on(async { …宿主调用… })` 跑完 → `spawn(async move { writer.write(..).await })` → 返回 reader。因此探测不再有看门狗：枚举是同步等待的，卡住会卡住这一次点击，但不会假装「没设备」。
+- **Level 4 的宿主调用直接 `await`，`wit_future` 样板已删除。** 导出（`on_event` / `on_ui_event` / `on_ui_render` 等）都是 `async func`，由宿主驱动 guest task；宿主错误带 `string` 原因，发送和启动失败会记下具体原因。这样既不会出现 Level 2/3 里同步回调 `spawn` 的任务从不 poll（插件看起来**根本没发起过任何宿主调用**：没有 `device` 权限请求、没有弹窗、永远「没有设备」），也不会 `block_on` 写要返回宿主的 future 而触发 `deadlock detected`。因此探测不再有看门狗：枚举是在 async 回调里等待的，卡住会卡住这一次点击，但不会假装「没设备」。
 - **检测链只包含枚举。** 宿主 `get_thirdparty_app_list` 自带 12 秒上限（`QUICK_APP_LIST_TIMEOUT`），早期版本把它和 `register_interconnect_recv` 串在枚举之后，手表明明 50 ms 就被找到，面板却要等完整条链才有结论。现在枚举一返回就提交并绘制「目标：<手表名 或 地址>」；应用列表**不在发送路径上**，只在发送已经失败或「打开 Talk」时查，用来把「没装 rpk」和「蓝牙/IPC 失败」区分开。
-- **等待预算必须长于手表自己的判断。** 手表的 OCS 请求有 20 秒看门狗（`REQUEST_TIMEOUT_MS`），超时后还要写 storage、再回执，所以插件给 40 秒。预算比这短时会出现最误导人的现象：手表还在「正在校验账号…」，手机已经报「手表没有回应」判失败，用户在两端看到的结论相反。同理，`get_thirdparty_app_list` 那 12 秒也不能站在发送之前——它和旧版 15 秒的回执预算叠加时，凭据往往还没送到手表，手机就已经超时。
+- **等待预算必须长于手表自己的判断。** 手表的 OCS 请求有 20 秒看门狗（`REQUEST_TIMEOUT_MS`），超时后还要写 storage、再回执，所以插件给 40 秒。预算比这短时会出现最误导人的现象：手表还在「正在校验账号…」，手机已经报「手表没有回应」判失败，用户在两端看到的结论相反。同理，`get_thirdparty_app_list` 那 12 秒也不能站在发送之前——它和旧版 15 秒的回执预算叠加时，凭据往往还没送到手表，手机就已经超时。Level 4 的 `timer::set_timeout` 是同步本地操作，到期仍以 `Timer` 事件回到 `on_event`；载荷里的 `request_id` 用来过滤旧定时器。
 - **`device-action` 自带地址。** 宿主派发的载荷是 `{"action":"connected"|"disconnected","addr":"…","name":"…"}`（见宿主 `interconnect_link.rs`），插件直接把它当目标，**不需要 `device` 权限**；而 `launch_qa` / `send_qaic_message` 只要 `thirdpartyapp` / `interconnect` / `register_interconnect_recv`。所以「设备枚举被拒」不再等于「无法配置」：打开面板后在 AstroBox 里断开再连一次手表，状态行出现「目标：<手表名>」即可继续。
 - 宿主的 `device` 接口没有错误通道：未授权或内部失败时只是返回空列表。因此面板在无设备时把宿主报告的「已连接 N / 已配对 M」数量显示出来，并区分「还没检测」与「检测过、确实没有」。
 - [Vela 官方 Android 三方 App 互联](https://iot.mi.com/vela/quickapp/zh/features/network/interconnect.html)要求 Android 应用和快应用包名、签名一致。这里使用 AstroBox 的插件宿主及其设备通道，不改变 Android 签名或包名；是否能收发仍应以对应设备、固件和 AstroBox 版本的真机验证为准。工作流只能验证构建及协议，不跑蓝牙真机测试。
@@ -43,7 +43,7 @@ AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 T
 
 | 现象 | 先检查 |
 | --- | --- |
-| 面板停在「正在检测设备…」 | 枚举是同步等待的：宿主没返回就一直停在这句。看 AstroBox 日志里有没有 `permission request start 'device'`——有就是前端权限弹窗在等确认，没有就是插件没有发起调用（版本不对，重装 0.1.11）。 |
+| 面板停在「正在检测设备…」 | 枚举是在 async 回调里等待的：宿主没返回就一直停在这句。看 AstroBox 日志里有没有 `permission request start 'device'`——有就是前端权限弹窗在等确认，没有就是插件没有发起调用（版本不对，重装当前版本 0.1.14）。 |
 | 面板显示「已连接 0 / 已配对 0」 | 说明 `device` 权限没有拿到（前端授权被拒时宿主只返回空列表，不报错）。三条出路：① 在插件权限里把「设备」打开，恢复自动枚举；② 保持面板打开，在 AstroBox 里断手表再连一次，插件会从 `device-action` 直接拿到地址并显示「目标：<手表名>」；③ 把 AstroBox 设备详情里的地址填进「设备地址（高级）」，填了就不再枚举——启动与发送只需要 `thirdpartyapp` / `interconnect` 权限。 |
 | 面板一直显示「没有已连接的设备」 | 先点「重新检测设备」。插件会枚举 AstroBox 当前**已连接**的设备，只配对未连接不算；仍然为空时在 AstroBox 里断开重连手表。设备单独连上/断开时宿主会推 `device-action`，面板会自动重测，不必关掉重开。 |
 | 面板显示「已配对但当前未连接」 | 宿主管道暂时没建立，发送时会再尝试一次；失败请先在 AstroBox 里连接手表。 |
