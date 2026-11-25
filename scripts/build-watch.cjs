@@ -48,6 +48,36 @@ function copySources(source, destination) {
   }
 }
 
+// Vela will not load a page bundle above 1 MB. The toolkit only warns during
+// packaging ("the following files is large than 1024KB, please check on the
+// real device") and what the watch does with such a page is exactly what a dead
+// tap looks like: the transition is issued, the page never appears, the router
+// stays where it was. This app's chat page carries the vendored keyboard, so
+// the ceiling is within reach — check the package itself, before it reaches a
+// wrist, instead of debugging it there.
+const MAX_PAGE_BYTES = 1024 * 1024
+
+function oversizedEntries(buffer, limit) {
+  // The RPK is a zip; the device reads the uncompressed size in the central
+  // directory. Parsing it here keeps the check dependency free.
+  const eocd = buffer.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  if (eocd < 0) throw new Error('not a zip archive')
+  const count = buffer.readUInt16LE(eocd + 10)
+  let offset = buffer.readUInt32LE(eocd + 16)
+  const oversized = []
+  for (let i = 0; i < count; i += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('bad central directory entry')
+    const size = buffer.readUInt32LE(offset + 24)
+    const nameLength = buffer.readUInt16LE(offset + 28)
+    const extraLength = buffer.readUInt16LE(offset + 30)
+    const commentLength = buffer.readUInt16LE(offset + 32)
+    const name = buffer.toString('utf8', offset + 46, offset + 46 + nameLength)
+    if (size > limit) oversized.push({ name: name, size: size })
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  return oversized
+}
+
 const root = path.resolve(__dirname, '..')
 const output = path.join(root, 'dist')
 const stagingRoot = os.tmpdir()
@@ -82,8 +112,17 @@ try {
   if (fs.existsSync(output)) fs.rmSync(output, { recursive: true, force: true })
   fs.mkdirSync(output, { recursive: true })
   const name = packages[0]
+  const rpk = path.join(dist, name)
+  const oversized = oversizedEntries(fs.readFileSync(rpk), MAX_PAGE_BYTES)
+  if (oversized.length) {
+    throw new Error(
+      '页面包超过 1 MB，手表不会加载它（表现就是点了没反应，停在原地）：' +
+      oversized.map((entry) => `${entry.name} ${Math.round(entry.size / 1024)} KB`).join('、') +
+      '；请把它拆小（别把大组件放进同一个页面），不要装这个包'
+    )
+  }
   const targetName = `${path.basename(name, '.rpk')}-${shape}.rpk`
-  fs.copyFileSync(path.join(dist, name), path.join(output, targetName))
+  fs.copyFileSync(rpk, path.join(output, targetName))
   console.log(`${shape}: dist/${targetName}`)
 } finally {
   if (path.dirname(temp) !== stagingRoot || !path.basename(temp).startsWith('vela-watch-')) {

@@ -317,6 +317,18 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 - 被 replace 打开的页面在栈底，`router.back()` 无处可去，所以 chat / settings / setup 的返回统一走 `nav.leave(ROUTE.home)`：`router.getState().index > 0` 才 `back()`，否则延后 30ms replace 回 `pages/index`（`leave` 的 replace 同样在触摸回调里，同样要延后）。
 
 
+### 单个页面文件不能超过 1 MB
+
+1.0.4 的真机结果把前四轮的全部猜测一次否掉：**诊断页（9 KB）能打开，会话页打不开**——路由和调用方都正常，是目标页没能被创建。
+
+原因是体积。`chat.js` 里带着三方输入法组件，打包后 **700 KB**；用 AIoT-IDE 的打包按钮直接构建原始源码时不做压缩，同一个文件变成 **1.06 MB**，而 Vela 不加载超过 **1 MB** 的单个页面文件。表现不是报错，而是**跳转发出去、页面不出现、停在原地**——和「点击没反应」完全一样，这也是为什么前三轮一直在导航形式与时序里找原因。工具链在打包时只会打一行 warning（`the following files is large than 1024KB, please check on the real device`），不会失败。
+
+因此：
+
+- 会话页、登录页都带输入法，两个包分别是 700 KB / 652 KB，余量不大。**再往页面里加东西前先看包大小**。
+- `scripts/build-watch.cjs` 打包后解析 RPK 的每个条目，任何条目 > 1 MB 直接构建失败并报出文件名与体积（`tests/build-watch.test.cjs` 用一张构造出来的 zip 校验这条）。工具链只警告，构建自己必须拒绝。
+- 只装命令行/CI 产出的 `dist/com.hanyixuanten.nctalk.debug.<版本>-<形状>.rpk`：它按屏幕做了条件预处理并压缩。IDE 的打包按钮两条都不做。
+
 ### 用户点了就必须有反应：状态位不能吞掉一次读取
 
 1.0.1 同时报「无法进入会话」和「刷新按钮不起作用」。两处共用一个坏习惯：**用一个布尔状态位拦住后面的读取**。
