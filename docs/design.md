@@ -79,9 +79,7 @@ half_width(y) = sqrt(240² - (y - 240)²)
 | 输入态（隐藏但仍占位） | 150 |
 | 合计 | 510 > 480 |
 
-`flex: 1` 的消息列表因此解析成 0 高，整块只剩一条横缝（真机报告：「会话界面被压成长横条」）。改成 `if` 后列表拿到 480 − 148 − 106 = 226px。聊天页模板里已经没有 `show`，由 `tests/chat-layout.test.mjs` 守护：两种状态用 `if`、模板不出现 `show`、固定块之后列表在圆屏/矩形屏都 ≥ 180px。
-
-回归检查见 `tests/login-layout.test.mjs`（状态用 `if`、占位在按钮之后、占位高度不低于键盘实际高度、`.app-page` 不可滚动）。
+`flex: 1` 的消息列表因此解析成 0 高，整块只剩一条横缝。改成 `if` 后列表拿到 480 − 148 − 106 = 226px。聊天页模板里已经没有 `show`，登录页的键盘占位与两态互斥同样由 `if` 保证，两者都由 `tests/layout.test.mjs` 守护。
 
 草稿只显示末尾 60 字（`DRAFT_VIEW_LIMIT`），前面加省略号。这是为了避免长消息挤占输入区域。长按服务端标为可回复的消息后，页面仅保存目标 ID 和 48 个 UTF-16 代码单元以内的单行摘要（另加省略号），不额外获取原消息。发送失败保留草稿和引用；成功后清除。
 
@@ -174,67 +172,48 @@ pages/chat   onInit  → 取 token：router params → shared.pendingRoom → st
 ## 8. 其他设计决策
 
 - **表情反应**：普通消息仅显示 👍、❤️、😂 的计数（超过 99 显示 `99+`，`•` 表示自己点过），每行只存三位状态和短文本。反应事件复用向前轮询，只更新窗口中的原消息，不插入事件行；发送反应时暂停轮询，服务端确认后才更新。历史浏览暂停轮询，返回最新后重新拉取。无需图片、字体包、反应人列表缓存或额外轮询。
-- **图片消息**：不提供缩略图或图片预览；详见[解码成本评估](image-preview.md)。
+- **图片消息**：不提供缩略图或图片预览。Vela 的 `<image>` 不承诺按显示尺寸解码，`fetch` 也没有传输字节上限，纯文本附件显示是唯一不引入这些开销的选择。
 - **多实例**：目前只支持一个 Nextcloud 账号。多账号需要把 `nctalk.settings` 改成账号数组 + 当前索引，`markers` 也要按账号分区。
 
 ## 9. 启动网络门
 
 网络不通时应用不进入主界面（会话列表 / 设置 / 聊天），停在 `pages/offline`，只提供「重试」。
 
-做法照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `pages/app/entry/splash`：**把网络检查放在路由入口页**。`src/manifest.json` 的 `router.entry` 是 `pages/splash`，点图标先落到这一页（图标 + 名称 + 「正在检查网络…」），页面 `onShow` 探测完再 `replace` 到会话列表或 `pages/setup`；失败则 `replace('/offline')`。主界面不是「先渲染再隐藏」，而是**根本没被创建**，所以不存在检查期间点到「设置」的窗口，也没有列表闪一下再跳走的情况。
+做法照 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的 `pages/app/entry/splash`：**把网络检查放在路由入口页**。`src/manifest.json` 的 `router.entry` 是 `pages/splash`，点图标先落到这一页（图标 + 名称 +「正在检查网络…」），页面 `onShow` 探测完再 `replace` 到会话列表或 `pages/setup`，失败则 `replace` 到 `pages/offline`。主界面不是「先渲染再隐藏」，而是**根本没被创建**，所以不存在检查期间点到「设置」的窗口。
 
 判定只看一件事（`common/scripts/network.js`）：`@system.network.getType` 的结果。**只有明确的 `none` 才算离线**——空字符串、`fail` 回调、或者干脆不回调，都记为「未知」并放行。
 
-这一条比 HyperBilibili 的 `NetworkCheck` 更宽松（它把空值也当离线），原因是真机上吃过一次教训：把判定简化成只看类型之后，有固件上 `getType` **既不 success 也不 fail**，页面就永久停在「正在检查网络…」，比之前停在离线页更没用。所以：
-
-- `TYPE_TIMEOUT_MS`（4 s）是 `getType` 的硬上限：不回调就记 `unknown` 继续走；
+- `TYPE_TIMEOUT_MS`（4 s）是 `getType` 的硬上限：不回调就记 `unknown` 继续走，否则页面会永久停在「正在检查网络…」；
 - 「未知」不等于「没网」，放行进应用，由第一条请求给出带 `code` 的真实错误；
 - 启动页始终显示当前阶段（`stage`：「读取设置…」/「检查网络…」/「进入 /…」/「跳转重试…」），手表上没有日志控制台，卡住时必须能从表盘上读出来；
-- `router.replace` 推迟一个 tick 再发（与 `onShow` 同 tick 的跳转可能被路由丢掉，表现也像卡死），1.2 s 后若页面仍可见则重试一次并改文案。
+- `router.replace` 推迟一个 tick 再发（与 `onShow` 同 tick 的跳转可能被路由丢掉），1.2 s 后若页面仍可见则重试一次并改文案。
 
-### 两个探针是证据，不是判决
+### 探针是证据，不是判决
 
 放行只看接口类型。路由决定之后（`router.replace` 已在执行），`pages/splash` 再跑两个探针，结果只进 `state` 和日志，**不参与放行、也不阻塞启动页**：
 
 | 探针 | 目标 | 回答的问题 |
 | --- | --- | --- |
-| 对照（control） | `https://www.bilibili.com/` | 这块表本身能不能上外网？（与参考实现同一类公共站点，证书链是主流 CA） |
+| 对照（control） | `https://www.bilibili.com/` | 这块表本身能不能上外网？ |
 | 目标（server） | `<baseUrl>/status.php` | 能不能到达你自己的 Nextcloud？ |
 
-两者组合就是诊断：**对照通、目标不通 → 是域名解析 / 证书链 / 端口这一段的问题，不是手表没网**；两个都不通 → 接口在但没有可用出口。结果分别写进 `state.controlProbe` / `state.serverProbe`（`{ ok, status, code, detail, timedOut, ms, url }`），无账号时 `serverProbe` 为 `null`。
+对照通而目标不通 → 问题在域名解析 / 证书链 / 端口这一段；两个都不通 → 接口在但没有可用出口。结果分别写进 `state.controlProbe` / `state.serverProbe`（`{ ok, status, code, detail, timedOut, ms, url }`），无账号时 `serverProbe` 为 `null`。
 
-这是修过一次的回归。0.2.4 起探针被当成第二道门：`status.php` 在 8 秒内没有响应就判离线。于是 DNS 慢、TLS 握手慢、应用刚启动 Wi-Fi 还没完全关联、或者目标服务器的证书链/端口在手表上不被接受时，用户看到的是一个**永远停在「没有网络」的死页**——而同一块表上 HyperBilibili 能正常联网，因为参考实现从不因为「服务器探不通」拦人。更糟的是离线页不显示任何 `code`，原因被彻底藏起来。
+探针**不能**当第二道门：`status.php` 超时就判离线，会让慢 DNS、慢 TLS、Wi-Fi 尚未完全关联、或证书链在手表上不被接受的情况停在一个没有 `code` 的死页上。所以只有「设备没有网络接口」阻挡入口，其余情况一律放行，由会话列表的第一条真实请求给出带平台错误码的文案；对照探针通时，会话页会在前面加「网络正常，但服务器不可达」，把「Wi-Fi 没网」和「这台服务器连不上」分开。
 
-现在的取舍：
+路由决策抽成纯函数 `common/scripts/launch.js` 的 `routeAfterGate(online, hasAccount)`：离线一律 `pages/offline`（账号状态不参与），在线且无账号才 `pages/setup`，其余进会话列表。`tests/launch-gate.test.mjs` 跑这个函数，并静态断言入口页是 `pages/splash`、`ROUTE` 都是页面 key、`probe()` 出现在 `router.replace` 之后；`tests/network.test.mjs` 钉住三种离线判定、`checkSignal()` 零往返，以及 control 通 / server 不通时仍然 online。
 
-- **设备没接口** → 离线性命，这是唯一阻挡入口的情况，因为界面上每条请求都必然失败；
-- **接口在、服务器探不通** → 仍然放行。用户会进到会话列表，由第一条真实请求给出带平台错误码的文案（`api.js` 的 `fail` 现在把 `code` 也拼进可见消息，例如「网络请求失败：code=1001」）；如果对照探针是通的，会话页会在这句前面再加「网络正常，但服务器不可达」（`index.serverUnreachable`），把「Wi-Fi 没网」和「这台服务器连不上」分开。这比一个没有信息的死页有用：它区分了 DNS / TLS / 连接，而且是用户能截屏反馈的东西。
+### 跨页状态只能放 app 实例
 
-`tests/network.test.mjs` 钉住三件事：`none` / `''` / `getType` 失败都判离线且不发任何请求；判定本身零往返（`checkSignal()` 不发请求）；对照通了而目标不通时**仍然是 online**，同时 `server.ok === false` 且带 `code`，探针超时则 `timedOut: true`。测试用 `probeTargets(settings, { controlUrl })` 把对照探针指向本地服务器，不去真的访问 bilibili。
+`aiot-toolkit` 把每个页面打成独立的 webpack entry，`src/common/scripts/state.js` 会被**内联进每个页面的 bundle**，模块级对象因此是「每页一份」。跨页数据必须走 `this.$app.$def`：
 
-路由决策抽成纯函数 `common/scripts/launch.js` 的 `routeAfterGate(online, hasAccount)`：离线一律 `/offline`（账号状态不参与），在线且无账号才 `/setup`，其余进会话列表。`tests/launch-gate.test.mjs` 直接跑这个函数，并静态断言入口页是 `pages/splash`、会话列表**不会**再跳回 `/splash`、离线页的重试回到 `/splash`、网络门的判定不由 `probe` 决定，且 `this.probe()` 出现在 `router.replace` **之后**。
+- `app.ux` 导出 `shared`（`backgroundSummary`、`controlProbe`、`serverProbe`）；
+- `common/scripts/shared.js` 的 `sharedOf(vm, fallback)` 取不到 `$def` 时退回页面本地 `state`，测试与不支持 `$def` 的固件仍能跑；
+- **不要跨页读判定**：曾经把 `gateOnline` 放在 `shared` 上并让会话页据此回跳网络门，结果 splash ⇄ 列表互相踢球。门只负责「跳到哪一页」，然后把结论忘掉。
 
-网络门**不发布「通过/未通过」的判定**。曾经有过 `state.launchAllowed` 加 `pages/index` 的守卫，那正是死循环的来源（见下一节）；现在门只负责「跳到哪一页」然后把结论忘掉，主界面不再回头质疑它。
+`tests/launch-gate.test.mjs` 静态断言 `app.ux` 导出 `shared`、`shared` 上没有 `gateOnline`、任何页面都不出现 `launchAllowed` / `gateOnline` / `gateChecked`。
 
-### 跨页状态：`common/scripts/*.js` 里的模块级对象是「每页一份」
-
-0.2.10 真机上出现过 `检查网络… → 进入 / → 检查网络…` 的死循环。根因不在判定，而在状态共享：`aiot-toolkit` 把每个页面打成独立的 webpack entry，`src/common/scripts/state.js` 会被**内联进每个页面的 bundle**（用构建出的 RPK 验证过：`app.js`、`pages/splash/splash.js`、`pages/index/index.js`、`pages/chat/chat.js` 里都各有一份 `networkChecked` / `activeRoom` 的拷贝）。所以 splash 写 `state.launchAllowed = true`，`pages/index` 读到的仍是它自己的 `false` → 立刻 `replace('/splash')` → 又跑一遍门，无限循环。
-
-官方文档给的跨页通道是 app 实例：`app.ux` 导出的对象可以在任何页面通过 `this.$app.$def` 访问。因此：
-
-- `app.ux` 导出一个 `shared` 对象（`gateChecked` / `gateOnline` / `networkType` / `controlProbe` / `serverProbe` / `backgroundSummary`）；
-- `common/scripts/shared.js` 的 `sharedOf(vm, fallback)` 负责取 `this.$app.$def.shared`，取不到时退回页面本地 `state`（测试与不支持 `$def` 的固件仍能跑，不至于硬崩）；
-- 0.2.11 先把判定放上 `shared` 并保留守卫，真机仍然循环——说明 `$app.$def` 上的写入在页面之间也不保证可见（或守卫本身读到的仍是旧值）。0.2.12 的结论：**不要再试着跨页读判定**，把守卫删掉。门只在「`type === "none"`」时把用户送去 `/offline`，其余情况一律放行；插件直接拉起 `pages/index` 也照常工作，请求失败由页面自己报错。
-
-`shared` 现在只承载两件锦上添花的数据：`backgroundSummary`（keeper 预渲染）与 `controlProbe` / `serverProbe`（会话页「服务器不可达」提示）。它们读不到时最多退化成「没有预渲染 / 没有提示」，不影响能不能进应用。`tests/launch-gate.test.mjs` 静态断言：`app.ux` 必须导出 `shared`、`shared` 上不得有 `gateOnline`、任何页面都不得出现 `launchAllowed` / `gateOnline` / `gateChecked`。
-
-离线页只在 `type === "none"` 时出现，文案仍是「连上 Wi-Fi 再试」。
-
-离线页不再自己探测，重试只做 `replace('/splash')`：判一次只需要一个结论，两次探测意味着死网络下要等两个超时。
-
-AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件不接受非入口页时的回退）时**不再**被弹回网络门：那条守卫是死循环的根源，而门现在只挡 `none`，直接进列表只会看到每条请求自己的错误，比来回跳屏有用。
-
-插件启动到 `pages/setup`（手机推凭据）不经过网络门，这是有意的：那是配置页而不是主界面，它自己的校验和 20 秒超时会给出准确结论。
+离线页不自己探测，重试只做 `replace` 回 `pages/splash`：判一次只需要一个结论，两次探测意味着死网络下要等两个超时。AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`、或从手机推凭据启动 `pages/setup` 时都不经过网络门——前者只会看到每条请求自己的错误，后者是配置页，自带校验与超时。
 
 ## 10. 校验期间不熄屏
 
@@ -277,82 +256,51 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 
 ### 尺寸必须落在设计像素上
 
-0.2.5 的主题移植在真机（圆表）上翻过一次车，两条都是尺寸解析问题，记在这里避免重犯：
+Vela 对百分比与显隐的解析有几处与 CSS 规范不同，这些写法会直接塌掉布局：
 
-| 位置 | 错误写法 | 真机表现 | 正确写法 |
+| 位置 | 不要写 | 为什么 | 正确写法 |
 | --- | --- | --- | --- |
-| `.app-page` | `position: relative` | 页面根不再把确定宽度传给子节点 | 静态定位（沿用移植前的 `.page`） |
-| `.app-bg` | `width/height: 100%` | 回退到位图的固有尺寸，粉色辉光只占左上角 256×256，其余纯黑 | `480px` × `480px`（矩形屏在 RECT 块里加高） |
-| `<scroll>` 内容根 `.list` | `width: 100%` | 滚动内容没有确定宽度，百分比解析不到基准，气泡／行全部塌成零宽（「消息界面被压扁」「会话列表被压成长横条」） | `480px`（设计宽度），子卡片用 394 / 413 / 374 这类设计像素 |
-| 状态容器（`main` / `editor` / 输入条） | `show="{{editing}}"` | 隐藏节点仍占高度：148 + 212 + 150 = 510 > 480，列表 `flex: 1` 解析成 0，只剩一条横缝（「被压成长横条」） | `if="{{...}}"`，模板内不出现 `show` |
-| 会话列表的占位块与 `.badge` | `show="{{!loading && error}}"` | 三个占位块（各约 100px）躲在列表末尾一起占高度，能滚动进空白；未读为 0 时徽标仍占 30px，把时间顶出行 | `if="{{...}}"`；`tests/index-layout.test.mjs` 断言这一页模板不出现 `show` |
+| `.app-page` | `position: relative` | 页面根不再把确定宽度传给子节点 | 静态定位，`100%` 宽的列布局 |
+| `.app-bg` | `width/height: 100%` | 回退到位图固有尺寸，辉光只占左上角 256×256 | `480px` × `480px`，矩形屏在 RECT 块里加高 |
+| `<scroll>` 内容根 `.list` | `width: 100%` | 滚动内容没有确定宽度，百分比解析不到基准，子卡片全部塌成零宽 | `480px`（设计宽度），子卡片用 394 / 413 / 374 这类设计像素 |
+| 状态容器（`main` / `editor` / 输入条） | `show="{{...}}"` | 隐藏节点仍占高度：148 + 212 + 150 = 510 > 480，`flex: 1` 的列表解析成 0 | `if="{{...}}"`，模板内不出现 `show` |
+| 会话列表的占位块与 `.badge` | `show="{{...}}"` | 占位块躲在列表末尾一起占高度；未读为 0 时徽标仍占 30px，把时间顶出行 | `if="{{...}}"` |
 
-界面尺寸与显隐不变式由四个测试守护：`tests/layout-sizing.test.mjs` 断言页面根没有相对定位、`.app-bg` 用像素值且 `object-fit` 合法、三个滚动页的 `.list` 与卡片在每种屏幕下都是像素宽度；`tests/chat-layout.test.mjs` 断言聊天页两态用 `if`、模板不出现 `show`，并算出固定块之上留给消息列表的高度（圆屏 226、矩形 466）；`tests/index-layout.test.mjs` 对会话列表做同样的检查（不出现 `show`、`.list` 480px、卡片 394 / 413，圆屏 268 / 矩形 478 可用高度）。百分比只在父节点有确定宽度时才用（例如 `.app-page` 的直接子节点）。
+`tests/layout.test.mjs` 守住这些不变式：页面根静态定位、`.app-bg` 用像素值且 `object-fit` 合法、三个滚动页的 `.list` 与卡片在每种屏幕下都是像素宽、两态用 `if`、固定块之上留给消息列表的高度（圆屏 / 矩形屏都 ≥ 180px），以及登录页键盘占位不低于真实键盘高度。百分比只在父节点有确定宽度时才用（例如 `.app-page` 的直接子节点）。
 
-### 跳转：形式与时序都排除后，让手表说出是谁的问题
+### 跳转：先排除形式与时序，再怀疑目标页
 
-1.0.0 的真机报告：点会话卡片、点「设置」**都没有任何反应**（不是报错、不是闪一下，就是停在原地），而同一行里的「刷新」正常。这三个处理器里只有「刷新」不跳转——两条死掉的路正是全应用仅有的两处 `router.push`；所有确实能落地的跳转（splash → index / setup / offline）用的都是 `router.replace`。结论：**这块固件上 `push` 可能静默不生效**，而手表没有控制台，静默失败和界面卡死从外面看是一样的。
-
-1.0.1 按「push 可能不落地」加了 push → 300ms → replace 的兜底，真机回报**会话仍然点不开，而且「刷新」也一起死了**。1.0.1 对点击路径的改动只有这个兜底和它依赖的 `leftPage`，所以问题就出在兜底本身：`push` 被丢弃时固件仍会触发当前页的 `onHide`（它响应的是「发起了跳转」，不是「跳转成功了」），`leftPage` 因此读到「已经离开」，重试被永久跳过——又一次静默无响应，还多了一个帮忙掩盖它的状态位。
-
-1.0.3 把三种形式都延后重试（+30ms `replace(params)`、+1300ms 无 params 的 `replace`、+2400ms 的 `push`），真机回报**约 4 秒才弹 toast**——即每一级都没落地，形式与时序都被排除。1.0.4 因此临时加了一个只依赖 `@system.router` 的诊断页，用「它能打开、会话页打不开」证明了**路由与调用方都正常，是目标页建不出来**；真机日志随后给出了那句 `data` / `protected` 冲突的报错（见下一节），诊断页也在 1.0.6 删掉了。
+这块固件上 `router.push` 可能静默不生效，而跳转成功也不一定触发 `onHide`——两者从外面看都是「点了没反应」。`common/scripts/nav.js` 因此按「延后 → 逐级只变一个变量 → 比对 `router.getState()` 快照」的顺序尝试，全部落空才弹 toast：
 
 | 时间 | 做法 | 排除了什么 |
 | --- | --- | --- |
-| +30ms | `replace(uri, params)` | 同拍发送（splash 的 30ms 延后） |
-| +1300ms | `replace(uri)` | 参数：不带 params 也打不开就不是它 |
-| +2400ms | `push(uri, params)` | 形式：延后之后另一种形式也不行，就不是形式的问题 |
-| +3600ms | 仍未离开 → toast + 把路由器前后快照写进列表页头部 | 下一次报告是事实而不是症状 |
+| +30ms | `replace(uri, params)` | 同拍发送 |
+| +1300ms | `replace(uri)` | 参数 |
+| +2400ms | `push(uri, params)` | 形式 |
+| +3600ms | 仍未离开 → toast，并把路由器前后快照写进列表页头部 | 下一次报告是事实而不是症状 |
 
-另外，会话列表头部现在有一行状态（`正在加载…` / `已更新 N 个会话` / `✕ 失败原因` / `✕ 栈1:pages/index→1:pages/index`）。原因是「刷新」以前**没有任何可见反馈**：列表里已有卡片时没有转圈，而失败文案渲染在滚动区最后一张卡片下面，看不到。
+「到没到」以 `router.getState()` 的 `index` / `path` / `name` 为准，页面自己的 `$visible` 只作补充。房间信息同时走 router params（`pages/chat` 的 `protected`）与 `$app.$def.shared.pendingRoom`，所以不带 params 的那一级仍能打开会话；`onInit` 读完立刻清空，避免串房。被 `replace` 打开的页面在栈底，`router.back()` 无处可去，所以返回统一走 `nav.leave(ROUTE.home)`。
 
-「到没到」不再只信页面自己的生命周期：这块固件上跳转成功也不一定触发 `onHide`/`onDestroy`，1.0.2 的单次判定因此可能对已经打开的页面误报。现在先给路由器做一次快照，每级之后比对 `getState()` 的 `index`/`path`/`name`——这是唯一来自路由器、而不是来自「我们要离开的那一页」的证据；页面自己的 `leftPage`/`destroyedPage` 与 `$visible` 仍作为补充证据。
+会话列表头部保留一行状态（`正在加载…` / `已更新 N 个会话` / `✕ 失败原因` / 路由快照），因为滚动区末尾的失败文案常常看不到。
 
-配套的两处：
+### 页面 VM 的硬规则
 
-- 房间信息走两条通道：router params（`pages/chat` 的 `protected`）+ `$app.$def.shared.pendingRoom`（跨页对象，见 §9）。这也让「不带 params 的 replace」这一级有意义：chat 仍能从 `pendingRoom` 拿到房间。`pages/chat.onInit` 读完立刻清空，避免上一间房串到下一间。
-- 被 replace 打开的页面在栈底，`router.back()` 无处可去，所以 chat / settings / setup 的返回统一走 `nav.leave(ROUTE.home)`：`router.getState().index > 0` 才 `back()`，否则延后 30ms replace 回 `pages/index`（`leave` 的 replace 同样在触摸回调里，同样要延后）。
+页面同时声明 `data` 与 `protected` / `public` / `private` 时，这块固件的页面 VM **根本建不出来**：路由发出跳转，目标页构造失败，调用页停在原地，表现就是「点会话没反应」。会话页因此把状态块叫 `private`，`protected` 只接路由参数。`tests/page-vm.test.mjs` 对每个页面做这条静态检查——规则只能静态断言，所以必须覆盖所有页面而不是点名 chat。
 
+### 用户点了就必须有反应
 
-### 页面 VM 不能同时声明 `data` 与 `protected`
+不要用布尔状态位拦住后面的读取：一次既不回调也不报错的请求会让 `loading` / `receiving` 永远为真，按钮从此静默无响应。
 
-1.0.4 的真机日志给出了四轮排查的最终答案，每一次尝试跳转都打一条：
+1. **用户发起的读取永远优先**：`refresh()` 不因 `loading` 提前返回，而是用 `fetchToken` 让旧请求的答案失效（1.5s 内的重复点击才忽略）；
+2. **超过请求超时的状态位视为失效**：`releaseStaleReceive()` 在 `receive` / `schedulePoll` / `onShow` 开头放掉 25s 以上的 `receiving`；
+3. **回到页面时 `loading` 清零**：可见的页面不可能是「正在忙」；
+4. **失败必须能点**：聊天页的错误占位块本身可点重试。
 
-```
-Error: 页面VM对象中的属性data不可与"public,protected,private"同时存在，请使用private替换data名称
-    at __scriptModule__ (.../pages/chat/chat.js:8659)
-```
+`tests/tap-recovery.test.mjs` 守护这四条。
 
-`pages/chat` 同时写了 `protected: { token, name }`（路由参数通道）和 `data: { ... }`。这块固件上页面 VM 因此**根本建不出来**：路由确实发出了跳转，目标页构造失败，调用页停在原地——和「点击没反应」从外面完全无法区分。这也解释了两件一直想不通的事：
+### 改了看得见的布局就要抬版本号
 
-- 为什么当时那个 9 KB、无 params 也无 `data` 的临时诊断页能打开，而会话页打不开——**不是体积**，是页面构造时就被拒绝；
-- 为什么只有会话页和设置页死掉（1.0.0 时期）：chat 是唯一带 `protected` 的页面；设置页那次是 push 的问题。
-
-改法：`data` 整块改名为 `private`（报错信息本身的要求），`protected` 保留，键与响应式行为不变。
-
-`tests/page-vm.test.mjs` 对**每个**页面做静态检查：只要出现 `protected` / `public` / `private` 之一，就不允许再有 `data`；并单独钉住 chat「保留 protected + 用 private」。这条规则无法在桌面 Node 上跑出真实 VM 行为，只能靠静态断言，因此测试必须覆盖所有页面而不是点名 chat。
-
-### 用户点了就必须有反应：状态位不能吞掉一次读取
-
-1.0.1 同时报「无法进入会话」和「刷新按钮不起作用」。两处共用一个坏习惯：**用一个布尔状态位拦住后面的读取**。
-
-| 位置 | 1.0.1 的写法 | 真机表现 |
-| --- | --- | --- |
-| `pages/index.refresh()` | `if (this.loading) return` | 有一次请求既不回调也不报错，`loading` 永远是 `true`，之后每次点「刷新」都被丢掉：没有转圈、没有错误、没有变化 |
-| `pages/chat.receive()` | `if (... \|\| this.receiving \|\| ...) return` | 同上，`receiving` 卡住后页面永远停在「正在加载…」，再也不发下一次读取 |
-
-现在的规则：
-
-1. **用户发起的读取永远优先**：`refresh()` 不再因为 `loading` 提前返回，而是用 `fetchToken` 让旧请求的答案失效（1.5s 内的重复点击才忽略，防连点）。
-2. **超过请求超时的状态位视为失效**：`releaseStaleReceive()` 在 `receive` / `schedulePoll` / `onShow` 开头把 20s + 5s 以上的 `receiving` 放掉，页面因此总能恢复。
-3. **回到页面时 `loading` 清零**：可见的页面不可能是「正在忙」，否则转圈会一直挂在那儿。
-4. **失败必须能点**：聊天页的错误占位块本身可点重试，不再是死胡同。
-
-`tests/tap-recovery.test.mjs` 守护这四条（1.0.1 的源码全部失败）。
-
-### 0.2.5 的两个包不是同一个东西
-
-0.2.5 发版后才修了上面三条尺寸问题，期间 `versionName` 没动，于是「0.2.5」既可以指修复前的包，也可以指修复后的包——真机上「会话列表还是被压扁」的报告就来自修复前那个。**只要改了用户看得见的布局，就必须同时抬版本号**，否则没法从版本号判断表上装的是哪一版。0.2.6 起这条作为发布纪律。
+`versionName` 不动时，同一个版本号既可能指修复前的包也可能指修复后的包，无法从版本号判断表上装的是哪一版。
 
 ## 12. 后台留存（微服务）
 
@@ -424,4 +372,4 @@ Error: 页面VM对象中的属性data不可与"public,protected,private"同时�
 | `serviceManager.postMessage` 签名 | 文档表格写 `postMessage(clientId, Object)`，唯一示例写 `postMessage({ clientId, params })` | 先按示例调用，抛异常再退回两参数形式（`src/services/keeper.js`） |
 | 后台网络是否被系统挂起 | 未验证 | 观察息屏 10 分钟后摘要时间戳是否还在推进 |
 
-构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。守护这些接线的测试是 `tests/keeper.test.mjs`（服务决策逻辑）和 `tests/keeper-service.test.mjs`（manifest / app.ux / 设置页 / i18n 的一致性）。
+构建侧已验证：`npm run build:circle` 会把 `src/services/keeper.js` 打进 RPK（rspack 单独打包，依赖一并内联），`manifest-watch.json` 保留 `services` 字段，不需要改打包脚本。决策逻辑由 `tests/keeper.test.mjs` 守护（含服务名与 manifest 的一致性）；manifest / app.ux / 设置页 / i18n 的接线只能在真机上验证，见上表。

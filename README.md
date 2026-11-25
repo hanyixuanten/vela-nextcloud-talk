@@ -91,7 +91,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页和轮询，以及针对模拟 Nextcloud 的接口集成测试；`tests/network.test.mjs` 与 `tests/launch-gate.test.mjs` 守住启动网络门（接口类型判定、两个探针只作证据不拦人、入口页是 `pages/splash`、会话列表不再跳回网络门）。另有几组纯静态的布局断言（`tests/layout-sizing.test.mjs`、`tests/chat-layout.test.mjs`、`tests/index-layout.test.mjs`、`tests/login-layout.test.mjs`），守住设计像素尺寸、`if` 显隐和键盘占位这些只能靠真机才能发现的问题；`tests/navigation.test.mjs` 守住跳转链（页面不得裸调 `router.push`、每次尝试都要延后出触摸回调、逐级只变一个变量、到达判定要比对 `getState()` 快照），`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`，否则页面根本建不出来），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」（刷新不能被 `loading` 吞掉、卡住的读取超时后自动放行、聊天错误占位块可点重试、每次操作都要在头部状态行留下结果）。
+JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页与轮询，以及针对模拟 Nextcloud 的接口集成测试。启动网络门由 `tests/network.test.mjs`（接口类型判定、探针只作证据）和 `tests/launch-gate.test.mjs`（入口页路由决策）守住；`tests/layout.test.mjs` 是一组纯静态的布局断言，守住设计像素尺寸、`if` 显隐、键盘占位和各页的可用高度——这些只能靠真机才能发现的问题。`tests/navigation.test.mjs` 守住跳转链，`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」。
 
 插件侧的协议单测要另跑（它只能编到 host，不能编到 wasm）：
 
@@ -196,7 +196,6 @@ vela-nextcloud-talk/
 │   ├── check-credentials.mjs     # 本机真机联调凭据自检（只读）
 │   ├── gen-icon.py               # 零依赖 PNG 生成
 │   ├── gen-bg.py                 # 页面辉光背景 PNG（纯 Python 写 PNG）
-│   ├── seed-watch-chat.mjs       # 向真机测试房间写入基线消息
 │   └── sync-input-method.sh      # 重新拉取并覆盖 InputMethod
 ├── astrobox-plugin/              # 手机侧配置凭据的 AstroBox 插件（Rust → wasm）
 │   ├── Cargo.toml
@@ -210,9 +209,7 @@ vela-nextcloud-talk/
 │   ├── api.md                    # 接口清单与错误映射
 │   ├── design.md                 # 圆屏布局计算与状态机
 │   ├── interconnect.md           # 与插件的协议、时序、排错
-│   ├── ci.md                     # CI 的 job 划分、secrets、产物与排错
-│   ├── image-preview.md          # 附件显示调查
-│   └── watch-memory-baseline.md  # 手表基线内存
+│   └── ci.md                     # CI 的 job 划分、secrets、产物与排错
 ├── tests/
 │   ├── run.sh                    # 一键跑全部测试（需要 Node ≥ 18）
 │   ├── mock-server.mjs           # 假 Nextcloud Talk OCS 服务
@@ -222,15 +219,13 @@ vela-nextcloud-talk/
 │   ├── units.test.mjs            # base64 / format 单元测试
 │   ├── network.test.mjs          # 网络门：类型判定 + 探针只作证据
 │   ├── launch-gate.test.mjs      # 入口页路由决策与「先探网络再进主界面」
-│   ├── index-layout.test.mjs     # 会话列表：无 show、像素宽度、可用高度
+│   ├── layout.test.mjs           # 静态布局：设计像素、if 显隐、键盘占位、可用高度
 │   ├── navigation.test.mjs       # 跳转：阶梯逐级只变一个变量、返回不落到空栈
-│   ├── page-vm.test.mjs         # 页面 VM：有 protected 就不能再写 data（否则页面建不出来）
+│   ├── page-vm.test.mjs          # 页面 VM：有 protected 就不能再写 data（否则页面建不出来）
 │   ├── tap-recovery.test.mjs     # 点击不被状态位吞掉：刷新可重发、卡住的读取会超时放行
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试
 │   ├── keeper.test.mjs           # 后台留存：轮询归属、振动冷却、摘要容错
-│   ├── keeper-service.test.mjs   # 微服务接线：manifest / app.ux / 设置 / i18n
-│   ├── seed-watch-chat.test.mjs  # seed/watch 聊天测试
 │   └── build-watch.test.cjs      # 屏幕条件编译测试
 ├── LICENSE                       # 根仓库 MIT 许可
 ├── SECURITY.md                   # 漏洞报告与安全边界
@@ -349,14 +344,14 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 ## 已知限制
 
 - **跨页状态只能放 app 实例**：每个页面是独立 webpack entry，`common/scripts/state.js` 的模块级对象是「每页一份」，跨页判定/缓存必须经 `this.$app.$def.shared`（见 `src/common/scripts/shared.js` 与 design.md 第 9 节），否则会出现 splash ⇄ 会话页互相踢球的死循环。
-- **跳转可能被丢弃，也可能是因为目标页建不出来**：1.0.0 的 `push` 毫无反应；1.0.1 的 push→replace 兜底被页面 `onHide` 误导，永久跳过重试；1.0.2 只用 `replace` 仍打不开，但弹出「打不开，请重试」——说明点击进了处理器、跳转没落地；1.0.3 三种形式全部延后重试后仍要等约 4 秒才弹 toast，于是怀疑目标页。真机日志最终给出答案：会话页同时声明了 `data` 与 `protected`，**页面 VM 根本没被创建**（见下一条）。现在 `src/common/scripts/nav.js` 仍是「延后出触摸回调的阶梯」：+30ms `replace(uri, params)` → +1300ms `replace(uri)`（排除参数）→ +2400ms `push`（排除形式）→ +3600ms 仍未离开才 toast，并把路由器前后快照留在会话列表头部；「到没到」比对 `router.getState()`，因为跳转成功也不一定触发 `onHide`。代价是返回栈退化为「回会话列表」（`nav.leave` 会处理）。见 design.md 第 11 节。
-- **页面 VM 不能同时声明 `data` 与 `protected`**：真机（1.0.4）每次点会话都会打 `页面VM对象中的属性data不可与"public,protected,private"同时存在，请使用private替换data名称`——页面根本建不出来，路由发了跳转但目标页构造失败，表现就是「点会话没反应 / 打不开」。会话页的状态块因此叫 `private`，`protected` 留着接路由参数。`tests/page-vm.test.mjs` 对所有页面做这条静态检查。
+- **跳转可能被静默丢弃**：这块固件上 `router.push` 可能不生效，跳转成功也不一定触发 `onHide`，两者从外面看都是「点了没反应」。`src/common/scripts/nav.js` 因此按「延后 → 逐级只变一个形式或参数 → 比对 `router.getState()` 快照」重试，全部落空才弹 toast；代价是返回栈退化为「回会话列表」（`nav.leave` 处理）。若目标页自己建不出来（见下一条），这个阶梯也只能报告而不能修复。见 design.md 第 11 节。
+- **页面 VM 不能同时声明 `data` 与 `protected`**：同时声明 `data` 与 `protected` 时页面 VM 根本建不出来：路由发出跳转，目标页构造失败，表现就是「点会话没反应」。会话页的状态块因此叫 `private`，`protected` 只接路由参数，`tests/page-vm.test.mjs` 对所有页面做这条静态检查。
 - **服务器不可达时仍可进入应用**：启动门只判网络接口类型（且仅 `none` 算离线），因此 `status.php` 探不通、`getType` 失败或超时都不会拦人；真正的失败会以「网络正常，但服务器不可达：网络请求失败：code=…」的文案出现在会话列表（对照探针通时），平台错误码同时打在日志里。启动页会显示当前阶段，卡住时能直接从表盘看出停在哪一步。
 - **短轮询**：使用 `lookIntoFuture=1` 拉取新消息，每次请求结束后再开始计时；按设置每 15s（可改 30s / 60s）轮询。浏览历史或离开页面时暂停轮询。
 - **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，因此做成设置里可关的开关。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
 - **HTTPS-only**：手动登录、候选账号校验与手机凭据协议均拒绝明文 HTTP；客户端依赖系统 TLS 校验，不做证书 pinning。
 - **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。清除本地账号后也应在 Nextcloud 吊销对应应用密码。
-- **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。不提供缩略图，也不下载或解码图片，原因见[图片预览评估](docs/image-preview.md)。
+- **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。不提供缩略图，也不下载或解码图片：`<image>` 不承诺按显示尺寸解码，`fetch` 也没有传输字节上限。
 - **消息窗口**：每次拉取 12 条，界面最多保留 24 条；支持加载更早消息，单条正文保留前 512 个 UTF-16 代码单元以内并加省略号。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
 - **互联真机验证**：AstroBox 按已连接设备地址与已安装快应用包名投递；仍须在目标固件与 AstroBox 版本上验证收发。Android 官方互联签名要求与排错见[凭据互联说明](docs/interconnect.md)。
@@ -366,7 +361,7 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 
 按优先级：
 
-1. 按[文本聊天真机内存基线](docs/watch-memory-baseline.md)验收历史分页、返回最新、后台切换及内存峰值。
+1. 真机验收历史分页、返回最新、后台切换与微服务留存（步骤见 [design.md 第 12 节](docs/design.md)）。
 2. 手势返回（`onBackPress` 已由系统接管，但可以加滑动手势）。
 3. 离线草稿队列。
 
