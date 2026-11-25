@@ -11,7 +11,13 @@ node_modules/
 sign/*.pem
 sign/**/*.pem
 
+# Local credentials for live testing (only the template is tracked)
+.env
+.env.*
+!.env.example
+
 # Tooling / OS noise
+.workbuddy/
 .DS_Store
 .idea/
 .vscode/
