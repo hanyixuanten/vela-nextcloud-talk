@@ -1,12 +1,15 @@
-// What is left of "background retention" (1.0.20): the crown-exit floating
-// icon. Background message sync is gone — no micro service, no background
-// download ticker — and these tests pin both halves of that decision:
+// "Background retention" final form (1.0.21): a manifest declaration and
+// nothing else. HyperBilibili's 挂后台 never played silent audio — its git
+// history shows `system.audio` only as a manifest declaration — and these
+// tests pin that shape:
 //
-//   1. the keep-alive audio is wired correctly (it is what puts the media
-//      entry on the watch face, HyperBilibili-style);
-//   2. the machinery it replaced stays removed, so a future refactor cannot
-//      quietly reintroduce a background poller the user explicitly declined;
-//   3. foreground polling is intact (index refreshes on show, chat polls while
+//   1. the background declaration is present (it is what keeps the process
+//      alive after the crown exit, so the watch-face entry can return to the
+//      untouched UI);
+//   2. no playback machinery exists — a silent loop was shipped in 1.0.20 and
+//      removed in 1.0.21; these assertions keep it out;
+//   3. the removed background-sync machinery stays removed;
+//   4. foreground polling is intact (index refreshes on show, chat polls while
 //      visible).
 
 import assert from 'node:assert/strict'
@@ -22,38 +25,36 @@ function test(name, fn) {
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const manifest = JSON.parse(read('../src/manifest.json'))
 const app = read('../src/app.ux')
-const keepAlive = read('../src/common/scripts/keepAliveAudio.js')
 
-test('the manifest declares only the audio it uses in the background', () => {
+test('the manifest declares the background audio feature, and only that', () => {
   const features = (manifest.features || []).map((item) => item.name)
   assert.ok(features.includes('system.audio'), 'system.audio must be in features')
   const background = manifest.config && manifest.config.background
   assert.ok(background && Array.isArray(background.features), 'config.background.features is required')
-  assert.deepEqual(background.features, ['system.audio'],
-    'no background interface may be declared that nothing runs any more')
+  // This declaration is the whole keep-alive: HyperBilibili ships the same
+  // single entry and nothing else.
+  assert.deepEqual(background.features, ['system.audio'])
   assert.equal(manifest.services, undefined, 'the keeper micro service stays removed')
   assert.ok(!features.includes('system.serviceclient'), 'no serviceclient feature')
   assert.equal(existsSync(new URL('../src/services', import.meta.url).pathname), false,
     'the services directory stays removed')
 })
 
-test('the keep-alive audio is wired to hide/show like the media-card entry needs', () => {
-  // The floating resume icon on the watch face exists while audio plays, so
-  // onHide must start it and onShow must stop it — and the feature must be
-  // resolved lazily: a module-level import of a missing feature takes app.ux
-  // down with it (the 1.0.17 serviceclient lesson).
-  assert.match(keepAlive, /require\('@system\.audio'\)/, 'lazy require, never a module-level import')
-  assert.match(keepAlive, /catch/, 'the resolution is caught')
-  assert.match(keepAlive, /loop = true/, 'a loop, or the silence ends and the process dies with it')
-  assert.match(keepAlive, /keepalive\.wav/, 'a packaged silent file, not a network stream')
-  assert.match(app, /keepAliveAudio\.start\(\)/, 'onHide starts the loop')
-  const show = app.slice(app.indexOf('onShow() {'), app.indexOf('onDestroy() {'))
-  assert.match(show, /keepAliveAudio\.stop\(\)/, 'onShow stops it')
-  const destroy = app.slice(app.indexOf('onDestroy() {'))
-  assert.match(destroy, /keepAliveAudio\.stop\(\)/, 'teardown stops it')
+test('no keep-alive playback: declaration only, like HyperBilibili', () => {
+  // The silent WAV loop (1.0.20) was removed in 1.0.21. If the floating icon
+  // ever disappears, bring the loop back — not a resident hack.
+  assert.equal(existsSync(new URL('../src/common/audio', import.meta.url).pathname), false,
+    'no packaged audio asset')
+  assert.equal(existsSync(new URL('../src/common/scripts/keepAliveAudio.js', import.meta.url).pathname), false,
+    'no audio playback module')
+  for (const name of ['keepAliveAudio.start', 'keepAliveAudio.stop', 'system.audio\'', 'audio.start', 'audio.play']) {
+    assert.ok(!app.includes(name), 'app.ux must not reference ' + name)
+  }
+  const comment = app.slice(app.indexOf('1.0.21:'))
+  assert.match(comment, /keepAliveAudio/, 'app.ux must say where the removed module lives')
 })
 
-test('the removed background machinery stays removed', () => {
+test('the removed background-sync machinery stays removed', () => {
   for (const name of ['keeperClient', 'bgKeeper', 'BG_SYNC_MS', 'createKeeper', 'request.download']) {
     assert.ok(!app.includes(name), 'app.ux must not reference ' + name)
   }

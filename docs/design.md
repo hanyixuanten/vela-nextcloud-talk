@@ -319,15 +319,14 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 
 `versionName` 不动时，同一个版本号既可能指修复前的包也可能指修复后的包，无法从版本号判断表上装的是哪一版。
 
-## 12. 挂后台：表盘悬浮入口（1.0.20）
+## 12. 挂后台：表盘悬浮入口（纯声明，1.0.21）
 
 需求不是后台消息同步，而是 HyperBilibili 那种「按下表冠回表盘 → 表盘出现悬浮图标 → 点它回到原状态」。1.0.14–1.0.19 走过三条路（布尔量前台标记 → keeper 微服务 → 进程内 15 秒下载 ticker），全部以「后台留存不可用」告终；对 HyperBilibili 仓库考古（commit `0ccb19b`，音频播放器出现之前）给出了答案：它的「挂后台」就是 manifest 里 `config.background.features: ["system.request", "system.audio"]` 的声明，表盘悬浮入口是音频播放时系统挂出的**媒体卡片**。
 
 ### 12.1 实现
 
-- manifest：`features` 与 `config.background.features` 都声明 `system.audio`。
-- `app.ux` 的 `onHide` 用 `@system.audio` 循环播放打包的静音 WAV（`src/common/audio/keepalive.wav`，2 秒 8kHz 单声道，音量 0，标题 Talk）；`onShow` / `onDestroy` 停止。
-- `@system.audio` 懒加载 + try/catch（沿用 `serviceclient` 的教训：feature 缺失的模块级 import 会在 app.ux 初始化时抛异常带崩一切）。固件没有音频时打日志退回普通行为。
+- manifest：`features` 与 `config.background.features` 都声明 `system.audio`，仅此而已。
+- **没有任何播放代码。** HyperBilibili 的全部历史证实纯声明即挂后台（`audio` 在 998dcf6 之前只出现在 manifest.json 一处）。1.0.20 的静音 WAV 循环（commit `3e48d2f` 里的 `keepAliveAudio.js` + `keepalive.wav`）在 1.0.21 移除；若真机发现悬浮图标不再出现，从该 commit 找回。
 
 ### 12.2 轮询只在foreground
 
@@ -336,13 +335,13 @@ bubble 372x18 / text 343x0 / row0 343x0 / title 311x36
 - 会话页 `onShow` 刷新列表（1.5 秒防双击下限不变）；
 - 聊天页可见时按 `pollInterval` 短轮询消息。
 
-`tests/keepalive.test.mjs` 钉住三件事：保活音频接线正确；被拆除的机制不复活（`services/` 目录、`keeperClient`、`bgKeeper` 等不得回到 `app.ux`，manifest 不得再有 `services` / `serviceclient`）；前台轮询健在。
+`tests/keepalive.test.mjs` 钉住三件事：纯声明形态不被加回播放（无 `keepAliveAudio`、无音频资源）；被拆除的机制不复活（`services/` 目录、`keeperClient`、`bgKeeper` 等不得回到 `app.ux`，manifest 不得再有 `services` / `serviceclient`）；前台轮询健在。
 
 ### 12.3 真机待验证
 
 | 项 | 现状 | 处理 |
 | --- | --- | --- |
-| 静音音频（volume 0）能否维持媒体卡片 | 未验证 | 进 app → 按表冠 → 看表盘是否出现悬浮图标；不出现则改音量 0.01 或换 m4a |
+| 纯声明（无播放）能否保住进程与悬浮入口 | 未验证 | 进 app → 按表冠 → 看表盘是否出现悬浮图标、点回状态是否原样；不成立则从 commit `3e48d2f` 找回静音循环 |
 | 悬浮图标点回后状态 | 未验证 | 应原样回到离开前的页面；被杀则说明音频没撑住进程 |
 | 息屏数小时后的存活 | 未验证 | 若夜间被回收属平台行为，可接受（回表盘当时可用即可） |
 

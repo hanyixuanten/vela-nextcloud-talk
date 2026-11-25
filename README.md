@@ -178,7 +178,6 @@ vela-nextcloud-talk/
 │   │       ├── textlayout.js     # 气泡/详情页共用的折行与文本度量
 │   │       ├── network.js        # 启动网络门（类型判定 + bilibili/服务器探针证据）
 │   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
-│   │       ├── keepAliveAudio.js # 表冠退出后的静音音频保活（表盘悬浮入口）
 │   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
 │   ├── components/
 │   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
@@ -226,7 +225,7 @@ vela-nextcloud-talk/
 │   ├── tap-recovery.test.mjs     # 点击不被状态位吞掉：刷新可重发、卡住的读取会超时放行
 │   ├── setup.test.mjs            # 配置页接收与确认流程
 │   ├── chat.test.mjs             # 聊天交互测试（顺序、四行预览、展开全文、窗口上限）
-│   ├── keepalive.test.mjs        # 表冠退出保活：静音音频接线、后台机制不复活、前台轮询健在
+│   ├── keepalive.test.mjs        # 表冠退出保活：纯声明形态、后台机制不复活、前台轮询健在
 │   └── build-watch.test.cjs      # 屏幕条件编译测试
 ├── LICENSE                       # 根仓库 MIT 许可
 ├── SECURITY.md                   # 漏洞报告与安全边界
@@ -277,13 +276,13 @@ Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `commo
 
 从手机推来的凭据在手表上要经历「写 storage → 最长 20 秒的校验 → 回执」，期间用 `@system.brightness.setKeepScreenOn(true)` 保持亮屏，成功、失败、离开页面都会释放。写盘排在校验之前，校验失败也保留输入（回执文字带「已保存；」前缀）；只有写盘本身失败才什么都不留。细节见 [`docs/design.md`](docs/design.md) 第 9、10 节。
 
-### 挂后台：表盘悬浮入口（1.0.20）
+### 挂后台：表盘悬浮入口（纯声明，1.0.21）
 
 需求不是后台消息同步，而是 HyperBilibili 那种「按下表冠回表盘 → 表盘出现悬浮图标 → 点它回到原状态」。对照 HyperBilibili 仓库：commit `0ccb19b`（音频播放器出现之前）仅凭 manifest `config.background.features: ["system.request", "system.audio"]` 声明实现挂后台，表盘悬浮入口就是音频播放时系统挂出的**媒体卡片**。
 
-Talk 因此声明 `system.audio`（`features` + `config.background.features`），并在 `app.ux` 的 `onHide` 里用 `@system.audio` 循环播放打包的静音 WAV（`src/common/audio/keepalive.wav`，音量 0、标题 Talk）；`onShow` / `onDestroy` 停止。音频在播期间进程不死后，系统保住悬浮入口，点回去页面原样保留。`@system.audio` 与曾经的 `@system.serviceclient` 一样懒加载 + try/catch：feature 缺失时打日志退回普通客户端行为，绝不带崩 app.ux。
+Talk 与它完全一致：只在 `features` + `config.background.features` 声明 `system.audio`，**没有任何播放代码**。HyperBilibili 仓库考古证实它在音频播放器出现之前也从未播放过任何音频——纯声明即挂后台。1.0.20 曾加过静音 WAV 循环作为保险，真机验证前先按 HyperBilibili 的最简形态收敛；若悬浮图标不再出现，从 git 历史找回 `keepAliveAudio.js` + `keepalive.wav`（commit `3e48d2f`）即可。
 
-**1.0.20 起没有后台轮询**：keeper 微服务（`services/`、`serviceclient`）与进程内 15 秒下载 ticker（`bgSync.js`）整体拆除，用户明确不需要后台消息同步。轮询只在前台发生——会话页 `onShow` 刷新列表，聊天页可见时按间隔拉消息。`tests/keepalive.test.mjs` 钉住这两半：保活音频的接线正确、被拆除的机制不复活、前台轮询健在。
+**1.0.20 起没有后台轮询**：keeper 微服务（`services/`、`serviceclient`）与进程内 15 秒下载 ticker（`bgSync.js`）整体拆除，用户明确不需要后台消息同步。轮询只在前台发生——会话页 `onShow` 刷新列表，聊天页可见时按间隔拉消息。`tests/keepalive.test.mjs` 钉住：纯声明形态不被加回播放、被拆除的机制不复活、前台轮询健在。
 
 ### 输入态为什么要两个页面状态
 

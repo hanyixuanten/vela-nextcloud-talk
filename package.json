@@ -1,6 +1,6 @@
 {
   "name": "vela-nextcloud-talk",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "private": true,
   "description": "Nextcloud Talk client for Xiaomi Vela smartwatches (Vela JS app)",
   "engines": {

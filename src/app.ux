@@ -2,7 +2,6 @@
 import store from './common/scripts/store'
 import api from './common/scripts/api'
 import state from './common/scripts/state'
-import keepAliveAudio from './common/scripts/keepAliveAudio'
 
 // The only truly cross-page object in the app. Pages reach it through
 // `this.$app.$def.shared`; see common/scripts/shared.js for why module level
@@ -49,24 +48,22 @@ export default {
   // background poller — the micro service and the 15s background download
   // ticker were removed in 1.0.20 (the user does not want background sync).
 
+  // 1.0.21: no keep-alive playback either. HyperBilibili's 挂后台 never played
+  // silent audio — its history shows `system.audio` only as a manifest
+  // declaration — so this app relies on the same declaration alone
+  // (manifest.config.background.features). If the crown-exit floating icon
+  // stops appearing, reintroduce the looping silent WAV (see git history of
+  // common/scripts/keepAliveAudio.js) rather than a resident hack.
+
   onShow() {
     this.visible = true
-    // Back on screen: the silent keep-alive loop is no longer needed, and the
-    // media entry on the watch face would only be stale.
-    keepAliveAudio.stop()
   },
 
   onHide() {
     this.visible = false
-    // The crown exit path: with a looping silent audio running the platform
-    // keeps the process alive and shows the media entry on the watch face, so
-    // tapping it returns to the app exactly as it was (HyperBilibili's way of
-    // 挂后台, commit 0ccb19b there).
-    keepAliveAudio.start()
   },
 
   onDestroy() {
-    keepAliveAudio.stop()
     console.log('app destroyed')
   }
 }
