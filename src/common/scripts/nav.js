@@ -21,9 +21,9 @@
 //           a transition is *proven* to work.
 //   1.0.3 — deferred replace, params-less replace and a deferred push, spread
 //           over 2.4s: still nothing, and the toast arrived at ~4s, i.e. after
-//           every rung. So form and timing are ruled out; the fault is the
-//           calling context or the target page. That is not something to keep
-//           guessing at — see pages/probe.
+//           every rung. Form and timing are ruled out; the page that failed to
+//           construct was the answer all along — see the note in pages/chat
+//           about `data` next to `protected`.
 //
 // Hence this ladder. Every attempt is deferred out of the touch callback, each
 // one varies exactly one thing, and the page is given time to appear before the
@@ -32,16 +32,9 @@
 //   +30ms    replace(uri, params)     the working form, deferred (splash's fix)
 //   +1300ms  replace(uri)             same form, no params — rules params out
 //   +2400ms  push(uri, params)        the other form, now deferred — rules form out
-//   +3900ms  replace('pages/probe')   a page that cannot fail on its own: if it
-//                                     opens, the router and the caller are fine
-//                                     and the target page is the problem; if it
-//                                     does not, transitions from this page are
-//                                     refused outright. It says so on screen, so
-//                                     one install answers what three rounds of
-//                                     guessing could not.
-//   +4700ms  still here → toast       plus the router's own before/after state
-//                                     on the page that asked, so the next
-//                                     report is a fact rather than a symptom.
+//   +3600ms  still here → toast       plus the router's own before/after state on
+//                                     the page that asked, so the next report is
+//                                     a fact rather than a symptom.
 //
 // "Did we get there?" no longer relies on the page's own lifecycle: a landed
 // transition on this firmware does not always run onHide/onDestroy, and 1.0.2's
@@ -60,13 +53,7 @@ const LADDER = [
   { at: 1300, form: 'replace', withParams: false },
   { at: 2400, form: 'push', withParams: true }
 ]
-// When every form has been refused for the real target, try a page that cannot
-// fail on its own. 1.0.3's toast proved the transition was issued and dropped
-// but could not say *who* is at fault: the calling page/context, or the target
-// page. pages/probe answers that on the device, and it says so on screen.
-const PROBE_AT = 3900
-const PROBE_URI = 'pages/probe'
-const GIVE_UP_AT = 4700
+const GIVE_UP_AT = 3600
 
 export function navigate(vm, uri, params, failMessage, onFail) {
   // A second tap inside the ladder would stack two transitions.
@@ -122,26 +109,7 @@ export function navigate(vm, uri, params, failMessage, onFail) {
   })
 
   timers.push(setTimeout(() => {
-    if (settled) return
-    if (moved(vm, uri, before)) {
-      settle(true)
-      return
-    }
-    // Everything was refused for the real target: ask the router to open a page
-    // that carries nothing but two lines of text.
-    console.log('navigate: every form dropped for ' + uri + ', probing the router')
-    try {
-      router.replace({ uri: PROBE_URI })
-    } catch (err) {
-      thrown.push('+' + PROBE_AT + 'ms probe: ' + ((err && err.message) || String(err)))
-    }
-  }, PROBE_AT))
-
-  timers.push(setTimeout(() => {
-    // The probe landing means the router works from here and the target page is
-    // what failed; the probe page itself says that, so there is no toast to add
-    // and nothing to explain.
-    if (moved(vm, 'pages/probe', before)) settle(true)
+    if (moved(vm, uri, before)) settle(true)
     else settle(false)
   }, GIVE_UP_AT))
 }

@@ -48,7 +48,10 @@ const ctx = {
 }
 runInNewContext(script, ctx)
 const scrollOffsets = []
-const page = Object.assign(ctx.page, ctx.page.data, {
+// The page declares its state under `private`, not `data`: a page VM may not
+// carry `data` and `protected` at the same time (see chat.ux), and `protected`
+// is how the room arrives.
+const page = Object.assign(ctx.page, ctx.page.private, {
   token: 'tokA',
   $t: (key) => key,
   $element: (id) => {

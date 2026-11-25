@@ -173,12 +173,24 @@ function trimLastChar(text) {
 }
 
 export default {
+  // The router hands this page its params through `protected`. On this VM a
+  // page may declare `protected`/`public`/`private` **or** `data` — never both:
+  //
+  //   Error: 页面VM对象中的属性data不可与"public,protected,private"同时存在，
+  //          请使用private替换data名称
+  //
+  // 1.0.4 shipped `protected` + `data` here, so the page VM was never created.
+  // The router issued the transition, the target page failed to build, and the
+  // list stayed on screen — indistinguishable from a tap that did nothing. It
+  // is also why the throwaway probe page (no params, no data) opened fine while
+  // this one did not. The state block is `private` for that reason; the same keys, the same
+  // reactivity, only a name the VM accepts next to `protected`.
   protected: {
     token: '',
     name: ''
   },
 
-  data: {
+  private: {
     title: '',
     messages: [],
     draft: '',

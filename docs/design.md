@@ -115,7 +115,7 @@ pages/login  ──submit──> api.getCurrentUser()
 
 pages/index  ──tap 会话──> state.activeRoom + shared.pendingRoom → nav.navigate(pages/chat, {token, name})
                           nav.navigate = 30ms replace(params) → 1300ms replace → 2400ms push
-                                         → 3900ms pages/probe（诊断页）→ 4700ms 仍未离开才 toast
+                                         → 3600ms 仍未离开才 toast + 头部留下路由器快照
                           （「到没到」比对 router.getState() 快照，不只看页面自己的 onHide）
 
 pages/chat   onInit  → 取 token：router params → shared.pendingRoom → state.activeRoom
@@ -295,17 +295,14 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 
 1.0.1 按「push 可能不落地」加了 push → 300ms → replace 的兜底，真机回报**会话仍然点不开，而且「刷新」也一起死了**。1.0.1 对点击路径的改动只有这个兜底和它依赖的 `leftPage`，所以问题就出在兜底本身：`push` 被丢弃时固件仍会触发当前页的 `onHide`（它响应的是「发起了跳转」，不是「跳转成功了」），`leftPage` 因此读到「已经离开」，重试被永久跳过——又一次静默无响应，还多了一个帮忙掩盖它的状态位。
 
-1.0.3 把三种形式都延后重试（+30ms `replace(params)`、+1300ms 无 params 的 `replace`、+2400ms 的 `push`），真机回报**约 4 秒才弹 toast**——即每一级都没落地。形式与时序因此都被排除，问题只剩「调用方/上下文」或「目标页本身」。这已经不是能靠猜收敛的区间了，所以 1.0.4 让手表自己回答：全部失败后再试跳一个**只有一个纯文本、除了 router 不依赖任何东西**的诊断页 `pages/probe`。
+1.0.3 把三种形式都延后重试（+30ms `replace(params)`、+1300ms 无 params 的 `replace`、+2400ms 的 `push`），真机回报**约 4 秒才弹 toast**——即每一级都没落地，形式与时序都被排除。1.0.4 因此临时加了一个只依赖 `@system.router` 的诊断页，用「它能打开、会话页打不开」证明了**路由与调用方都正常，是目标页建不出来**；真机日志随后给出了那句 `data` / `protected` 冲突的报错（见下一节），诊断页也在 1.0.6 删掉了。
 
 | 时间 | 做法 | 排除了什么 |
 | --- | --- | --- |
 | +30ms | `replace(uri, params)` | 同拍发送（splash 的 30ms 延后） |
 | +1300ms | `replace(uri)` | 参数：不带 params 也打不开就不是它 |
 | +2400ms | `push(uri, params)` | 形式：延后之后另一种形式也不行，就不是形式的问题 |
-| +3900ms | `replace('pages/probe')` | **责任方**：这个页面能打开 → 路由与调用方都正常，问题在目标页；打不开 → 从这个页面发起的跳转被整体拒绝 |
-| +4700ms | 仍未离开 → toast + 把路由器前后快照写进列表页头部 | 下一次报告是事实而不是症状 |
-
-诊断页自己写着「路由可用 / 目标页打不开」，并带一个「返回会话列表」（同样是延后 30ms 的 replace），所以它不是死胡同。它的包只有 9KB、只 import `@system.router`——如果连它都打不开，那一定不是页面内容的问题。
+| +3600ms | 仍未离开 → toast + 把路由器前后快照写进列表页头部 | 下一次报告是事实而不是症状 |
 
 另外，会话列表头部现在有一行状态（`正在加载…` / `已更新 N 个会话` / `✕ 失败原因` / `✕ 栈1:pages/index→1:pages/index`）。原因是「刷新」以前**没有任何可见反馈**：列表里已有卡片时没有转圈，而失败文案渲染在滚动区最后一张卡片下面，看不到。
 
@@ -316,6 +313,24 @@ AstroBox 插件用 `thirdpartyapp::launch-qa` 拉起 `pages/index`（旧固件�
 - 房间信息走两条通道：router params（`pages/chat` 的 `protected`）+ `$app.$def.shared.pendingRoom`（跨页对象，见 §9）。这也让「不带 params 的 replace」这一级有意义：chat 仍能从 `pendingRoom` 拿到房间。`pages/chat.onInit` 读完立刻清空，避免上一间房串到下一间。
 - 被 replace 打开的页面在栈底，`router.back()` 无处可去，所以 chat / settings / setup 的返回统一走 `nav.leave(ROUTE.home)`：`router.getState().index > 0` 才 `back()`，否则延后 30ms replace 回 `pages/index`（`leave` 的 replace 同样在触摸回调里，同样要延后）。
 
+
+### 页面 VM 不能同时声明 `data` 与 `protected`
+
+1.0.4 的真机日志给出了四轮排查的最终答案，每一次尝试跳转都打一条：
+
+```
+Error: 页面VM对象中的属性data不可与"public,protected,private"同时存在，请使用private替换data名称
+    at __scriptModule__ (.../pages/chat/chat.js:8659)
+```
+
+`pages/chat` 同时写了 `protected: { token, name }`（路由参数通道）和 `data: { ... }`。这块固件上页面 VM 因此**根本建不出来**：路由确实发出了跳转，目标页构造失败，调用页停在原地——和「点击没反应」从外面完全无法区分。这也解释了两件一直想不通的事：
+
+- 为什么当时那个 9 KB、无 params 也无 `data` 的临时诊断页能打开，而会话页打不开——**不是体积**，是页面构造时就被拒绝；
+- 为什么只有会话页和设置页死掉（1.0.0 时期）：chat 是唯一带 `protected` 的页面；设置页那次是 push 的问题。
+
+改法：`data` 整块改名为 `private`（报错信息本身的要求），`protected` 保留，键与响应式行为不变。
+
+`tests/page-vm.test.mjs` 对**每个**页面做静态检查：只要出现 `protected` / `public` / `private` 之一，就不允许再有 `data`；并单独钉住 chat「保留 protected + 用 private」。这条规则无法在桌面 Node 上跑出真实 VM 行为，只能靠静态断言，因此测试必须覆盖所有页面而不是点名 chat。
 
 ### 用户点了就必须有反应：状态位不能吞掉一次读取
 
