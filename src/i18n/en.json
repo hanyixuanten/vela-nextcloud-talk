@@ -32,7 +32,23 @@
     "errRequired": "All three fields are required",
     "errScheme": "Server address must use https://",
     "saved": "Connected",
-    "savedUnverified": "Saved; {message}"
+    "savedUnverified": "Saved; {message}",
+    "modeAccount": "Account",
+    "modePublic": "Public room",
+    "roomLink": "Room link",
+    "roomLinkHint": "https://cloud.example.com/call/abc123",
+    "roomPassword": "Password (optional)",
+    "roomPasswordHint": "Leave empty if the room has none",
+    "roomName": "Display name",
+    "roomNameHint": "The name others see",
+    "join": "Join room",
+    "joining": "Joining…",
+    "publicJoined": "Joined the room",
+    "errRoomLink": "That room link is not valid",
+    "errRoomToken": "No room token in that link",
+    "errRoomBase": "Enter the server first for a bare token",
+    "errRoomHost": "The link has no usable server",
+    "errRoomName": "A display name is required"
   },
   "index": {
     "title": "Chats",
@@ -54,7 +70,20 @@
     "settings": "Settings",
     "serverUnreachable": "Online, but the server is unreachable",
     "updated": "Updated {n} chats",
-    "noAccount": "No account configured"
+    "noAccount": "No account configured",
+    "publicRoom": "Public room",
+    "joined": "Joined {name}",
+    "publicEmpty": "Not in a room yet",
+    "publicEmptyHint": "Settings → Mode: enter the room link"
+  },
+  "public": {
+    "errNoRoom": "No room configured yet",
+    "errPassword": "Wrong room password",
+    "errNotFound": "No such room, or guests are not allowed",
+    "errBanned": "You are banned from that room",
+    "sessionLost": "The guest session expired, try again",
+    "noList": "A public room has no conversation list",
+    "noUser": "A public room has no account"
   },
   "chat": {
     "offline": "Offline",
@@ -90,7 +119,13 @@
     "saveFailed": "Could not save settings. Please try again.",
     "cleared": "Cleared",
     "clearFailed": "Could not clear data. Please try again.",
-    "clearAgain": "Tap again to confirm clearing"
+    "clearAgain": "Tap again to confirm clearing",
+    "mode": "Mode",
+    "modeAccount": "Account",
+    "modePublic": "Public room",
+    "room": "Room",
+    "switchedPublic": "Switched to the public room",
+    "switchedAccount": "Switched to the account"
   },
   "setup": {
     "title": "Set up from phone",
@@ -108,7 +143,9 @@
     "done": "Configured: {name}",
     "timeout": "No response from the server: check the watch's Wi-Fi and try again",
     "failed": "Setup failed",
-    "savedUnverified": "Saved; {message}"
+    "savedUnverified": "Saved; {message}",
+    "room": "Room",
+    "joining": "Joining the room…"
   },
   "splash": {
     "checking": "Checking network…",

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
 import { ROUTE } from './.build/launch.mjs'
+import { parseRoomLink, buildRoomLink } from './.build/roomlink.mjs'
 
 // The page script declares a helper before `export default`, so it is wrapped
 // in a function to keep the helper local and hand back the component object.
@@ -22,13 +23,16 @@ let toasts = 0
 const configured = []
 const state = { settings: null, ready: false }
 const page = runInNewContext('(function () {\n' + script.trim() + '\n})()', {
-  state, console, ROUTE,
+  state, console, ROUTE, parseRoomLink, buildRoomLink,
+  // The account path here never asks for a tab switch; the public path has its
+  // own suite (login-public.test.mjs).
+  sharedOf: () => ({}),
   api: {
     configure: (settings) => configured.push(settings),
     getCurrentUser: (settings) => validate(settings)
   },
   store: {
-    DEFAULT_SETTINGS: { baseUrl: '', user: '', appPassword: '', displayName: '' },
+    DEFAULT_SETTINGS: { baseUrl: '', user: '', appPassword: '', displayName: '', mode: 'account' },
     load: async () => ({ baseUrl: '', user: '', appPassword: '', displayName: '', keyboardType: 'QWERTY' }),
     save: async (settings) => {
       saves++

@@ -57,7 +57,8 @@ test('routes are page keys, exactly like the reference app', () => {
 test('the gate probes the network and routes by its verdict', () => {
   assert.match(splash, /import network from '\.\.\/\.\.\/common\/scripts\/network'/)
   assert.match(splash, /network\.checkSignal\(/)
-  assert.match(splash, /routeAfterGate\(signal\.online, store\.hasAccount/)
+  // "Configured" is either mode: an account, or a public conversation.
+  assert.match(splash, /routeAfterGate\(signal\.online, store\.isConfigured/)
   // The verdict has to be published before the replace, otherwise the page
   // being entered bounces straight back here.
   // The verdict goes onto the app instance, not into this page's copy of

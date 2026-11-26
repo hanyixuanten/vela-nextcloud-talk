@@ -23,6 +23,7 @@ mkdir -p "$BUILD"
 
 sed -e "s#from '@system.fetch'#from './fetch-double.mjs'#" \
     -e "s#from './base64'#from './base64.mjs'#" \
+    -e "s#from './store'#from './store.mjs'#" \
     "$ROOT/src/common/scripts/api.js" > "$BUILD/api.mjs"
 sed -e "s#from '@system.storage'#from './storage-double.mjs'#" \
     "$ROOT/src/common/scripts/store.js" > "$BUILD/store.mjs"
@@ -31,7 +32,9 @@ sed -e "s#from '@system.fetch'#from './fetch-double.mjs'#" \
     "$ROOT/src/common/scripts/network.js" > "$BUILD/network.mjs"
 cp "$ROOT/src/common/scripts/base64.js" "$BUILD/base64.mjs"
 cp "$ROOT/src/common/scripts/format.js" "$BUILD/format.mjs"
-cp "$ROOT/src/common/scripts/protocol.js" "$BUILD/protocol.mjs"
+cp "$ROOT/src/common/scripts/roomlink.js" "$BUILD/roomlink.mjs"
+sed -e "s#from './roomlink'#from './roomlink.mjs'#" \
+    "$ROOT/src/common/scripts/protocol.js" > "$BUILD/protocol.mjs"
 cp "$ROOT/src/common/scripts/launch.js" "$BUILD/launch.mjs"
 cp "$ROOT/src/common/scripts/textlayout.js" "$BUILD/textlayout.mjs"
 cp "$ROOT/src/common/scripts/shared.js" "$BUILD/shared.mjs"
@@ -42,6 +45,7 @@ cp "$ROOT/tests/network-double.mjs" "$BUILD/network-double.mjs"
 fail=0
 "$NODE" "$ROOT/tests/units.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/store.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/roomlink.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/protocol.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/setup.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/login-save.test.mjs" || fail=1
@@ -53,6 +57,8 @@ fail=0
 "$NODE" "$ROOT/tests/tap-recovery.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/chat.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/api.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/public-api.test.mjs" || fail=1
+"$NODE" "$ROOT/tests/login-public.test.mjs" || fail=1
 "$NODE" "$ROOT/tests/keepalive.test.mjs" || fail=1
 
 if [ "$fail" -eq 0 ]; then

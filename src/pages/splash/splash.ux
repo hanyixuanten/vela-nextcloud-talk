@@ -72,7 +72,7 @@ export default {
       .then((settings) => {
         state.settings = settings
         api.configure(settings)
-        state.ready = store.hasAccount(settings)
+        state.ready = store.isConfigured(settings)
         this.stage = this.$t('splash.stageNetwork')
         return network.checkSignal()
       })
@@ -84,7 +84,7 @@ export default {
         // Nothing is published about the verdict on purpose: pages/index must
         // not try to read it (that check is what looped), and the gate is
         // advisory anyway.
-        const target = routeAfterGate(signal.online, store.hasAccount(state.settings))
+        const target = routeAfterGate(signal.online, store.isConfigured(state.settings))
         console.log(
           'launch gate: type=' + (signal.type || 'unknown') + ' online=' + signal.online +
           ' → ' + target

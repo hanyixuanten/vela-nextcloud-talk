@@ -240,7 +240,13 @@ export default {
     error: '',
     fontScale: 'normal',
     fontSize: FONT_METRICS.normal.size,
-    keyboardType: 'QWERTY'
+    keyboardType: 'QWERTY',
+    // Who "mine" means. In account mode that is the Nextcloud user id; in
+    // public mode there is no user at all — the guest actor id (sha1 of the
+    // Talk session) and, as a fallback, the display name we joined with.
+    publicMode: false,
+    myActorId: '',
+    myName: ''
   },
 
   onInit() {
@@ -267,7 +273,7 @@ export default {
     this.settingsReady = store.load().then((settings) => {
       state.settings = settings
       api.configure(settings)
-      this.myUser = String(settings.user || '').toLowerCase()
+      this.applyIdentity(settings)
       this.keyboardType = settings.keyboardType || 'QWERTY'
     })
   },
@@ -303,9 +309,40 @@ export default {
     this.settingsReady = this.settingsReady.then(() => store.load()).then((settings) => {
       state.settings = settings
       api.configure(settings)
+      this.applyIdentity(settings)
       this.keyboardType = settings.keyboardType || 'QWERTY'
     })
     return this.settingsReady
+  },
+
+  /**
+   * Work out what "my own message" means for this room.
+   *
+   * Account mode compares the Nextcloud user id. A guest has none: Talk gives it
+   * a random actor id derived from its session (see api.js joinSession), which
+   * is persisted next to the session cookies, so the value survives the page
+   * change between joining and reading.
+   */
+  applyIdentity(settings) {
+    const s = settings || {}
+    this.publicMode = s.mode === 'public'
+    this.myUser = this.publicMode ? '' : String(s.user || '').toLowerCase()
+    this.myActorId = this.publicMode ? String(s.roomActorId || '').toLowerCase() : ''
+    this.myName = this.publicMode ? String(s.roomDisplayName || '') : ''
+  },
+
+  /**
+   * A guest is identified by its session; when this page never learned the actor
+   * id (a fresh session made by another page, or a server that rotated it) the
+   * name is the only signal left — and it is only trusted for guest actors, so
+   * it cannot claim a logged-in user's message.
+   */
+  isMine(actorId, message) {
+    if (!this.publicMode) return actorId === this.myUser
+    if (this.myActorId && actorId === this.myActorId) return true
+    if (message && message.actorType && message.actorType !== 'guests') return false
+    const name = String((message && message.actorDisplayName) || '')
+    return Boolean(this.myName) && name === this.myName
   },
 
   onHide() {
@@ -587,7 +624,7 @@ export default {
   toView(message) {
     const actorId = String(message.actorId || '').toLowerCase()
     const isSystem = Boolean(message.systemMessage)
-    const mine = !isSystem && actorId === this.myUser
+    const mine = !isSystem && this.isMine(actorId, message)
     const author = clipDisplay(String(message.actorDisplayName || ''), 48)
     const reactable = !isSystem && message.deleted !== true && (!message.messageType || message.messageType === 'comment')
     const mask = reactable ? reactionMask(message) : 0

@@ -123,5 +123,90 @@ test('accepts a Vela object and echoes request_id on success and failure', () =>
   assert.equal(protocol.buildAck(failure).request_id, 'cfg-2')
 })
 
+test('a v1 message still means an account', () => {
+  // An older plugin must not be locked out by the new watch build.
+  const result = protocol.parseCredentialMessage(VALID)
+  assert.equal(result.ok, true)
+  assert.equal(result.config.mode, 'account')
+  assert.equal(result.config.roomToken, '')
+})
+
+test('v2 parses a public conversation from a link', () => {
+  const raw = JSON.stringify({
+    v: 2,
+    kind: 'credentials',
+    mode: 'public',
+    room_link: 'https://cloud.example.com/index.php/call/ABC123?password=pa%20ss',
+    display_name: ' 小明 ',
+    request_id: 'cfg-pub'
+  })
+  const result = protocol.parseCredentialMessage(raw)
+  assert.equal(result.ok, true)
+  assert.equal(result.requestId, 'cfg-pub')
+  assert.equal(result.config.mode, 'public')
+  assert.equal(result.config.baseUrl, 'https://cloud.example.com')
+  assert.equal(result.config.roomToken, 'abc123')
+  assert.equal(result.config.roomPassword, 'pa ss')
+  assert.equal(result.config.roomDisplayName, '小明')
+  assert.equal(result.config.user, '')
+  assert.equal(result.config.appPassword, '')
+})
+
+test('v2 accepts an explicit token and password instead of a link', () => {
+  const raw = JSON.stringify({
+    v: 2,
+    kind: 'credentials',
+    mode: 'public',
+    base_url: 'https://example.com/nextcloud/',
+    room_token: ' PubPass ',
+    room_password: 'secret',
+    display_name: '小明'
+  })
+  const result = protocol.parseCredentialMessage(raw)
+  assert.equal(result.ok, true)
+  assert.equal(result.config.baseUrl, 'https://example.com/nextcloud')
+  assert.equal(result.config.roomToken, 'pubpass')
+  assert.equal(result.config.roomPassword, 'secret')
+})
+
+test('a typed password wins over the one inside the link', () => {
+  const raw = JSON.stringify({
+    v: 2,
+    kind: 'credentials',
+    mode: 'public',
+    room_link: 'https://cloud.example.com/call/abc123?password=from-link',
+    room_password: 'typed',
+    display_name: '小明'
+  })
+  assert.equal(protocol.parseCredentialMessage(raw).config.roomPassword, 'typed')
+})
+
+test('a public message is rejected field by field', () => {
+  const base = { v: 2, kind: 'credentials', mode: 'public', base_url: 'https://cloud.example.com' }
+  // No token at all.
+  assert.match(protocol.parseCredentialMessage(JSON.stringify(Object.assign({}, base, { display_name: '小明' }))).error, /令牌/)
+  // Token too short.
+  assert.match(protocol.parseCredentialMessage(JSON.stringify(Object.assign({}, base, { room_token: 'ab', display_name: '小明' }))).error, /令牌/)
+  // No name: an unnamed guest cannot be told apart from everyone else.
+  assert.match(protocol.parseCredentialMessage(JSON.stringify(Object.assign({}, base, { room_token: 'abc123' }))).error, /显示名称/)
+  // Plain http, like the account path.
+  assert.equal(protocol.parseCredentialMessage(JSON.stringify(Object.assign({}, base, {
+    base_url: 'http://cloud.example.com', room_token: 'abc123', display_name: '小明'
+  }))).ok, false)
+})
+
+test('an unparsable link is a link error, not a token error', () => {
+  const raw = JSON.stringify({
+    v: 2, kind: 'credentials', mode: 'public', room_link: 'cloud.example.com/call/abc123', display_name: '小明'
+  })
+  assert.match(protocol.parseCredentialMessage(raw).error, /链接/)
+})
+
+test('the ack shape did not change with v2', () => {
+  // ui.rs on the plugin side deserialises exactly these three keys.
+  const ack = protocol.buildAck({ ok: true, message: '已保存', displayName: '小明', requestId: 'r1' })
+  assert.deepEqual(ack, { ok: true, message: '已保存', display_name: '小明', request_id: 'r1' })
+})
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)

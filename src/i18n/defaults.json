@@ -32,7 +32,23 @@
     "errRequired": "请填写全部三项",
     "errScheme": "服务器地址必须使用 https://",
     "saved": "已连接",
-    "savedUnverified": "已保存；{message}"
+    "savedUnverified": "已保存；{message}",
+    "modeAccount": "账号",
+    "modePublic": "公开聊天室",
+    "roomLink": "聊天室链接",
+    "roomLinkHint": "https://cloud.example.com/call/abc123",
+    "roomPassword": "密码（可留空）",
+    "roomPasswordHint": "没有密码就留空",
+    "roomName": "显示名称",
+    "roomNameHint": "其他人看到的名字",
+    "join": "进入聊天室",
+    "joining": "正在加入…",
+    "publicJoined": "已进入聊天室",
+    "errRoomLink": "聊天室链接无效",
+    "errRoomToken": "链接里没有聊天室令牌",
+    "errRoomBase": "只填令牌时要先填服务器",
+    "errRoomHost": "链接里的服务器地址无效",
+    "errRoomName": "请填写显示名称"
   },
   "index": {
     "title": "会话",
@@ -54,7 +70,20 @@
     "settings": "设置",
     "serverUnreachable": "网络正常，但服务器不可达",
     "updated": "已更新 {n} 个会话",
-    "noAccount": "未配置账号"
+    "noAccount": "未配置账号",
+    "publicRoom": "公开聊天室",
+    "joined": "已进入 {name}",
+    "publicEmpty": "还没有进入聊天室",
+    "publicEmptyHint": "在 设置 → 模式 里填房间链接"
+  },
+  "public": {
+    "errNoRoom": "尚未设置聊天室",
+    "errPassword": "聊天室密码不正确",
+    "errNotFound": "聊天室不存在，或未开放访客访问",
+    "errBanned": "你已被禁止进入该聊天室",
+    "sessionLost": "访客会话已失效，请重试",
+    "noList": "公开聊天室没有会话列表",
+    "noUser": "公开聊天室没有账号信息"
   },
   "chat": {
     "offline": "离线",
@@ -90,7 +119,13 @@
     "saveFailed": "保存失败，请重试",
     "cleared": "已清除",
     "clearFailed": "清除失败，请重试",
-    "clearAgain": "再次点击确认清除"
+    "clearAgain": "再次点击确认清除",
+    "mode": "模式",
+    "modeAccount": "账号",
+    "modePublic": "公开聊天室",
+    "room": "聊天室",
+    "switchedPublic": "已切换到公开聊天室",
+    "switchedAccount": "已切换到账号模式"
   },
   "setup": {
     "title": "从手机配置",
@@ -108,7 +143,9 @@
     "done": "已配置：{name}",
     "timeout": "服务器没有响应：先确认手表已连上 Wi-Fi，再重试",
     "failed": "配置失败",
-    "savedUnverified": "已保存；{message}"
+    "savedUnverified": "已保存；{message}",
+    "room": "聊天室",
+    "joining": "正在加入聊天室…"
   },
   "splash": {
     "checking": "正在检查网络…",
