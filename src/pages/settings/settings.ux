@@ -13,8 +13,13 @@
 
     <scroll class="scroll" scroll-y="{{true}}">
       <div class="list">
+        <div class="row" @click="toggleMode">
+          <text class="row-label">{{ $t('settings.mode') }}</text>
+          <text class="row-value">{{ publicMode ? $t('settings.modePublic') : $t('settings.modeAccount') }}</text>
+        </div>
+
         <div class="row" @click="openAccount">
-          <text class="row-label">{{ $t('settings.account') }}</text>
+          <text class="row-label">{{ publicMode ? $t('settings.room') : $t('settings.account') }}</text>
           <text class="row-value">{{ accountLabel }}</text>
         </div>
 
@@ -49,12 +54,14 @@ import state from '../../common/scripts/state'
 import api from '../../common/scripts/api'
 import { ROUTE } from '../../common/scripts/launch'
 import nav from '../../common/scripts/nav'
+import { sharedOf } from '../../common/scripts/shared'
 import manifest from '../../manifest.json'
 
 export default {
   data: {
     version: manifest.versionName,
     accountLabel: '',
+    publicMode: false,
     keyboardType: 'QWERTY',
     clearArmed: false
   },
@@ -62,7 +69,7 @@ export default {
   onInit() {
     store.load().then((settings) => {
       state.settings = settings
-      state.ready = store.hasAccount(settings)
+      state.ready = store.isConfigured(settings)
       this.keyboardType = settings.keyboardType || 'QWERTY'
       this.refreshLabels(settings)
     })
@@ -85,11 +92,57 @@ export default {
 
   refreshLabels(settings) {
     const s = settings || {}
-    if (store.hasAccount(s)) {
-      this.accountLabel = s.user + '@' + String(s.baseUrl).replace(/^https?:\/\//, '')
-    } else {
-      this.accountLabel = this.$t('settings.notSet')
+    const host = String(s.baseUrl || '').replace(/^https?:\/\//, '')
+    this.publicMode = s.mode === 'public'
+    if (this.publicMode) {
+      // A guest has no user name to show; the room token is what identifies the
+      // configuration, and the guest name is next to it.
+      this.accountLabel = store.hasPublicRoom(s)
+        ? '#' + s.roomToken + (s.roomDisplayName ? ' · ' + s.roomDisplayName : '') + '@' + host
+        : this.$t('settings.notSet')
+      return
     }
+    if (store.hasAccount(s)) {
+      this.accountLabel = s.user + '@' + host
+      return
+    }
+    this.accountLabel = this.$t('settings.notSet')
+  },
+
+  /**
+   * Switch between the two modes.
+   *
+   * Switching only writes `mode` when the other mode is already configured —
+   * otherwise it would put the app into a mode it cannot connect with. When it
+   * is not configured yet, the login page opens on that tab instead, which is
+   * also where the fields live.
+   */
+  toggleMode() {
+    if (this.modeBusy) return
+    const settings = state.settings || {}
+    const target = settings.mode === 'public' ? 'account' : 'public'
+    const ready = target === 'public' ? store.hasPublicRoom(settings) : store.hasAccount(settings)
+    if (!ready) {
+      const shared = sharedOf(this, state)
+      if (shared && shared !== state) shared.pendingMode = target
+      nav.navigate(this, ROUTE.login, null, this.$t('common.openFailed'))
+      return
+    }
+    this.modeBusy = true
+    this.persist({ mode: target })
+      .then(() => {
+        this.modeBusy = false
+        prompt.showToast({
+          message: target === 'public' ? this.$t('settings.switchedPublic') : this.$t('settings.switchedAccount'),
+          duration: 1500
+        })
+        // The list page reads the stored mode on show, so going back is enough.
+        nav.leave(ROUTE.home)
+      })
+      .catch((err) => {
+        this.modeBusy = false
+        this.handlePersistFailure(err)
+      })
   },
 
   persist(patch) {

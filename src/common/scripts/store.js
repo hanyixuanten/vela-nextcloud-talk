@@ -11,10 +11,30 @@ import storage from '@system.storage'
 const KEY_SETTINGS = 'nctalk.settings'
 
 export const DEFAULT_SETTINGS = {
+  // Two ways into the same app:
+  //   account — Nextcloud account + app password (HTTP Basic)
+  //   public  — a public conversation joined as a guest (link + optional
+  //             password + display name), no account at all
+  // `hasAccount()` stays account-only; `isConfigured()` answers "is either mode
+  // ready", which is what the launch gate and the pages actually ask.
+  mode: 'account',
+
   baseUrl: '',
   user: '',
   appPassword: '',
   displayName: '',
+
+  // Public conversation (mode: 'public').
+  roomToken: '',
+  roomPassword: '',
+  roomDisplayName: '',
+  // Filled in by api.js after a successful guest join: the room title, the
+  // guest actor id (sha1 of the Talk session) and the session cookies. Keeping
+  // them on disk is what lets every page — each one is its own bundle with its
+  // own copy of api.js — reuse one guest identity instead of joining again.
+  roomName: '',
+  roomActorId: '',
+  sessionCookies: '',
 
   // Keyboard: QWERTY | T9 (forwarded to the InputMethod component).
   keyboardType: 'QWERTY'
@@ -138,6 +158,15 @@ function normalize(settings) {
   merged.baseUrl = String(merged.baseUrl || '').trim().replace(/\/+$/, '')
   merged.user = String(merged.user || '').trim()
   merged.appPassword = String(merged.appPassword || '').trim()
+  merged.mode = merged.mode === 'public' ? 'public' : 'account'
+  // Talk tokens are lowercase by definition ([a-z0-9]{4,30}); a token pasted
+  // from a link in upper case would otherwise 404 on every request.
+  merged.roomToken = String(merged.roomToken || '').trim().toLowerCase()
+  merged.roomPassword = String(merged.roomPassword || '').trim()
+  merged.roomDisplayName = String(merged.roomDisplayName || '').trim()
+  merged.roomName = String(merged.roomName || '').trim()
+  merged.roomActorId = String(merged.roomActorId || '').trim()
+  merged.sessionCookies = String(merged.sessionCookies || '').trim()
   // Retention is always on; a value written by 1.0.14 and earlier would only
   // confuse the next reader of this object.
   delete merged.backgroundKeep
@@ -149,9 +178,28 @@ function normalize(settings) {
   return merged
 }
 
+/** Account mode only: server + user + app password. */
 function hasAccount(settings) {
   const s = settings || {}
   return Boolean(s.baseUrl && s.user && s.appPassword)
+}
+
+/** Public mode only: server + room token. The display name is optional to the
+ * API (Talk shows "Guest"), so it is not part of "usable". */
+function hasPublicRoom(settings) {
+  const s = settings || {}
+  return Boolean(s.baseUrl && s.roomToken)
+}
+
+function isPublic(settings) {
+  const s = settings || {}
+  return s.mode === 'public'
+}
+
+/** Either mode is ready to connect. This is the question pages ask. */
+function isConfigured(settings) {
+  const s = settings || {}
+  return isPublic(s) ? hasPublicRoom(s) : hasAccount(s)
 }
 
 function load() {
@@ -186,6 +234,9 @@ function clearAll() {
 export default {
   DEFAULT_SETTINGS,
   hasAccount,
+  hasPublicRoom,
+  isPublic,
+  isConfigured,
   load,
   save,
   clearAll

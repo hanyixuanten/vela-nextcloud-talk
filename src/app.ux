@@ -34,7 +34,8 @@ export default {
     store.load()
       .then((settings) => {
         state.settings = settings
-        state.ready = store.hasAccount(settings)
+        // Either mode counts: account or public conversation.
+        state.ready = store.isConfigured(settings)
         api.configure(settings)
         console.log('app created, configured=' + state.ready)
       })

@@ -12,25 +12,57 @@
     <div class="layout" if="{{!editing}}">
       <div class="top">
         <text class="t-display brand">{{ $t('app.name') }}</text>
-        <text class="t-caption tagline">{{ $t('login.subtitle') }}</text>
+        <!-- The two ways into the app. This replaced the "Nextcloud Talk"
+             tagline: the mode is the first thing the form depends on, and the
+             tagline only repeated the app name. `if` moves the fields, so the
+             two forms never share a slot. -->
+        <div class="modes">
+          <div class="mode {{ mode === 'account' ? 'mode-on' : '' }}" @click="switchMode('account')">
+            <text class="mode-text {{ mode === 'account' ? 'mode-text-on' : '' }}">{{ $t('login.modeAccount') }}</text>
+          </div>
+          <div class="mode {{ mode === 'public' ? 'mode-on' : '' }}" @click="switchMode('public')">
+            <text class="mode-text {{ mode === 'public' ? 'mode-text-on' : '' }}">{{ $t('login.modePublic') }}</text>
+          </div>
+        </div>
       </div>
 
       <div class="form">
-        <div class="field" @click="startEdit(0)">
+        <!-- Account: server, user, app password. -->
+        <div class="field" if="{{mode === 'account'}}" @click="startEdit(0)">
           <text class="t-label field-label">{{ $t('login.server') }}</text>
           <text class="field-value {{ server ? '' : 'field-empty' }}">{{ server || $t('login.serverHint') }}</text>
         </div>
-        <div class="field" @click="startEdit(1)">
+        <div class="field" if="{{mode === 'account'}}" @click="startEdit(1)">
           <text class="t-label field-label">{{ $t('login.user') }}</text>
           <text class="field-value {{ user ? '' : 'field-empty' }}">{{ user || $t('login.userHint') }}</text>
         </div>
-        <div class="field" @click="startEdit(2)">
+        <div class="field" if="{{mode === 'account'}}" @click="startEdit(2)">
           <text class="t-label field-label">{{ $t('login.password') }}</text>
           <text class="field-value {{ appPassword ? '' : 'field-empty' }}">{{ appPassword ? maskedPassword : $t('login.passwordHint') }}</text>
         </div>
 
+        <!-- Public conversation: the share link, an optional password, and the
+             name the other participants see. The link carries the server, so
+             there is no separate server field and the form stays three rows on
+             the round screen. -->
+        <div class="field" if="{{mode === 'public'}}" @click="startEdit(0)">
+          <text class="t-label field-label">{{ $t('login.roomLink') }}</text>
+          <text class="field-value {{ roomLink ? '' : 'field-empty' }}">{{ roomLink || $t('login.roomLinkHint') }}</text>
+        </div>
+        <div class="field" if="{{mode === 'public'}}" @click="startEdit(1)">
+          <text class="t-label field-label">{{ $t('login.roomPassword') }}</text>
+          <text class="field-value {{ roomPassword ? '' : 'field-empty' }}">{{ roomPassword ? maskedRoomPassword : $t('login.roomPasswordHint') }}</text>
+        </div>
+        <div class="field" if="{{mode === 'public'}}" @click="startEdit(2)">
+          <text class="t-label field-label">{{ $t('login.roomName') }}</text>
+          <text class="field-value {{ roomName ? '' : 'field-empty' }}">{{ roomName || $t('login.roomNameHint') }}</text>
+        </div>
+
         <div class="connect">
-          <app-pill text="{{ submitting ? $t('login.connecting') : $t('login.connect') }}"
+          <!-- One label, computed in syncSubmitLabel(): a nested ternary
+               here would be the only one of its kind in the app, and this
+               string is the page's single call to action. -->
+          <app-pill text="{{ submitLabel }}"
                     width="100%" primary="{{true}}" busy="{{submitting}}" @click="submit"></app-pill>
         </div>
 
@@ -48,12 +80,13 @@
     <!-- No dismiss key on the keyboard: tapping the label/value area closes it. -->
     <div class="edit-panel" if="{{editing}}">
       <div class="edit-top" @click="stopEdit">
-        <text class="t-label" if="{{activeIndex === 0}}">{{ $t('login.server') }}</text>
-        <text class="t-label" if="{{activeIndex === 1}}">{{ $t('login.user') }}</text>
-        <text class="t-label" if="{{activeIndex === 2}}">{{ $t('login.password') }}</text>
-        <text class="edit-value" if="{{activeIndex === 0}}">{{ server || $t('login.serverHint') }}_</text>
-        <text class="edit-value" if="{{activeIndex === 1}}">{{ user || $t('login.userHint') }}_</text>
-        <text class="edit-value" if="{{activeIndex === 2}}">{{ maskedPassword }}_</text>
+        <text class="t-label" if="{{activeIndex === 0}}">{{ mode === 'public' ? $t('login.roomLink') : $t('login.server') }}</text>
+        <text class="t-label" if="{{activeIndex === 1}}">{{ mode === 'public' ? $t('login.roomPassword') : $t('login.user') }}</text>
+        <text class="t-label" if="{{activeIndex === 2}}">{{ mode === 'public' ? $t('login.roomName') : $t('login.password') }}</text>
+
+        <text class="edit-value" if="{{activeIndex === 0}}">{{ mode === 'public' ? (roomLink || $t('login.roomLinkHint')) : (server || $t('login.serverHint')) }}_</text>
+        <text class="edit-value" if="{{activeIndex === 1}}">{{ mode === 'public' ? maskedRoomPassword : (user || $t('login.userHint')) }}_</text>
+        <text class="edit-value" if="{{activeIndex === 2}}">{{ mode === 'public' ? (roomName || $t('login.roomNameHint')) : maskedPassword }}_</text>
       </div>
 
       <div class="edit-actions">
@@ -92,6 +125,8 @@ import api from '../../common/scripts/api'
 import store from '../../common/scripts/store'
 import state from '../../common/scripts/state'
 import { ROUTE } from '../../common/scripts/launch'
+import { sharedOf } from '../../common/scripts/shared'
+import { parseRoomLink, buildRoomLink } from '../../common/scripts/roomlink'
 
 function trimLastChar(text) {
   const source = String(text || '')
@@ -104,33 +139,100 @@ function trimLastChar(text) {
   return source.slice(0, source.length - 1)
 }
 
+function withoutSlash(value) {
+  return String(value || '').trim().replace(/\/+$/, '')
+}
+
 export default {
   data: {
+    mode: 'account',
+
+    // Account mode.
     server: '',
     user: '',
     appPassword: '',
     maskedPassword: '',
+
+    // Public mode.
+    roomLink: '',
+    roomPassword: '',
+    maskedRoomPassword: '',
+    roomName: '',
+
     editing: false,
     activeIndex: -1,
     submitting: false,
+    submitLabel: '',
     error: '',
     keyboardType: 'QWERTY'
   },
 
   onInit() {
-    store.load().then((settings) => {
+    // A settings row can send the user straight to the tab it wants to edit.
+    const shared = sharedOf(this, state)
+    const pending = shared && shared.pendingMode
+    if (shared && shared.pendingMode) shared.pendingMode = null
+
+    this.settingsReady = store.load().then((settings) => {
+      // The submit handlers merge into what is stored, so the page has to know
+      // it even when it opened straight onto the form (no splash in between).
+      state.settings = settings
+      this.mode = pending === 'public' || (!pending && settings.mode === 'public') ? 'public' : 'account'
       this.server = settings.baseUrl || 'https://'
       this.user = settings.user || ''
       this.appPassword = settings.appPassword || ''
+      this.roomLink = buildRoomLink(settings.baseUrl, settings.roomToken)
+      this.roomPassword = settings.roomPassword || ''
+      this.roomName = settings.roomDisplayName || ''
       this.syncMasked()
+      this.syncSubmitLabel()
       this.keyboardType = settings.keyboardType || 'QWERTY'
+      return settings
     })
   },
 
   syncMasked() {
+    this.maskedPassword = this.maskFor(this.appPassword)
+    this.maskedRoomPassword = this.maskFor(this.roomPassword)
+  },
+
+  maskFor(value) {
     let dots = ''
-    for (let i = 0; i < this.appPassword.length; i += 1) dots += '•'
-    this.maskedPassword = dots
+    for (let i = 0; i < String(value || '').length; i += 1) dots += '•'
+    return dots
+  },
+
+  switchMode(target) {
+    const next = target === 'public' ? 'public' : 'account'
+    if (this.mode === next) return
+    this.mode = next
+    this.editing = false
+    this.activeIndex = -1
+    this.error = ''
+    this.syncSubmitLabel()
+  },
+
+  /**
+   * Navigation on this firmware can be dropped silently (nav.js retries and
+   * then only toasts), so a successful submit must not leave the button stuck
+   * in 'connecting…': that would be a page with no working action left.
+   */
+  releaseSubmit() {
+    this.submitting = false
+    this.syncSubmitLabel()
+  },
+
+  /**
+   * The button says what the tap will do in the current mode, and while it is
+   * running says what it is doing. Kept as data rather than written into the
+   * template so there is one place to read, and one place to test.
+   */
+  syncSubmitLabel() {
+    if (this.submitting) {
+      this.submitLabel = this.mode === 'public' ? this.$t('login.joining') : this.$t('login.connecting')
+      return
+    }
+    this.submitLabel = this.mode === 'public' ? this.$t('login.join') : this.$t('login.connect')
   },
 
   startEdit(index) {
@@ -153,6 +255,14 @@ export default {
   },
 
   applyText(value) {
+    if (this.mode === 'public') {
+      if (this.activeIndex === 0) this.roomLink += value
+      else if (this.activeIndex === 1) {
+        this.roomPassword += value
+        this.syncMasked()
+      } else if (this.activeIndex === 2) this.roomName += value
+      return
+    }
     if (this.activeIndex === 0) this.server += value
     else if (this.activeIndex === 1) this.user += value
     else if (this.activeIndex === 2) {
@@ -162,6 +272,14 @@ export default {
   },
 
   removeText() {
+    if (this.mode === 'public') {
+      if (this.activeIndex === 0) this.roomLink = trimLastChar(this.roomLink)
+      else if (this.activeIndex === 1) {
+        this.roomPassword = trimLastChar(this.roomPassword)
+        this.syncMasked()
+      } else if (this.activeIndex === 2) this.roomName = trimLastChar(this.roomName)
+      return
+    }
     if (this.activeIndex === 0) this.server = trimLastChar(this.server)
     else if (this.activeIndex === 1) this.user = trimLastChar(this.user)
     else if (this.activeIndex === 2) {
@@ -184,10 +302,32 @@ export default {
     router.replace({ uri: ROUTE.setup })
   },
 
+  /** Why a pasted link could not be split, in words a wrist can act on. */
+  describeLinkError(error) {
+    if (error === 'scheme') return this.$t('login.errScheme')
+    if (error === 'base') return this.$t('login.errRoomBase')
+    if (error === 'token') return this.$t('login.errRoomToken')
+    if (error === 'host') return this.$t('login.errRoomHost')
+    return this.$t('login.errRoomLink')
+  },
+
   submit() {
     if (this.submitting) return
+    if (this.mode === 'public') {
+      this.submitPublic()
+      return
+    }
+    this.submitAccount()
+  },
 
-    const baseUrl = String(this.server || '').trim().replace(/\/+$/, '')
+  /**
+   * Account mode. Persist before validating: the app password was typed on a
+   * watch keyboard and a failed round trip must not discard it. Validation only
+   * adds the display name, and a rejection leaves the user on this page with
+   * what they typed already stored, ready to be corrected.
+   */
+  submitAccount() {
+    const baseUrl = withoutSlash(this.server)
     const user = String(this.user || '').trim()
     const appPassword = String(this.appPassword || '').trim()
 
@@ -203,24 +343,22 @@ export default {
     this.editing = false
     this.activeIndex = -1
     this.submitting = true
+    this.syncSubmitLabel()
     this.error = ''
 
     const previous = state.settings || store.DEFAULT_SETTINGS
     const candidate = Object.assign({}, previous, {
+      mode: 'account',
       baseUrl: baseUrl,
       user: user,
       appPassword: appPassword
     })
     // A stored display name belongs to the account it was fetched for.
-    const previousBase = String(previous.baseUrl || '').replace(/\/+$/, '')
+    const previousBase = withoutSlash(previous.baseUrl)
     if (previousBase !== baseUrl || previous.user !== user) {
       candidate.displayName = ''
     }
 
-    // Persist before validating: the app password was typed on a watch
-    // keyboard and a failed round trip must not discard it. Validation only
-    // adds the display name, and a rejection leaves the user on this page with
-    // what they typed already stored, ready to be corrected.
     let persisted = false
     store.save(candidate)
       .then((saved) => {
@@ -236,14 +374,109 @@ export default {
             state.settings = named
             api.configure(named)
             prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
+            this.releaseSubmit()
             router.replace({ uri: ROUTE.home })
           })
       })
       .catch((err) => {
         this.submitting = false
+        this.syncSubmitLabel()
         const reason = err && err.message ? err.message : this.$t('login.errRequired')
         // Keep the client on what is actually on disk, so a retry only has to
         // correct the wrong field.
+        api.configure(state.settings || {})
+        this.error = persisted
+          ? this.$t('login.savedUnverified', { message: reason })
+          : reason
+      })
+  },
+
+  /**
+   * Public mode. Same order as the account form — write, then join — for the
+   * same reason: the link and the name were typed on the watch, and the join is
+   * a network round trip that can fail for reasons that say nothing about the
+   * input. A rejection still leaves a configured room on disk, and the join's
+   * own error (wrong password / not a public room) is what the user sees.
+   */
+  submitPublic() {
+    // A bare token is only usable when a server is already known (the account
+    // tab or a previous configuration put one in this same field).
+    const server = withoutSlash(this.server)
+    const parsed = parseRoomLink(this.roomLink, /^https:\/\//i.test(server) ? server : '')
+    if (!parsed.ok) {
+      this.error = this.describeLinkError(parsed.error)
+      return
+    }
+    if (!/^https:\/\//i.test(parsed.baseUrl)) {
+      this.error = this.$t('login.errScheme')
+      return
+    }
+    const roomName = String(this.roomName || '').trim()
+    if (!roomName) {
+      this.error = this.$t('login.errRoomName')
+      return
+    }
+    // A link pasted from Talk may carry `?password=`; the field always wins
+    // when it has something in it.
+    const roomPassword = String(this.roomPassword || '').trim() || parsed.password || ''
+
+    this.editing = false
+    this.activeIndex = -1
+    this.submitting = true
+    this.syncSubmitLabel()
+    this.error = ''
+
+    const previous = state.settings || store.DEFAULT_SETTINGS
+    const candidate = Object.assign({}, previous, {
+      mode: 'public',
+      baseUrl: parsed.baseUrl,
+      roomToken: parsed.token,
+      roomPassword: roomPassword,
+      roomDisplayName: roomName
+    })
+    // The guest session (cookies + actor id) and the cached title belong to one
+    // conversation; carrying them to another would replay a dead session.
+    const sameRoom = withoutSlash(previous.baseUrl) === parsed.baseUrl &&
+      String(previous.roomToken || '').toLowerCase() === parsed.token
+    if (!sameRoom) {
+      candidate.roomName = ''
+      candidate.roomActorId = ''
+      candidate.sessionCookies = ''
+    }
+
+    let persisted = false
+    store.save(candidate)
+      .then((saved) => {
+        persisted = true
+        state.settings = saved
+        state.ready = true
+        api.configure(saved)
+        return api.joinPublicRoom()
+          .then((room) => {
+            // api.js already wrote the session record; keep this page's copy in
+            // step so the page we navigate to starts from the same guest.
+            const session = api.getSession ? api.getSession() : {}
+            const named = Object.assign({}, saved, {
+              roomName: room.name || saved.roomName || saved.roomToken,
+              roomActorId: session.actorId || saved.roomActorId,
+              sessionCookies: session.cookies || saved.sessionCookies
+            })
+            return store.save(named).catch(() => named)
+          })
+          .then((named) => {
+            state.settings = named
+            api.configure(named)
+            prompt.showToast({ message: this.$t('login.publicJoined'), duration: 1500 })
+            this.releaseSubmit()
+            router.replace({ uri: ROUTE.home })
+          })
+      })
+      .catch((err) => {
+        this.submitting = false
+        this.syncSubmitLabel()
+        const reason = err && err.message ? err.message : this.$t('login.errRoomLink')
+        // Fall back to what is on disk: a rejected join must not leave the API
+        // client pointed at a half-written candidate.
         api.configure(state.settings || {})
         this.error = persisted
           ? this.$t('login.savedUnverified', { message: reason })
@@ -266,8 +499,11 @@ export default {
   align-items: center;
 }
 
+/* Tall enough for the brand plus the two mode tabs (44 + 6 + 30). The tagline
+ * that used to live here was replaced by them, so the height grew by one row
+ * and the form below it stays inside the round screen. */
 .top {
-  height: 96px;
+  height: 108px;
   padding-top: 12px;
   flex-direction: column;
   justify-content: center;
@@ -278,8 +514,38 @@ export default {
   font-size: 44px;
 }
 
-.tagline {
+/* Account / public switch. Two tabs, one of them filled with the accent: the
+ * same "selected" language as the rest of the UI, no extra chrome. */
+.modes {
+  width: 74%;
+  height: 30px;
   margin-top: 6px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mode {
+  width: 48%;
+  height: 30px;
+  border-radius: 15px;
+  background-color: #1f1f1f;
+  justify-content: center;
+  align-items: center;
+}
+
+.mode-on {
+  background-color: #ff7da8;
+}
+
+.mode-text {
+  font-size: 17px;
+  font-weight: 600;
+  color: #9c9c9c;
+}
+
+.mode-text-on {
+  color: #1a1a1a;
 }
 
 .form {
@@ -394,10 +660,13 @@ export default {
 
 /* if true: process.env.SHAPE === 'CIRCLE' */
 .top {
-  height: 96px;
+  height: 108px;
   padding-top: 26px;
 }
 .form, .edit-top, .edit-actions {
+  width: 74%;
+}
+.modes {
   width: 74%;
 }
 .edit-actions {
@@ -416,6 +685,9 @@ export default {
   padding-top: 8px;
 }
 .form, .edit-top, .edit-actions {
+  width: 86%;
+}
+.modes {
   width: 86%;
 }
 .field {

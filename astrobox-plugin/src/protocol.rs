@@ -6,16 +6,32 @@ use serde_json::Value;
 
 /// Package name of the watch app. Must match the watch manifest's `package`.
 pub const PKG_NAME: &str = "com.hanyixuanten.nctalk";
-pub const PROTOCOL_VERSION: u32 = 1;
+/// v2 adds `mode` and the public-conversation fields. The watch still accepts a
+/// v1 message (account only), but a v1 message must not be what this build
+/// sends: it cannot express the public mode at all.
+pub const PROTOCOL_VERSION: u32 = 2;
+pub const MODE_ACCOUNT: &str = "account";
+pub const MODE_PUBLIC: &str = "public";
 const TIMEOUT_PREFIX: &str = "nctalk-send-timeout:";
+/// Longest branch of Talk's room token rule; the watch re-validates.
+const MAX_TOKEN_LEN: usize = 30;
+const MIN_TOKEN_LEN: usize = 4;
 
+/// One message shape for both modes: the watch reads `mode` and ignores the
+/// fields that belong to the other one, so an account message still carries
+/// (empty) room keys and a public message still carries (empty) user keys.
 #[derive(Serialize)]
 struct CredentialMessage<'a> {
     v: u32,
     kind: &'a str,
+    mode: &'a str,
     base_url: &'a str,
     user: &'a str,
     app_password: &'a str,
+    room_link: &'a str,
+    room_token: &'a str,
+    room_password: &'a str,
+    display_name: &'a str,
     request_id: &'a str,
 }
 
@@ -121,16 +137,89 @@ pub fn normalize_server(server: &str) -> Option<String> {
 
 pub fn build_credential_message(server: &str, user: &str, password: &str, request_id: &str) -> String {
     let normalized_server = normalize_server(server).unwrap_or_default();
-    let message = CredentialMessage {
+    serialize(CredentialMessage {
         v: PROTOCOL_VERSION,
         kind: "credentials",
+        mode: MODE_ACCOUNT,
         base_url: normalized_server.as_str(),
         user: user.trim(),
         app_password: password,
+        room_link: "",
+        room_token: "",
+        room_password: "",
+        display_name: "",
         request_id,
-    };
+    })
+}
+
+/// Public conversation: the room link the user pasted, the optional password,
+/// and the name the watch will show to the room.
+///
+/// The link is sent as-is (trimmed) instead of being split here: the watch owns
+/// room-link parsing (`src/common/scripts/roomlink.js`), so there is exactly one
+/// implementation of it, and its error text is what the user ends up reading.
+/// `base_url` therefore stays empty in this mode.
+pub fn build_public_message(
+    room_link: &str,
+    room_password: &str,
+    display_name: &str,
+    request_id: &str,
+) -> String {
+    serialize(CredentialMessage {
+        v: PROTOCOL_VERSION,
+        kind: "credentials",
+        mode: MODE_PUBLIC,
+        base_url: "",
+        user: "",
+        app_password: "",
+        room_link: room_link.trim(),
+        room_token: "",
+        room_password,
+        display_name: display_name.trim(),
+        request_id,
+    })
+}
+
+fn serialize(message: CredentialMessage<'_>) -> String {
     // A struct containing only strings and a u32 always serializes to JSON.
     serde_json::to_string(&message).expect("credential message serialization")
+}
+
+/// The same checks the watch will make, run before a send: the panel is where
+/// the user can fix the input, and a round trip that ends in "聊天室链接无效"
+/// costs 40 s of waiting for the timer.
+pub fn validate_public_input(room_link: &str, display_name: &str) -> Result<(), String> {
+    if display_name.trim().is_empty() {
+        return Err("请填写显示名称：聊天室里看不到用户名，只有这个名字。".to_string());
+    }
+    let link = room_link.trim();
+    if link.is_empty() {
+        return Err("请粘贴聊天室链接，或填想进的房间令牌。".to_string());
+    }
+    if link.contains("://") {
+        // Validation only looks at the link without its query: `?password=` is
+        // legitimate and `normalize_server` rejects any `?` outright.
+        let head = link.split('?').next().unwrap_or(link);
+        if normalize_server(head).is_none() {
+            return Err("聊天室链接无效：应形如 https://服务器/call/令牌。".to_string());
+        }
+        return Ok(());
+    }
+    // The watch lower-cases the token before validating, so `ABC123` is fine.
+    if !valid_token(&link.to_ascii_lowercase()) {
+        return Err(format!(
+            "聊天室令牌无效：{MIN_TOKEN_LEN}–{MAX_TOKEN_LEN} 位小写字母或数字。"
+        ));
+    }
+    Ok(())
+}
+
+pub fn valid_token(token: &str) -> bool {
+    let len = token.len();
+    (MIN_TOKEN_LEN..=MAX_TOKEN_LEN).contains(&len)
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
 }
 
 #[derive(Debug, Deserialize)]

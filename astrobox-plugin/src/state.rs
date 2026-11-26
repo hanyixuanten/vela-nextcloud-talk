@@ -8,6 +8,15 @@
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+/// The two ways into the watch app. Everything the panel shows after the mode
+/// switch belongs to one of them, and `begin_send` builds a different message
+/// for each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Account,
+    Public,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
     Idle,
@@ -54,9 +63,17 @@ pub struct State {
     pub host: String,
     /// None = not probed yet, Some(false) = Talk is not installed.
     pub app_installed: Option<bool>,
+    /// Which form is on screen and which message `begin_send` builds.
+    pub mode: Mode,
+    /// Account mode.
     pub server: String,
     pub user: String,
     pub password: String,
+    /// Public mode: the room link (or bare token), its optional password, and
+    /// the name the other participants will see.
+    pub room_link: String,
+    pub room_password: String,
+    pub display_name: String,
     pub status: Status,
     pub pending: Option<PendingSend>,
     pub next_request: u64,
@@ -78,9 +95,13 @@ impl Default for State {
             probe_seq: 0,
             host: String::new(),
             app_installed: None,
+            mode: Mode::Account,
             server: String::new(),
             user: String::new(),
             password: String::new(),
+            room_link: String::new(),
+            room_password: String::new(),
+            display_name: String::new(),
             status: Status::Idle,
             pending: None,
             next_request: 0,

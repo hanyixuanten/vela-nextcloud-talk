@@ -100,12 +100,20 @@ app.ux onCreate
 pages/splash（路由入口）onShow
    └─ store.load() → network.checkNetwork(settings)
         ├─ 离线 → replace('/offline')  ──重试──> 回到 pages/splash（重新探测）
-        └─ 在线 → ├─ 无账号 → replace('/setup')
-                   └─ 有账号 → replace('/')   （pages/index 会话列表）
+        └─ 在线 → ├─ 未配置 → replace('/setup')
+                   └─ 已配置 → replace('/')   （pages/index 会话列表）
 
 pages/index onShow
-   └─ 无账号 → replace('/setup')；有账号 → refresh()
+   └─ 未配置 → replace('/setup')
+      已配置 → refresh()：账号模式 listConversations()，公开模式 publicRoom()
         （**没有**「是否通过网络门」的检查：跨 bundle 读不到那个值，一读就弹回 splash）
+
+pages/login  ──「账号」标签──> api.getCurrentUser()
+             ├─ ok   → store.save → replace('/')
+             └─ fail → 留在本页，显示错误
+             ──「公开聊天室」标签──> api.joinPublicRoom()
+             ├─ ok   → store.save（含 roomName/roomActorId/sessionCookies）→ replace('/')
+             └─ fail → 留在本页，显示 join 自己的错误（密码错 / 房间不开放）
 
 pages/login  ──submit──> api.getCurrentUser()
                           ├─ ok   → store.save → replace('/')
@@ -133,10 +141,17 @@ pages/chat   onInit  → 取 token：router params → shared.pendingRoom → st
 ```jsonc
 // nctalk.settings
 {
+  "mode": "account",          // account | public
   "baseUrl": "https://cloud.example.com",
-  "user": "alice",
+  "user": "alice",            // 账号模式
   "appPassword": "xxxxx-xxxxx-xxxxx-xxxxx-xxxxx",
   "displayName": "Alice",
+  "roomToken": "abc123",      // 公开模式
+  "roomPassword": "",
+  "roomDisplayName": "小明",
+  "roomName": "公开群",        // 上次 join 到的房间标题，仅用于显示
+  "roomActorId": "9f2c…",     // sha1(sessionId)，聊天页判断「我发的」
+  "sessionCookies": "spreed-session=…; spreed-guest-id=…",
   "keyboardType": "QWERTY",   // QWERTY | T9
   "screenType": "circle",     // circle | rect
   "pollInterval": 15000,
@@ -160,7 +175,9 @@ pages/chat   onInit  → 取 token：router params → shared.pendingRoom → st
 | 凭证类型 | 应用密码 | 不用账号密码；丢失设备只需吊销单条应用密码 |
 | 传输 | 强制 HTTPS | 客户端拒绝 HTTP；请求里不做证书 pinning，仍依赖系统 TLS 校验 |
 | 本地存储 | 明文 | **Vela 没有 keystore API**，`@system.storage` 是应用沙箱内的普通存储，root 或提权后可见；清除本地账号后应在 Nextcloud 吊销应用密码 |
-| 密码回显 | 掩码为 `•` | 输入态也只显示掩码 |
+| 密码回显 | 掩码为 `•` | 输入态也只显示掩码（房间密码同样处理） |
+| 访客会话 | 会话 cookie 明文存盘 | 与账号同一个沙箱；cookie 只在有效期内有用，换房间时会被清掉，没有账号权限可用 |
+| 房间密码 | 明文存盘 | 与账号密码同因：Vela 没有 keystore；它只保护「进这个房间」，泄露后应在 Talk 里改房间密码 |
 | 日志 | 不打印凭证 | `api.js` 只在失败时打错误文案，不打 header |
 
 明文存储是平台限制，不是实现选择。缓解手段只有：用应用密码而不是账号密码、定期轮换、丢失设备时立即吊销。
@@ -392,3 +409,39 @@ HyperBilibili 的评论区就是「固定高度预览 → 点开是整段文本�
 3. **详情页 `onDestroy` 清掉正文**，它只服务一条消息。
 
 `tests/chat.test.mjs` 钉住 13.1 与 13.2（顺序、窗口保留哪一端、四行预览、`more` 标志、`openDetail` 的参数），`tests/layout.test.mjs` 钉住详情页的像素预算。
+
+## 14. 两种模式：账号与公开聊天室（1.2.0）
+
+需求是「没有 Nextcloud 账号的人也能用」：Talk 的公开聊天室（分享链接）本来就允许访客加入，只要链接、房间密码（房间设了才要）和显示名称。这一版把它做成与账号并列的第二种模式，而不是砍掉账号——两套配置各自留在 storage 里，`mode` 只决定当前用哪一套。
+
+### 14.1 一份 parser，两个入口
+
+房间链接的解析只有一份实现：`src/common/scripts/roomlink.js`。登录页、设置页、`protocol.js`（手机推来的凭据）都走它，插件则**故意不解析**、原样把手里的链接发过来——两边各写一套才是这类功能最容易出的分歧（`/index.php/call/` 认不认、`?password=` 取不取、裸令牌算不算）。
+
+解析结果固定是 `{baseUrl, token, password}` 或 `{ok:false, error}`，错误码 `empty/scheme/host/token/base` 各有各的文案，因为用户能修的动作完全不同：`scheme` 是把 `http` 改成 `https`，`base` 是先填服务器，`token` 是链接贴错了。
+
+### 14.2 访客身份：会话 cookie，不是 token
+
+```
+POST /room/{token}/participants/active {password?, force:true}  → 200 + Set-Cookie
+POST /guest/{token}/name {displayName}                          → 之后的请求都带 Cookie
+```
+
+Vela 的 `fetch` 没有 cookie jar（只接受 `url/data/header/method/responseType`），所以 `api.js` 自己接管：`absorbCookies()` 解析 `set-cookie`（数组和逗号拼接两种形态都见过），`jar` 存 `name=value`，`Cookie:` 头由客户端拼。会话连同 `actorId` 一起写进 storage，于是访客在三个页面 bundle（login/index/chat）之间是同一个人。
+
+三个由此而来的规则：
+
+1. **`force: true` 恒定**：访客没有「等待室」这条路，`force: false` 只会换来 409。
+2. **会话死了只重放一次**：Talk 用会话解析 participant，解析不到就回 **404**（不是 401）。`request()` 捕获这个形状 → 重新 join → 重放原请求。重放也失败就报「访客会话已失效」并在 30 秒内不再 join：Talk 对 token 请求有防爆破限流，反复 join 还会往房间里刷「访客加入」系统消息。这条策略由 `tests/public-api.test.mjs` 的两个用例钉住（能恢复 / 不循环）。
+3. **「我发的」靠 `actorId`**：访客的 `actorId` 是 `sha1(sessionId)`，join 响应里会给、聊天消息里也带。聊天页优先比 `actorId`；拿不到时退回到「访客 + 同显示名称」，并**只对 `actorType === 'guests'` 的消息**生效，免得同名冒充登录用户。
+
+### 14.3 两个模式共用的东西
+
+- **落盘顺序**：都是「先写再验证」。公开模式的验证只能是 join，join 失败（密码错、房间不许访客）也保留输入，页面上的错误直接用 join 的说法。
+- **换房间清会话**：`roomToken` 变了就清掉 `roomName/roomActorId/sessionCookies`——访客 cookie 是按房间发的，带过去只会让新房间的第一条请求 404 再触发一次 join。
+- **设置里的「模式」一行**：另一种模式没配置时点了不写 `mode`，而是带 `shared.pendingMode` 跳到登录页的对应标签——写进去只会让应用落到一个连不上的模式。
+- **动作一致**：发送、已读、回应、引用、长消息、输入法、轮询全部沿用账号模式那套；公开模式没有的只是「会话列表」这件事（`pages/index` 显示单张卡片，`refresh()` 改读 `publicRoom()`）。
+
+### 14.4 版本与形状
+
+1.2.0 起 `versionName 1.2.0 / versionCode 40`，插件 `0.1.15`。协议升到 v2，但手表仍接受 v1（按「账号模式」处理），插件则要求手表至少能读 v2——不匹配时在手表的版本检查处明确失败，不会存半套配置。

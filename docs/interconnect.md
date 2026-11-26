@@ -1,6 +1,15 @@
 # 从手机配置 Nextcloud 凭据
 
-AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 Talk。手表**先把凭据落到 storage，再用自己的网络调用 `GET /ocs/v2.php/cloud/user` 校验**：校验只决定要不要补上显示名和回执的成功/失败，不决定凭据是否保存——密码是在手机上敲的，一次超时或一次输错都不该让它丢掉。所以回执 `ok:false` 的含义是「校验没通过」，文字里同时会说明凭据已保存。插入的应用密码只应授予此设备并通过 HTTPS 使用；插件不把密码写盘。
+AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 Talk。手表**先把凭据落到 storage，再用自己的网络请求校验**：校验只决定要不要补上显示名和回执的成功/失败，不决定凭据是否保存——输入是在手机上敲的，一次超时或一次输错都不该让它丢掉。所以回执 `ok:false` 的含义是「校验没通过」，文字里同时会说明凭据已保存。插入的应用密码只应授予此设备并通过 HTTPS 使用；插件不把密码写盘。
+
+两种模式共用一套消息和回执，靠 `mode` 区分：
+
+| 模式 | 手机填 | 手表校验 | 手表落盘的其他字段 |
+| --- | --- | --- | --- |
+| `account` | HTTPS 服务器、用户名、应用密码 | `GET /ocs/v2.php/cloud/user` | `displayName` |
+| `public` | 房间链接（或令牌）、房间密码（可空）、显示名称 | `POST …/room/{token}/participants/active` 真的 join 一次 | `roomName`、`roomActorId`、`sessionCookies` |
+
+公开模式的校验只能是 join：链路（服务器 + 令牌 + 密码）里任何一环错了，只有 join 会说出来。join 成功后手表顺手把会话 cookie 和 `actorId` 存进 storage，所以从配置页退出来进聊天页时还是同一个访客。
 
 ## 使用和真机验收
 
@@ -9,14 +18,27 @@ AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 T
 3. 打开手机的「Talk 凭据配置」，确保 AstroBox 只连接需要配置的那一块表，输入 HTTPS 地址、用户名和应用密码后发送。确认手表先写 storage、随后显示校验并在通过后进入会话列表；同时确认手机收到成功回执。重开 Talk，确保配置仍存在。
 4. 再用错误的应用密码测试：两边都应显示失败，但手表上保存的已经是这次发来的凭据（回执文字带「已保存；」前缀），在手表「设置 → 账号」里改正即可。最后退出手表配置页再发送，确认手机报告超时而不是一直显示发送中，且可重试。
 5. 两种屏幕分别检查主页、设置、配置页，以及登录和聊天的键盘、返回键、发送键是否可见且可点。
+6. 公开聊天室单独走一遍：插件里切到「公开聊天室」，填一个**设了密码**的房间链接（也可以只填令牌，这时手表上必须已经有服务器地址）和显示名称。手表应先保存、再 join、最后回执「已保存（房间名）」；错的密码应在手表上显示「聊天室密码不正确」而凭据仍然保留。join 成功后直接进聊天列表，应看到单张房间卡片；发一条消息，房间里立刻可见且作者是好显示名。再在手表上杀掉应用重开，仍能继续发消息（会话 cookie 存在 storage 里）；把 Nextcloud 上的访客会话清掉（或重启 PHP 会话）后再拉一次，应自动恢复而不是报错。
 
-## 协议（v1）
+## 协议（v2）
 
-手机发送 UTF-8 JSON 字符串；手表的 `onmessage` 也兼容已解码的对象：
+手机发送 UTF-8 JSON 字符串；手表的 `onmessage` 也兼容已解码的对象。两种模式共用同一个消息形状，另一模式的字段留空字符串：
 
 ```json
-{"v":1,"kind":"credentials","request_id":"cfg-1","base_url":"https://cloud.example.com","user":"alice","app_password":"example"}
+{"v":2,"kind":"credentials","mode":"account","request_id":"cfg-1","base_url":"https://cloud.example.com","user":"alice","app_password":"example","room_link":"","room_token":"","room_password":"","display_name":""}
 ```
+
+```json
+{"v":2,"kind":"credentials","mode":"public","request_id":"cfg-2","base_url":"","user":"","app_password":"","room_link":"https://cloud.example.com/index.php/call/abc123?password=pa%20ss","room_token":"","room_password":"","display_name":"小明"}
+```
+
+公开模式的三条约定：
+
+- **链接原样传，由手表解析。** 房间链接的解析只有一份实现（[`src/common/scripts/roomlink.js`](../src/common/scripts/roomlink.js)：`/call/`、`/index.php`、`/apps/spreed`、路径前缀、`?password=`、裸令牌），插件再实现一份就会两边判断不一致。所以插件只做「非空 + 服务器地址像 https」这种就地能改的检查，真正能否使用由手表的回执说。
+- **密码优先级**：`room_password` 非空时用它的值；为空时才采用链接里 `?password=` 的那个。手表登录页上的行为一致。
+- **显示名称必填**：访客没有用户名，聊天室里只有这个名字，空名字等于匿名发言。
+
+`v:1` 的消息仍然被接受，含义是「账号模式」（旧插件配新手表不会失效）。反过来不行：旧手表收到 `v:2` 会在版本检查处明确失败，返回「插件版本与手表应用不匹配（协议 v2）」，而不是存半套配置。
 
 手表将对象交给 Vela `connect.send({ data: … })` 序列化：
 
@@ -24,7 +46,7 @@ AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 T
 {"ok":true,"message":"已保存","display_name":"Alice","request_id":"cfg-1"}
 ```
 
-`request_id` 是可选字符串：手表在回执原样带回，用于区分重试后到达的旧回执。旧版请求无此字段时仍能处理。非凭据消息或无法解析的消息忽略；`kind: credentials` 但版本或参数不正确时返回失败回执。协议实现见 [手表端](../src/common/scripts/protocol.js) 与 [插件端](../astrobox-plugin/src/protocol.rs)。
+`request_id` 是可选字符串：手表在回执原样带回，用于区分重试后到达的旧回执。旧版请求无此字段时仍能处理。非凭据消息或无法解析的消息忽略；`kind: credentials` 但版本或参数不正确时返回失败回执。协议实现见 [手表端](../src/common/scripts/protocol.js) 与 [插件端](../astrobox-plugin/src/protocol.rs)，两边的字段名与版本常量都由 `tests/protocol.test.mjs` 与 `astrobox-plugin/tests/protocol.rs` 各自钉住。
 
 ## 宿主事件与限制
 
@@ -43,7 +65,7 @@ AstroBox 插件只负责把用户输入的凭据通过蓝牙发给手表上的 T
 
 | 现象 | 先检查 |
 | --- | --- |
-| 面板停在「正在检测设备…」 | 枚举是在 async 回调里等待的：宿主没返回就一直停在这句。看 AstroBox 日志里有没有 `permission request start 'device'`——有就是前端权限弹窗在等确认，没有就是插件没有发起调用（版本不对，重装当前版本 0.1.14）。 |
+| 面板停在「正在检测设备…」 | 枚举是在 async 回调里等待的：宿主没返回就一直停在这句。看 AstroBox 日志里有没有 `permission request start 'device'`——有就是前端权限弹窗在等确认，没有就是插件没有发起调用（版本不对，重装当前版本 0.1.15）。 |
 | 面板显示「已连接 0 / 已配对 0」 | 说明 `device` 权限没有拿到（前端授权被拒时宿主只返回空列表，不报错）。三条出路：① 在插件权限里把「设备」打开，恢复自动枚举；② 保持面板打开，在 AstroBox 里断手表再连一次，插件会从 `device-action` 直接拿到地址并显示「目标：<手表名>」；③ 把 AstroBox 设备详情里的地址填进「设备地址（高级）」，填了就不再枚举——启动与发送只需要 `thirdpartyapp` / `interconnect` 权限。 |
 | 面板一直显示「没有已连接的设备」 | 先点「重新检测设备」。插件会枚举 AstroBox 当前**已连接**的设备，只配对未连接不算；仍然为空时在 AstroBox 里断开重连手表。设备单独连上/断开时宿主会推 `device-action`，面板会自动重测，不必关掉重开。 |
 | 面板显示「已配对但当前未连接」 | 宿主管道暂时没建立，发送时会再尝试一次；失败请先在 AstroBox 里连接手表。 |

@@ -1,12 +1,18 @@
 # Nextcloud Talk 接口清单
 
-所有请求由 `src/common/scripts/api.js` 发出，统一走 OCS JSON API。
+所有请求由 `src/common/scripts/api.js` 发出，统一走 OCS JSON API。客户端有两种模式，同一套端点由不同的认证方式进入：
+
+| 模式 | 认证 | 进入条件 |
+| --- | --- | --- |
+| `account` | 每请求 `Authorization: Basic …` | 服务器 + 用户名 + 应用密码 |
+| `public` | 先 join 拿到会话 cookie，之后每请求 `Cookie: spreed-session=…` | 房间链接（或令牌）+ 房间密码（房间有就要）+ 显示名称 |
 
 ## 公共请求头
 
 | 头 | 值 | 为什么必须 |
 | --- | --- | --- |
-| `Authorization` | `Basic base64(user:appPassword)` | 应用密码认证，不用账号密码 |
+| `Authorization` | `Basic base64(user:appPassword)` | **仅账号模式**：应用密码认证，不用账号密码 |
+| `Cookie` | `spreed-session=…` | **仅公开模式**：Talk 用 PHP 会话认访客，见下节 |
 | `OCS-APIRequest` | `true` | 缺了会返回登录页 HTML，解析报错难以定位 |
 | `Accept` | `application/json` | Talk 的 `reactions` 结构会让 XML 响应非法 |
 
@@ -26,6 +32,44 @@ OCS 把真实数据包在 `ocs` 里：
 ```
 
 `api.js` 判定成功的条件是：HTTP 2xx **且**（`meta.statuscode` 为 `100`、`200` 或与 HTTP 状态码一致，或没有 `meta` 但 body 可解析）。OCS v2 可能在 `meta.statuscode` 里返回 HTTP 状态码，例如发送成功时的 `201`。
+
+## 公开聊天室（访客）端点
+
+### 加入房间
+
+```
+POST /ocs/v2.php/apps/spreed/api/v4/room/{token}/participants/active
+{ "password": "房间密码", "force": true }
+```
+
+`password` 只在房间有密码时才带——Talk 把「没有 password 字段」理解为「这个房间不需要密码」。`force: true` 跳过 409（等待室／需批准）那条分支，访客没有别的选择。成功时 `ocs.data` 是房间对象，并**同时下发会话 cookie**：
+
+```
+Set-Cookie: spreed-session=…; path=/; HttpOnly
+Set-Cookie: spreed-guest-id=…; path=/; HttpOnly
+```
+
+失败：`403 {error:"password"}` 密码错、`403 {error:"ban"}` 被踢、`404` 房间不存在或没开「允许访客」。Vela 的 `fetch` 没有 cookie jar，所以 `api.js` 自己解析 `Set-Cookie`（数组或逗号拼接两种形态都处理），存进 `@system.storage` 的 `sessionCookies`，之后手动拼 `Cookie:` 头。
+
+`ocs.data.sessionId` 与 `ocs.data.actorId` 要留下：访客的 `actorId` 是 `sha1(sessionId)`，聊天消息里的 `actorId` 就是它，聊天页靠这个判断「我发的」。
+
+### 设置访客显示名
+
+```
+POST /ocs/v2.php/apps/spreed/api/v1/guest/{token}/name
+{ "displayName": "小明" }
+```
+
+必须带上一步的会话 cookie；没有会话时 `404`（找不到 participant），不是 `401`。这是官方网页客户端的做法（`participantsService.joinConversation` → `guestName.setGuestUserName`）。发送消息时另外在 body 里带 `actorDisplayName`，两者一致即可。
+
+### 会话失效与重新加入
+
+访客会话一死（服务器重启、cookie 过期、房间被关、应用数据被清），后续任何请求都会拿到 **404**（Talk 通过会话解析 participant，解析不到就是「会话不存在」），而不是 401。此时 `api.js` 会重新 join 一次并**重放那条请求**：
+
+- 重放成功 → 会话恢复，访客可能是同一个（cookie 还在时）或一个新的 actorId；
+- 重放还是 404 → 报「访客会话已失效，请重试」，并在 30 秒内不再重新 join。Talk 对 token 请求有防爆破限流（`talkRoomToken`），反复 join 还会往房间里刷「访客加入」系统消息，所以宁可停下来让用户看见。
+
+公开模式下没有会话列表可用（`GET /room` 是账号视图）；`publicRoom()` 用 `GET /ocs/v2.php/apps/spreed/api/v4/room/{token}` 读这一个房间的标题与最后消息。
 
 ## 端点
 
@@ -53,7 +97,7 @@ GET /ocs/v2.php/apps/spreed/api/v4/room?includeStatus=0
 | `lastMessage` | 消息预览（Rich Object String） |
 | `unreadMessages` | 未读角标 |
 
-同一个端点也被后台的 keeper 微服务调用（`src/services/keeper.js`），间隔为 `max(pollInterval, 30s)`，只取上述字段写入本地摘要 `nctalk.keeper`；它不拉消息正文，也不改已读标记。设计见 [design.md 第 12 节](design.md)。
+这个端点只在前台调用：会话页 `onShow` 刷新一次。1.0.20 起后台的 keeper 微服务与进程内 ticker 已整体拆除（用户明确不需要后台消息同步，后台留存只靠 manifest 声明），所以服务端不会看到来自手表的定时轮询。`tests/keepalive.test.mjs` 钉住这条形态。
 
 ### 拉取消息
 

@@ -5,7 +5,9 @@
     <image class="app-bg" src="/common/images/bg/pink.png"></image>
 
     <div class="head">
-      <text class="t-title">{{ $t('index.title') }}</text>
+      <!-- In public mode "会话" would be a promise the page cannot keep: a
+           guest only ever sees the one room it was configured for. -->
+      <text class="t-title">{{ publicMode ? $t('index.publicRoom') : $t('index.title') }}</text>
       <!-- One line, always about the last thing the page did. 刷新 used to have
            no visible feedback at all: with rooms already on screen there is no
            spinner, and a failure only rendered inside the (scrollable) list,
@@ -39,8 +41,8 @@
              build, so all three (~300px together) were appended after the last
              card and could be scrolled into as empty space. -->
         <div class="empty" if="{{!loading && !error && rooms.length === 0}}">
-          <text class="t-body">{{ $t('index.empty') }}</text>
-          <text class="empty-hint">{{ $t('index.emptyHint') }}</text>
+          <text class="t-body">{{ publicMode ? $t('index.publicEmpty') : $t('index.empty') }}</text>
+          <text class="empty-hint">{{ publicMode ? $t('index.publicEmptyHint') : $t('index.emptyHint') }}</text>
         </div>
 
         <div class="empty" if="{{!loading && error}}">
@@ -76,6 +78,10 @@ export default {
     rooms: [],
     loading: false,
     error: '',
+    // Public conversation mode: the "list" holds exactly one room, the one the
+    // watch is configured for. Same cards, same footer, same navigation — the
+    // only difference is where refresh() gets the row from.
+    publicMode: false,
     accountLabel: '',
     // One short line in the header: 正在加载… / 加载失败：… / 跳转失败：…
     // The watch has no console, so anything that goes wrong has to be readable
@@ -92,7 +98,8 @@ export default {
     this.readyPromise = store.load().then((settings) => {
       state.settings = settings
       api.configure(settings)
-      state.ready = store.hasAccount(settings)
+      state.ready = store.isConfigured(settings)
+      this.publicMode = settings.mode === 'public'
       return settings
     })
   },
@@ -132,8 +139,13 @@ export default {
       // before this page is ever built — so an entry without it (the AstroBox
       // plugin launches pages/index directly) simply fetches and reports its
       // own errors.
-      this.accountLabel = settings.displayName || settings.user || ''
-      if (!store.hasAccount(settings)) {
+      this.publicMode = settings.mode === 'public'
+      // The header says who we are in the current mode: the account's display
+      // name, or the guest name given to the public conversation.
+      this.accountLabel = this.publicMode
+        ? (settings.roomDisplayName || settings.roomName || '')
+        : (settings.displayName || settings.user || '')
+      if (!store.isConfigured(settings)) {
         // First launch: land where the AstroBox plugin can actually reach us.
         // /setup listens on interconnect; /login does not.
         router.replace({ uri: ROUTE.setup })
@@ -174,12 +186,20 @@ export default {
     this.statusLine = this.$t('index.loading')
 
     const current = () => token === this.fetchToken
-    api.listConversations()
+    // Account mode lists the account's conversations; public mode has exactly
+    // one, and reading it is also what joins the guest session when this page
+    // bundle has not got one yet.
+    const read = this.publicMode
+      ? api.publicRoom().then((room) => [room])
+      : api.listConversations()
+    read
       .then((rooms) => {
         if (!current()) return
         this.rooms = rooms.map((room) => this.toView(room))
         state.rooms = this.rooms
-        this.statusLine = this.$t('index.updated').replace('{n}', this.rooms.length)
+        this.statusLine = this.publicMode
+          ? this.$t('index.joined').replace('{name}', this.rooms.length ? this.rooms[0].name : '')
+          : this.$t('index.updated').replace('{n}', this.rooms.length)
       })
       .catch((err) => {
         if (!current()) return
@@ -218,10 +238,12 @@ export default {
 
   toView(room) {
     const name = room.displayName || room.name || room.token
+    const preview = fmt.previewWithAuthor(room.lastMessage) ||
+      (this.publicMode ? this.$t('index.publicRoom') : '')
     return {
       token: room.token,
       name: name,
-      preview: fmt.previewWithAuthor(room.lastMessage),
+      preview: preview,
       time: fmt.formatTime(room.lastActivity),
       unread: room.unreadMessages || 0,
       initial: fmt.initials(name),

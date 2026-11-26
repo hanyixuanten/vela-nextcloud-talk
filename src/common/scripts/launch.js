@@ -31,13 +31,14 @@ export const ROUTE = {
 
 /**
  * Where the launch gate sends the app.
- * `online` is the verdict from network.checkNetwork; `hasAccount` decides
- * between first-run setup and the conversation list, and never overrides the
- * network verdict.
+ * `online` is the verdict from network.checkSignal; `configured` decides between
+ * first-run setup and the main screen, and never overrides the network verdict.
+ * "Configured" covers both modes: an account with an app password, or a public
+ * conversation joined as a guest — store.isConfigured() answers it.
  */
-export function routeAfterGate(online, hasAccount) {
+export function routeAfterGate(online, configured) {
   if (!online) return ROUTE.offline
-  if (!hasAccount) return ROUTE.setup
+  if (!configured) return ROUTE.setup
   return ROUTE.home
 }
 
