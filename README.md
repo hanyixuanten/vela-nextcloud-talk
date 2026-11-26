@@ -94,7 +94,7 @@ PATH="$HOME/.cargo/bin:$PATH" python3 scripts/build_dist.py --release --package
 npm test          # 或 sh tests/run.sh
 ```
 
-JS 回归测试包括基础工具、凭据协议、配置页接收与确认流程、聊天分页/顺序/长消息与轮询，以及针对模拟 Nextcloud 的接口集成测试。启动网络门由 `tests/network.test.mjs`（接口类型判定、探针只作证据）和 `tests/launch-gate.test.mjs`（入口页路由决策）守住；`tests/layout.test.mjs` 是一组纯静态的布局断言，守住设计像素尺寸、`if` 显隐、键盘占位，以及**每个 `<scroll>` 必须是「屏幕高 − 固定 chrome」的像素高度（`flex: 1` 会让这块固件把内容压进视口、滚不动）**——这些只能靠真机才能发现的问题。`tests/navigation.test.mjs` 守住跳转链，`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」。
+JS 回归测试包括基础工具、凭据协议（v1/v2 双向兼容）、房间链接解析、配置页接收与确认流程、登录页的两种模式、聊天分页/顺序/长消息与轮询，以及针对模拟 Nextcloud 的接口集成测试（账号模式一套，访客模式另一套：cookie 重放、会话失效后的恢复、以及「不产生 join 循环」）。启动网络门由 `tests/network.test.mjs`（接口类型判定、探针只作证据）和 `tests/launch-gate.test.mjs`（入口页路由决策）守住；`tests/layout.test.mjs` 是一组纯静态的布局断言，守住设计像素尺寸、`if` 显隐、键盘占位，以及**每个 `<scroll>` 必须是「屏幕高 − 固定 chrome」的像素高度（`flex: 1` 会让这块固件把内容压进视口、滚不动）**——这些只能靠真机才能发现的问题。`tests/navigation.test.mjs` 守住跳转链，`tests/page-vm.test.mjs` 守住页面 VM 的硬规则（有 `protected`/`public`/`private` 就不能再写 `data`），`tests/tap-recovery.test.mjs` 守住「用户点了就必须有反应」。
 
 插件侧的协议单测与 v4 契约测试要另跑（插件本体只能编到 wasm，测试编到 host）：
 

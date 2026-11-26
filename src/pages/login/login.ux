@@ -59,7 +59,10 @@
         </div>
 
         <div class="connect">
-          <app-pill text="{{ submitting ? (mode === 'public' ? $t('login.joining') : $t('login.connecting')) : (mode === 'public' ? $t('login.join') : $t('login.connect')) }}"
+          <!-- One label, computed in syncSubmitLabel(): a nested ternary
+               here would be the only one of its kind in the app, and this
+               string is the page's single call to action. -->
+          <app-pill text="{{ submitLabel }}"
                     width="100%" primary="{{true}}" busy="{{submitting}}" @click="submit"></app-pill>
         </div>
 
@@ -159,6 +162,7 @@ export default {
     editing: false,
     activeIndex: -1,
     submitting: false,
+    submitLabel: '',
     error: '',
     keyboardType: 'QWERTY'
   },
@@ -181,6 +185,7 @@ export default {
       this.roomPassword = settings.roomPassword || ''
       this.roomName = settings.roomDisplayName || ''
       this.syncMasked()
+      this.syncSubmitLabel()
       this.keyboardType = settings.keyboardType || 'QWERTY'
       return settings
     })
@@ -204,6 +209,30 @@ export default {
     this.editing = false
     this.activeIndex = -1
     this.error = ''
+    this.syncSubmitLabel()
+  },
+
+  /**
+   * Navigation on this firmware can be dropped silently (nav.js retries and
+   * then only toasts), so a successful submit must not leave the button stuck
+   * in 'connecting…': that would be a page with no working action left.
+   */
+  releaseSubmit() {
+    this.submitting = false
+    this.syncSubmitLabel()
+  },
+
+  /**
+   * The button says what the tap will do in the current mode, and while it is
+   * running says what it is doing. Kept as data rather than written into the
+   * template so there is one place to read, and one place to test.
+   */
+  syncSubmitLabel() {
+    if (this.submitting) {
+      this.submitLabel = this.mode === 'public' ? this.$t('login.joining') : this.$t('login.connecting')
+      return
+    }
+    this.submitLabel = this.mode === 'public' ? this.$t('login.join') : this.$t('login.connect')
   },
 
   startEdit(index) {
@@ -314,6 +343,7 @@ export default {
     this.editing = false
     this.activeIndex = -1
     this.submitting = true
+    this.syncSubmitLabel()
     this.error = ''
 
     const previous = state.settings || store.DEFAULT_SETTINGS
@@ -344,11 +374,13 @@ export default {
             state.settings = named
             api.configure(named)
             prompt.showToast({ message: this.$t('login.saved'), duration: 1500 })
+            this.releaseSubmit()
             router.replace({ uri: ROUTE.home })
           })
       })
       .catch((err) => {
         this.submitting = false
+        this.syncSubmitLabel()
         const reason = err && err.message ? err.message : this.$t('login.errRequired')
         // Keep the client on what is actually on disk, so a retry only has to
         // correct the wrong field.
@@ -391,6 +423,7 @@ export default {
     this.editing = false
     this.activeIndex = -1
     this.submitting = true
+    this.syncSubmitLabel()
     this.error = ''
 
     const previous = state.settings || store.DEFAULT_SETTINGS
@@ -434,11 +467,13 @@ export default {
             state.settings = named
             api.configure(named)
             prompt.showToast({ message: this.$t('login.publicJoined'), duration: 1500 })
+            this.releaseSubmit()
             router.replace({ uri: ROUTE.home })
           })
       })
       .catch((err) => {
         this.submitting = false
+        this.syncSubmitLabel()
         const reason = err && err.message ? err.message : this.$t('login.errRoomLink')
         // Fall back to what is on disk: a rejected join must not leave the API
         // client pointed at a half-written candidate.

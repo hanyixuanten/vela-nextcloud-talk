@@ -24,6 +24,7 @@ const saves = []
 const configured = []
 const shared = {}
 let joinResult = { name: '公开群', token: 'pubaaa' }
+let joinGate = null
 let joinError = null
 let session = { actorId: ACTOR, cookies: 'nc_session_id=abc' }
 let navigations = 0
@@ -40,6 +41,7 @@ const page = runInNewContext('(function () {\n' + script.trim() + '\n})()', {
   api: {
     configure: (settings) => configured.push(settings),
     joinPublicRoom: async () => {
+      if (joinGate) await joinGate
       if (joinError) throw joinError
       return joinResult
     },
@@ -70,13 +72,19 @@ const reset = () => {
   navigations = 0
   toasts = 0
   state.settings = null
+  page.submitting = false
+  page.error = ''
   joinError = null
+  joinGate = null
   joinResult = { name: '公开群', token: 'pubaaa' }
   session = { actorId: ACTOR, cookies: 'nc_session_id=abc' }
 }
 
-const typePublic = (overrides) => Object.assign(page, {
-  mode: 'public',
+// Switching through the page's own handler, not by assigning `mode`: the tab
+// is what recomputes the button label.
+const typePublic = (overrides) => {
+  if (page.mode !== 'public') page.switchMode('public')
+  return Object.assign(page, {
   roomLink: 'https://cloud.example.com/call/pubaaa',
   roomPassword: '',
   roomName: '小明',
@@ -85,6 +93,7 @@ const typePublic = (overrides) => Object.assign(page, {
   editing: false,
   activeIndex: -1
 }, overrides || {})
+}
 
 let failedCount = 0
 
@@ -156,6 +165,30 @@ await test('link + name joins, writes the room and keeps the account', async () 
   assert.equal(saved.user, 'alice')
   assert.equal(saved.appPassword, 'app-password')
   assert.equal(saved.keyboardType, 'T9')
+})
+
+await test('the button says what the tap will do, and what it is doing', async () => {
+  reset()
+  loaded = { mode: 'account', baseUrl: 'https://cloud.example.com', user: 'alice', appPassword: 'pw' }
+  await page.onInit()
+  await flush()
+  assert.equal(page.submitLabel, 'login.connect', 'the account tab connects')
+  typePublic()
+  assert.equal(page.submitLabel, 'login.join', 'the public tab joins a room')
+
+  // Hold the join open: the label has to change while the request runs, or a
+  // slow server reads as an ignored tap.
+  let release
+  joinGate = new Promise((resolve) => {
+    release = resolve
+  })
+  page.submit()
+  await flush()
+  assert.equal(page.submitLabel, 'login.joining')
+  assert.equal(page.submitting, true)
+  release()
+  await flush()
+  assert.equal(navigations, 1)
 })
 
 await test('a prefix and ?password= in the link are both understood', async () => {
