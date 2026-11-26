@@ -19,7 +19,7 @@ use astrobox_ng_wit::astrobox::psys_host_v4::{
 };
 use astrobox_ng_wit::exports::astrobox::psys_plugin_v4::{event, lifecycle};
 
-use crate::state::{PendingSend, Status};
+use crate::state::{Mode, PendingSend, Status};
 
 /// How long the panel waits for the watch's ACK.
 ///
@@ -352,20 +352,47 @@ fn begin_send() -> Option<(String, String)> {
             );
             return None;
         }
-        let server = state.server.trim();
-        let user = state.user.trim();
-        if server.is_empty() || user.is_empty() || state.password.is_empty() {
-            state.status = Status::Err("服务器、用户名、应用密码都要填。".to_string());
-            return None;
-        }
-        if protocol::normalize_server(server).is_none() {
-            state.status = Status::Err("请输入有效的 HTTPS 服务器地址。".to_string());
-            return None;
+        // The mode decides both what has to be filled in and which message is
+        // built; the watch reads `mode` and saves the matching half.
+        if state.mode == Mode::Public {
+            if let Err(message) =
+                protocol::validate_public_input(&state.room_link, &state.display_name)
+            {
+                state.status = Status::Err(message);
+                return None;
+            }
+        } else {
+            let server = state.server.trim();
+            let user = state.user.trim();
+            if server.is_empty() || user.is_empty() || state.password.is_empty() {
+                state.status = Status::Err("服务器、用户名、应用密码都要填。".to_string());
+                return None;
+            }
+            if protocol::normalize_server(server).is_none() {
+                state.status = Status::Err("请输入有效的 HTTPS 服务器地址。".to_string());
+                return None;
+            }
         }
 
         state.next_request += 1;
+        // One id, used both as the pending key and as the message's
+        // `request_id`: the ACK is matched on it, so the two must be the same.
         let id = format!("{}-{}", now_ms(), state.next_request);
-        let payload = protocol::build_credential_message(server, user, &state.password, &id);
+        let payload = if state.mode == Mode::Public {
+            protocol::build_public_message(
+                &state.room_link,
+                &state.room_password,
+                &state.display_name,
+                &id,
+            )
+        } else {
+            protocol::build_credential_message(
+                state.server.trim(),
+                state.user.trim(),
+                &state.password,
+                &id,
+            )
+        };
         state.pending = Some(PendingSend {
             id: id.clone(),
             addr: None,
@@ -497,7 +524,13 @@ fn handle_ack(payload: &str) {
         state.pending = None;
         state.link_connected = true;
         state.status = if ack.ok {
-            state.password.clear();
+            // The secret of the mode that was just configured is cleared from
+            // the panel; the watch has it now. The other mode's field is left
+            // alone, so switching back does not ask for a retype.
+            match state.mode {
+                Mode::Public => state.room_password.clear(),
+                Mode::Account => state.password.clear(),
+            }
             let message = if ack.message.is_empty() {
                 "已保存到手表"
             } else {
@@ -581,6 +614,17 @@ impl event::Guest for TalkCredentialPlugin {
             // fresh device list has been rendered.
             probe_device().await;
             ui::render(&state::snapshot());
+        } else if event_id == ui::EV_MODE && matches!(event, UiEvent::Click) {
+            // Switching forms is local and instant: no host call, no re-probe.
+            state::with(|state| {
+                state.mode = match state.mode {
+                    Mode::Account => Mode::Public,
+                    Mode::Public => Mode::Account,
+                };
+                // A verdict about the other form would be misleading here.
+                state.status = Status::Idle;
+            });
+            ui::render(&state::snapshot());
         } else if event_id == ui::EV_LAUNCH && matches!(event, UiEvent::Click) {
             let addr = state::with(|state| state.addr.clone());
             match addr {
@@ -641,6 +685,9 @@ impl event::Guest for TalkCredentialPlugin {
                     ui::EV_SERVER => state.server = value,
                     ui::EV_USER => state.user = value,
                     ui::EV_PASSWORD => state.password = value,
+                    ui::EV_ROOM_LINK => state.room_link = value,
+                    ui::EV_ROOM_PASSWORD => state.room_password = value,
+                    ui::EV_DISPLAY_NAME => state.display_name = value,
                     _ => return false,
                 }
                 true

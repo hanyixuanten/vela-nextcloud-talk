@@ -20,15 +20,59 @@ fn validates_and_normalizes_https_server_urls() {
 }
 
 #[test]
-fn builds_v1_credentials_with_request_id() {
+fn builds_v2_account_credentials_with_request_id() {
     let raw = protocol::build_credential_message(
         " https://cloud.example.com/nextcloud/ ", " alice ", " app-pass ", "123-1",
     );
     let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(value, json!({
-        "v": 1, "kind": "credentials", "base_url": "https://cloud.example.com/nextcloud",
-        "user": "alice", "app_password": " app-pass ", "request_id": "123-1"
+        "v": 2, "kind": "credentials", "mode": "account",
+        "base_url": "https://cloud.example.com/nextcloud",
+        "user": "alice", "app_password": " app-pass ",
+        // The public half is present but empty: one message shape for both modes.
+        "room_link": "", "room_token": "", "room_password": "", "display_name": "",
+        "request_id": "123-1"
     }));
+}
+
+#[test]
+fn builds_v2_public_message_from_a_link() {
+    let raw = protocol::build_public_message(
+        " https://cloud.example.com/index.php/call/ABC123?password=pa%20ss ",
+        "room-pass",
+        " 小明 ",
+        "123-2",
+    );
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(value, json!({
+        "v": 2, "kind": "credentials", "mode": "public",
+        // The watch parses the link; the plugin only carries it.
+        "base_url": "", "user": "", "app_password": "",
+        "room_link": "https://cloud.example.com/index.php/call/ABC123?password=pa%20ss",
+        "room_token": "", "room_password": "room-pass", "display_name": "小明",
+        "request_id": "123-2"
+    }));
+}
+
+#[test]
+fn validates_public_input_the_way_the_watch_will() {
+    // Accepted: a full link with a query, a bare token, and an upper-case one.
+    assert!(protocol::validate_public_input("https://cloud.example.com/call/abc123", "小明").is_ok());
+    assert!(protocol::validate_public_input(
+        "https://example.com/nextcloud/index.php/call/abc123?password=x",
+        "小明"
+    )
+    .is_ok());
+    assert!(protocol::validate_public_input("abc123", "小明").is_ok());
+    assert!(protocol::validate_public_input("ABC123", "小明").is_ok());
+
+    // Refused before the round trip, because the panel is where it can be fixed.
+    assert!(protocol::validate_public_input("https://cloud.example.com/call/abc123", "  ").is_err());
+    assert!(protocol::validate_public_input("", "小明").is_err());
+    assert!(protocol::validate_public_input("http://cloud.example.com/call/abc123", "小明").is_err());
+    assert!(protocol::validate_public_input("abc", "小明").is_err());
+    assert!(protocol::validate_public_input("abc-123", "小明").is_err());
+    assert!(protocol::validate_public_input("abcdefghijklmnopqrstuvwxyz123456", "小明").is_err());
 }
 
 #[test]

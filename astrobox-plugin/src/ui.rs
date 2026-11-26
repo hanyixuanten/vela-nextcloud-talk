@@ -2,11 +2,16 @@
 
 use astrobox_ng_wit::astrobox::psys_host_v4::ui::{self, Element, ElementType, Event};
 
-use crate::state::{State, Status};
+use crate::state::{Mode, State, Status};
 
 pub const EV_SERVER: &str = "field-server";
 pub const EV_USER: &str = "field-user";
 pub const EV_PASSWORD: &str = "field-password";
+/// Switch between the account form and the public-conversation form.
+pub const EV_MODE: &str = "mode";
+pub const EV_ROOM_LINK: &str = "field-room-link";
+pub const EV_ROOM_PASSWORD: &str = "field-room-password";
+pub const EV_DISPLAY_NAME: &str = "field-display-name";
 pub const EV_SEND: &str = "send";
 /// Open Talk on the watch so its interconnect listener is actually attached.
 pub const EV_LAUNCH: &str = "launch";
@@ -46,26 +51,84 @@ pub fn build(state: &State) -> Element {
     );
 
     let sending = matches!(state.status, Status::Sending);
-    form = form.child(field_label("服务器"));
-    form = form.child(field(
-        "https://cloud.example.com",
-        &state.server,
-        EV_SERVER,
-        sending,
-    ));
+    let public = state.mode == Mode::Public;
 
-    form = form.child(field_label("用户名"));
-    form = form.child(field("用户名或邮箱", &state.user, EV_USER, sending));
+    // One button, not two tabs: it says where the click will take you, so there
+    // is no way to read the current mode wrong.
+    let switch_label = if public {
+        "切换到账号模式"
+    } else {
+        "切换到公开聊天室（无需账号）"
+    };
+    let mut switch = Element::new(ElementType::Button, Some(switch_label))
+        .width_full()
+        .padding(8)
+        .radius(8)
+        .bg("#1F252C")
+        .text_color(TEXT)
+        .on(Event::Click, EV_MODE);
+    if sending {
+        switch = switch.disabled();
+    }
+    form = form.child(switch);
 
-    form = form.child(field_label("应用密码"));
-    // Plain text on purpose: app passwords are long and easy to mistype, and
-    // this form is on the user's own device. Masking here only hid typos.
-    form = form.child(field(
-        "Nextcloud → 设置 → 安全 → 应用密码",
-        &state.password,
-        EV_PASSWORD,
-        sending,
-    ));
+    form = form.child(Element::new(
+        ElementType::P,
+        Some(if public {
+            "公开聊天室：只要链接、密码（房间有就要）和显示名称，不需要 Nextcloud 账号。"
+        } else {
+            "账号模式：用 Nextcloud 用户名和应用密码登录。"
+        }),
+    )
+    .size(11)
+    .text_color(MUTED));
+
+    if public {
+        form = form.child(field_label("聊天室链接"));
+        form = form.child(field(
+            "https://cloud.example.com/call/abc123（或只填 abc123）",
+            &state.room_link,
+            EV_ROOM_LINK,
+            sending,
+        ));
+
+        form = form.child(field_label("房间密码（房间没有就留空）"));
+        form = form.child(field(
+            "没有密码就留空",
+            &state.room_password,
+            EV_ROOM_PASSWORD,
+            sending,
+        ));
+
+        form = form.child(field_label("显示名称"));
+        form = form.child(field(
+            "聊天室里其他人看到的名字",
+            &state.display_name,
+            EV_DISPLAY_NAME,
+            sending,
+        ));
+    } else {
+        form = form.child(field_label("服务器"));
+        form = form.child(field(
+            "https://cloud.example.com",
+            &state.server,
+            EV_SERVER,
+            sending,
+        ));
+
+        form = form.child(field_label("用户名"));
+        form = form.child(field("用户名或邮箱", &state.user, EV_USER, sending));
+
+        form = form.child(field_label("应用密码"));
+        // Plain text on purpose: app passwords are long and easy to mistype, and
+        // this form is on the user's own device. Masking here only hid typos.
+        form = form.child(field(
+            "Nextcloud → 设置 → 安全 → 应用密码",
+            &state.password,
+            EV_PASSWORD,
+            sending,
+        ));
+    }
 
     // Advanced escape hatch: when the host refuses to hand out its device list,
     // a typed address skips enumeration entirely (and the `device` grant).

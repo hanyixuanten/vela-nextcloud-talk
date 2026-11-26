@@ -1,6 +1,13 @@
 # Talk 凭据配置 · AstroBox 插件
 
-在 AstroBox（手机 / 桌面端）里填好服务器、用户名和应用密码，一键推送到手表上的 Talk 应用，省掉在 480px 圆屏上用九宫格敲一长串应用密码。
+在 AstroBox（手机 / 桌面端）里填好凭据，一键推送到手表上的 Talk 应用，省掉在 480px 圆屏上用九宫格敲一长串密码。
+
+两种模式，面板顶部一键切换：
+
+| 模式 | 填什么 | 手表做什么 |
+| --- | --- | --- |
+| 账号 | 服务器、用户名、应用密码 | `GET /ocs/v2.php/cloud/user` 校验后保存 |
+| 公开聊天室（无需账号） | 房间链接（或令牌）、房间密码（房间有就要）、显示名称 | 真的 join 一次房间，保存会话 cookie 与 `actorId` |
 
 ```
 AstroBox (插件 UI)  ──interconnect──>  手表 Talk (pages/setup)
@@ -29,7 +36,7 @@ astrobox-plugin/
 ├── Cargo.toml              # cdylib，astrobox-ng-wit 0.4（v4 WIT 世界）
 ├── .cargo/config.toml      # build.target = wasm32-wasip2
 ├── rust-toolchain.toml     # 固定 Rust 1.93，见下
-├── manifest.json           # api_level 4 / wasi_version 3 / 版本 0.1.14
+├── manifest.json           # api_level 4 / wasi_version 3 / 版本 0.1.15
 ├── icon.png
 ├── src/
 │   ├── lib.rs              # 生命周期、异步事件入口、发送流程
@@ -61,7 +68,7 @@ python3 scripts/build_dist.py --release --package  # 发布构建并打 .abp
 ```
 dist/nctalk_credential.wasm     # wasm component（导入 astrobox:psys-host-v4/*）
 dist/manifest.json  dist/icon.png
-dist/nctalk-credential-0.1.14.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
+dist/nctalk-credential-0.1.15.abp  # 直接拖进 AstroBox 安装（ASCII 文件名）
 ```
 
 ⚠️ 如果系统里的 `cargo` 不是 rustup 的那个（本机 `/usr/bin/cargo` 用的是系统 1.100），`rust-toolchain.toml` 不会生效，可能编出错误的 WASI 版本。用 rustup 的 cargo：
@@ -117,15 +124,15 @@ Linux    ~/.local/share/moe.astralsight.astrobox/plugins/
 ## 用起来
 
 1. 手表上安装 Talk（rpk），打开它 → 设置 → **从手机配置**，页面停在「等待手机发送…」；或直接点插件里的「打开手表上的 Talk」，由 `thirdpartyapp::launch_qa` 启动到 `pages/setup`。
-2. AstroBox 里打开「Talk 凭据配置」，填服务器地址、用户名、应用密码。
+2. AstroBox 里打开「Talk 凭据配置」，填服务器地址、用户名、应用密码；没有账号就点「切换到公开聊天室（无需账号）」，改填房间链接、房间密码（可留空）和显示名称。
 3. 先点「检测设备」找手表，再点「发送到手表」。两者都会按「唯一候选」规则定位：恰好一台已连接设备，或恰好一台已配对设备（发送时会尝试建立连接）。多台即拒绝猜测。设备连上/断开时宿主的 `device-action` 事件也会自动触发重测。
    **设备枚举只由点击触发，不在渲染时发起**：渲染期弹 `device` 授权，前端拒绝后宿主只返回空列表，看起来就是「没有手表」。同理，`get_thirdparty_app_list`（宿主上限 12 秒）不在检测链上：枚举一回来就出结论并绘制「目标：<手表名>」，应用列表与 ack 订阅随后在后台补，失败或过时都不影响结论。
    若设备列表始终为空（`device` 权限被前端拒绝时宿主只返回空列表），把 AstroBox 设备详情里的地址填进「设备地址（高级）」——填了就不再枚举，启动与发送只依赖 `thirdpartyapp` / `interconnect` 权限。
-4. 手表请求 `/ocs/v2.php/cloud/user` 校验，保存后回复 ACK。宿主发送成功不等于已保存；只有匹配的成功 ACK 才会清空密码和显示「已保存」。
+4. 手表自己校验：账号模式请求 `/ocs/v2.php/cloud/user`，公开模式 `POST /room/{token}/participants/active`（房间有密码就带 `password`）再补一个访客显示名。保存后回复 ACK。宿主发送成功不等于已保存；只有匹配的成功 ACK 才会清空对应的密码字段并显示「已保存」。
 
 ### 线上路由和协议
 
-- **手机 → 手表：** `interconnect.send_qaic_message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v1 JSON（`kind: "credentials"`、`base_url`、`user`、`app_password`），本插件额外发送字符串 `request_id`。
+- **手机 → 手表：** `interconnect.send_qaic_message(addr, pkg-name, data)` 将 `data` 的 UTF-8 字节通过小米设备的 QAIC 传给快应用。宿主在目标设备的已安装列表中按包名查找应用及其签名指纹；不要用通用 `transport.send` 或手机端原生应用配对来替代这条路由。`data` 是 v2 JSON：`kind: "credentials"`、`mode`（`account` / `public`）、账号三项（`base_url` / `user` / `app_password`）、公开三项（`room_link` / `room_password` / `display_name`），另一模式的字段留空字符串，另加字符串 `request_id`。房间链接原样传给手表解析——解析只有手表那一份实现（`src/common/scripts/roomlink.js`），插件只做「非空 + 看起来是 https」的就地检查。
 - **手表 → 手机：** 手表使用 `connect.send({data: ackObject})`，ACK JSON 为 `ok`、可选 `message` 和 `display_name`，且须回显本次字符串 `request_id`。当前 AstroBox 的 `InterconnectMessage` 事件包装为 `{addr, pkgName, payloadHex, payloadText}`，其中 `payloadText` 是 ACK 的 JSON 文本；插件以回显的 `request_id` 作为唯一必需的匹配项，来源设备/包名只在**存在且不一致**时否决（旧宿主会直接透传 JSON，没有信封，按旧逻辑这种合法回执会被丢掉，面板于是在超时后报「手表没有回应」）。无 request_id 的旧 ACK 一律不接受，因为它分不清是哪一次发送。
 - **异步驱动：** Level 4 的导出是 `async func`，宿主自己驱动这些 guest task。点击「发送到手表」时先建 40 秒超时，然后 `await` 枚举 / 订阅 / 发送；宿主调用都可能阻塞，但不再有 `block_on` 写 future 的死锁，也不再依赖 `spawn` 任务是否会被 poll。
 - **超时：** 点发送后立即独立启动 40 秒计时器，不依赖设备/互联宿主调用返回；v4 的 `timer::set_timeout` 同步返回 timer id，到期后以 `Timer` 事件送到 `on_event`，`payload` 含本次请求 ID，不会让上一次定时器中断新请求。若宿主调用自身永不返回（例如枚举设备挂起），计时器仍会结束等待；此外超过 40 秒 + 5 秒宽限的挂起请求会在下次重绘、输入或点「重新检测」时被自动清除。40 秒不是随手取的：手表自己的 OCS 请求有 20 秒看门狗（`REQUEST_TIMEOUT_MS`），失败后还要写 storage、再回执；预算短于这条链时，手表还在「正在校验账号…」，手机已经判失败，两端结论相反。同理 `get_thirdparty_app_list`（宿主侧 12 秒上限）只在发送失败后才查，用来区分「没装 rpk」和「传输断开」，UI 不会永久停在「正在发送…」。
