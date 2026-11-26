@@ -5,10 +5,11 @@
 骨架仓库：登录、会话列表、收发消息、设置四条主链路都已跑通，UI 以 480 为设计宽度、视觉与组件规范移植自 [HyperBilibili](https://github.com/Searchstars/Hyperbilibili) 的手表模板（黑底彩色辉光 + 圆角卡片 + 单主色胶囊按钮），并针对圆屏和矩形屏分别打包，输入法接入 [NEORUAA/Vela_input_method](https://github.com/NEORUAA/Vela_input_method)（已内置到 `src/components/InputMethod/`，支持中文拼音 / 英文 / 日语罗马字）。
 
 ```
-手表 ──HTTPS Basic Auth（应用密码）──> Nextcloud Talk OCS API
+账号模式：手表 ──HTTPS Basic Auth（应用密码）──────> Nextcloud Talk OCS API
+公开聊天室：手表 ──HTTPS 访客会话（spreed-session）──> Nextcloud Talk OCS API
 ```
 
-没有手机端中转，也没有后端服务：手表直连你的 Nextcloud 实例。
+没有手机端中转，也没有后端服务：手表直连你的 Nextcloud 实例。两种模式并存——有账号就用账号；没有账号，只要有房间链接（房间有密码时再加密码）和一个显示名称，也能进公开聊天室。
 
 ---
 
@@ -62,6 +63,8 @@
 ```
 
 只有这一页在监听 interconnect。登录页底部也留了「从手机配置」入口，避免选了手动输入之后回不去。
+
+插件顶部有「切换到公开聊天室（无需账号）」，切过去以后填的是房间链接、房间密码（没有就留空）和显示名称——和手表上「公开聊天室」标签页里的三项一一对应。
 
 插件源码在 [`astrobox-plugin/`](astrobox-plugin/)（Rust → `wasm32-wasip2`，API Level 4 / WASI Preview 3），构建产物 `astrobox-plugin/dist/nctalk-credential-<版本>.abp` 直接拖进 AstroBox 安装（需要带 Level 4 运行时的 AstroBox；旧版本只支持 Level 2/3，会拒绝加载。插件工具链固定 Rust 1.93，否则组件要求的 WASI 版本可能超过宿主上限）。装不上先跑 `python3 astrobox-plugin/scripts/check_artifact.py`。协议与时序见 [`docs/interconnect.md`](docs/interconnect.md)。
 
@@ -127,11 +130,42 @@ npm run check:live      # 或 node scripts/check-credentials.mjs [--file other.e
 
 ---
 
+## 公开聊天室（无需账号）
+
+Talk 的「公开聊天室」= 用链接分享出去的房间。访客不需要 Nextcloud 账号，只要三样东西：
+
+| 需要 | 说明 |
+| --- | --- |
+| 房间链接 | `https://cloud.example.com/call/abc123`，也接受 `/index.php/call/…`、`/apps/spreed/call/…` 和带路径前缀的部署；只填 `abc123` 也行，但此时服务器地址必须已知（登录页会自动带出来） |
+| 房间密码 | 房间设了密码就填；没设就留空。链接里带 `?password=` 时会自动取来，字段里手填的优先 |
+| 显示名称 | 聊天室里没有用户名，其他人只看到这个名字 |
+
+三条路径都能配：
+
+1. 手表登录页 → 顶部切到「公开聊天室」→ 填三项 → 「进入聊天室」；
+2. 手表 设置 → 模式（在账号 / 公开聊天室之间切）→ 聊天室一行进登录页补字段；
+3. 手机 AstroBox 插件 → 「切换到公开聊天室（无需账号）」→ 填完推送，手表负责校验（真的 join 一次）。
+
+工作原理（细节见 [`docs/api.md`](docs/api.md) 与 [`docs/interconnect.md`](docs/interconnect.md)）：
+
+```
+POST /ocs/v2.php/apps/spreed/api/v4/room/{token}/participants/active  {password?, force:true}
+     └─ 200 + Set-Cookie: spreed-session=…   房间对象里带 sessionId / actorId
+POST /ocs/v2.php/apps/spreed/api/v1/guest/{token}/name                {displayName}
+     └─ 之后所有请求带 Cookie: spreed-session=…  （不带 Authorization）
+```
+
+Vela 的 `fetch` 没有 cookie jar，所以 cookie 由 `api.js` 自己接管：join 的 `Set-Cookie` 存进 `@system.storage`，之后每个请求手动拼 `Cookie:` 头。这样从登录页跳到会话页再跳到聊天页（三个独立 bundle）用的还是同一个访客。聊天页判断「这条是我发的」也靠 join 返回的 `actorId`。
+
+---
+
 ## 功能
 
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
 | 账号登录 / 校验 | ✅ | 先落盘再走 `/ocs/v2.php/cloud/user` 校验；校验失败也保留输入 |
+| 公开聊天室（免账号） | ✅ | 只要房间链接（或令牌）+ 房间密码（有就要）+ 显示名称；访客靠 `spreed-session` cookie 认人 |
+| 两种模式共存 | ✅ | 设置里「模式」一行可切换；两套配置各自保留，切回去不用重填 |
 | 会话列表 | ✅ | 按最近活跃排序、未读数、最后一条消息预览 |
 | 历史消息 | ✅ | 每次拉 12 条；列表顶部点「加载更早消息」，窗口最多保留 16 条 |
 | 发送消息 | ✅ | POST `/chat/{token}`，发送后本地立即上屏 |
@@ -179,7 +213,8 @@ vela-nextcloud-talk/
 │   │       ├── textlayout.js     # 气泡/详情页共用的折行与文本度量
 │   │       ├── network.js        # 启动网络门（类型判定 + bilibili/服务器探针证据）
 │   │       ├── launch.js         # 网络门的路由决策（纯函数，可单测）
-│   │       └── protocol.js       # 手机推凭据的协议（与插件对称）
+│   │       ├── roomlink.js       # 房间链接 ↔ (服务器, 令牌, 密码) 的唯一实现
+│   │       └── protocol.js       # 手机推凭据的协议 v2（与插件对称）
 │   ├── components/
 │   │   ├── ui/AppPill.ux         # 胶囊按钮（模板 DefaultButton 的等价物）
 │   │   └── InputMethod/          # 三方输入法（vendored，勿手改）
@@ -216,7 +251,11 @@ vela-nextcloud-talk/
 │   ├── run.sh                    # 一键跑全部测试（需要 Node ≥ 18）
 │   ├── mock-server.mjs           # 假 Nextcloud Talk OCS 服务
 │   ├── fetch-double.mjs          # @system.fetch 的 Node 替身
-│   ├── api.test.mjs              # api.js 集成测试
+│   ├── api.test.mjs              # api.js 集成测试（账号模式）
+│   ├── public-api.test.mjs       # 访客加入、cookie 重放、会话失效与恢复
+│   ├── public-server.mjs         # 假 Talk 服务：只认 spreed-session cookie 的访客端点
+│   ├── login-public.test.mjs     # 登录页「公开聊天室」标签页
+│   ├── roomlink.test.mjs         # 房间链接解析
 │   ├── protocol.test.mjs         # 凭据协议单元测试
 │   ├── units.test.mjs            # base64 / format 单元测试
 │   ├── network.test.mjs          # 网络门：类型判定 + 探针只作证据
@@ -253,6 +292,16 @@ Accept: application/json
 `OCS-APIRequest: true` 必须带，否则 Nextcloud 会返回登录页 HTML，`JSON.parse` 直接炸掉，报错信息完全看不出原因。`Accept: application/json` 必须带，因为 Talk 的 `lastMessage.reactions` 结构会让 XML 响应非法。
 
 Vela 运行时不保证有 `btoa`，且 `btoa` 只接受 Latin-1，所以 `common/scripts/base64.js` 自己做了 UTF-8 编码后再 base64，可以处理中文用户名。
+
+### 公开聊天室：访客没有账号，只有会话 cookie
+
+账号模式一句话说完：每个请求带 `Authorization: Basic …`。访客没有这回事——Talk 用 PHP 会话认访客，cookie 名是 `spreed-session`，`POST …/participants/active` 建立它、`Set-Cookie` 下发它，之后**所有**请求都要回放它，否则中间件找不到 participant，只会回 404（不是 401）。这就是 `api.js` 里要自己管 cookie 的原因：Vela 的 `fetch` 只接受 `url/data/header/method/responseType`，没有 `credentials`，也不保存 cookie。
+
+三个和账号模式不一样的地方，都写在 `tests/public-api.test.mjs` 里：
+
+1. **join 才算登录**：填完链接先落盘再 join，join 失败（密码错 / 房间不对访客开放）也保留输入，错误文案直接用 join 自己的。
+2. **会话会死**：服务器重启、cookie 过期、房间被关，都会让下一次请求 404。这里重新 join 一次再重放原请求；如果重放还是 404，就停下来报「访客会话已失效」，30 秒内不再尝试——Talk 对 token 请求有防爆破限流，反复 join 还会往房间里刷「访客加入」。
+3. **身份是 `actorId`**：chat 消息里的 `actorId` 对访客就是 `sha1(sessionId)`，join 的响应里会给。聊天页用它判断「我发的」；如果这一页没拿到（比如会话是别的页面建的），退回到按显示名称匹配，且只认 `actorType === 'guests'` 的消息，冒充不了登录用户。
 
 ### 圆屏布局
 
@@ -355,6 +404,9 @@ sh scripts/sync-input-method.sh <git-ref>  # 指定分支或 commit
 - **后台留存不是推送**：靠微服务在后台按 `max(pollInterval, 30s)` 轮询会话列表，只能做本地未读留存和振动提醒，不能亮屏、弹通知或收实时消息。它是额外的请求与电量开销，但只保留一个开关会让「有账号就该跑」这件事变成一个用户要理解的取舍，所以固定开启。微服务的机型支持与后台定时器行为官方文档未给出，需真机确认（[design.md 第 12 节](docs/design.md)）。
 - **HTTPS-only**：手动登录、候选账号校验与手机凭据协议均拒绝明文 HTTP；客户端依赖系统 TLS 校验，不做证书 pinning。
 - **密码存储**：Vela 没有 keystore API，应用密码以明文存在 app 沙箱内的 `@system.storage` 里。这是平台限制，不是实现选择，详见 [`docs/design.md`](docs/design.md)。清除本地账号后也应在 Nextcloud 吊销对应应用密码。
+- **公开聊天室没有会话列表**：访客只待在配置好的那一个房间里，会话页显示单张卡片，也没有未读数（服务端不给访客算）。换房间就重新填链接，旧房间的会话会被丢掉——访客 cookie 是按房间发的。
+- **访客身份随会话走**：Talk 用会话 cookie（`spreed-session`）认访客，`actorId = sha1(sessionId)`。cookie 失效后手表会自动重新 join 一次再重放请求；如果 join 之后仍然 404，说明这个房间不接受访客（或密码被改了），此时会停下来提示重试，不会反复 join——Talk 对 token 请求有防爆破限流，反复 join 还会往房间里刷「访客加入」系统消息。
+- **访客做不了账号能做的事**：没有会话列表、没有联系人、改不了房间设置；发表情反应、已读回执按 Talk 给访客的权限处理，被拒绝时提示「没有权限执行该操作」。
 - **无附件预览**：图片和文件只显示 Rich Object String 展开后的文件名及文字。不提供缩略图，也不下载或解码图片：`<image>` 不承诺按显示尺寸解码，`fetch` 也没有传输字节上限。
 - **消息窗口**：每次拉取 12 条，界面最多保留 24 条；支持加载更早消息，单条正文保留前 512 个 UTF-16 代码单元以内并加省略号。
 - **未读数**：会话列表的未读数直接取服务端 `unreadMessages`，本地不会自增。
